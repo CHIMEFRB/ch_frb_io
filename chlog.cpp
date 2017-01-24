@@ -26,61 +26,99 @@ stringprintf(const char* format, ...) {
 }
 
 class chime_log_socket {
+    typedef std::lock_guard<std::mutex> scoped_lock;
+
 public:
-     chime_log_socket(zmq::context_t &ctx) :
-         _socket(ctx, ZMQ_PUB)
+    chime_log_socket() :
+        _socket(NULL)
     {}
 
     ~chime_log_socket() {
-        cout << "~chime_log_socket" << endl;
+        //cout << "~chime_log_socket" << endl;
+        if (_socket)
+            delete _socket;
     }
 
+    void open_socket(zmq::context_t &ctx) {
+        _socket = new zmq::socket_t(ctx, ZMQ_PUB);
+    }
+
+    void close_socket() {
+        delete _socket;
+        _socket = NULL;
+    }
+    
     void add_server(std::string port) {
-        cout << "chime_log connecting to " << port << endl;
-        _socket.connect(port);
+        //cout << "chime_log connecting to " << port << endl;
+        if (_socket)
+            throw runtime_error("chime_log_socket::add_server called by socket has not been initialized.");
+        _socket->connect(port);
     }
 
     void send(std::string msg) {
         //cout << "chime_log sending message: " << msg << endl;
-        size_t n = _socket.send(static_cast<const void*>(msg.data()), msg.size());
+        if (!_socket)
+            return;
+        {
+            scoped_lock l(_mutex);
+            size_t n = _socket->send(static_cast<const void*>(msg.data()), msg.size());
+        }
         //cout << "sent " << n << endl;
     }
 
 protected:
-    zmq::socket_t _socket;
-    
+    zmq::socket_t* _socket;
+
+    std::mutex _mutex;
 };
 
-static chime_log_socket* logsock = NULL;
+// GLOBALS for logging.
+static chime_log_socket logsock;
+static zmq::context_t* logctx = NULL;
 
 void chime_log_quit() {
-    cout << "chime_log_quit" << endl;
-    if (logsock)
-        delete logsock;
-    logsock = NULL;
+    logsock.close_socket();
 }
 
-void chime_log_init(zmq::context_t &ctx) {
-    if (logsock)
-        delete logsock;
-    logsock = new chime_log_socket(ctx);
-    std::atexit(chime_log_quit);
+// an atexit() function.
+static void delete_logctx() {
+    chime_log_quit();
+    //cout << "delete_logctx()" << endl;
+    if (logctx)
+        delete logctx;
+    logctx = NULL;
+}
+
+/*
+ Initializes the CHIME/FRB distributed logging socket for this node.
+
+ If a ZeroMQ context is passed in, it will be used to create the
+ socket.  Otherwise, a new context will be created.
+
+ NOTE, if a context is passed in, you likely will need to call
+ chime_log_quit() to guarantee that the socket is closed before the
+ ZeroMQ context is deleted.
+
+ (When a context is not passed in, an atexit() handler is registered
+ to clean up.)
+ */
+void chime_log_init(zmq::context_t* ctx = NULL) {
+    if (!ctx) {
+        if (!logctx) {
+            logctx = new zmq::context_t();
+            std::atexit(delete_logctx);
+        }
+        ctx = logctx;
+    }
+    logsock.open_socket(*ctx);
 }
 
 void chime_log_add_server(string port) {
-    if (!logsock)
-        return;
-    logsock->add_server(port);
+    logsock.add_server(port);
 }
 
 static void chime_send_log(const string &s) {
-    if (logsock) {
-        logsock->send(s);
-    } else {
-        cout << s;
-        cout.flush();
-        cout << "SEND" << endl;
-    }
+    logsock.send(s);
 }
 
 // inspired by http://stackoverflow.com/questions/2212776/overload-handling-of-stdendl
@@ -171,9 +209,10 @@ static void* server_main(void* varg) {
 }
 
 int main() {
-    zmq::context_t ctx;
+    //zmq::context_t ctx;
+    //chime_log_init(&ctx);
 
-    chime_log_init(ctx);
+    chime_log_init(NULL);
 
     /*
     string port = "tcp://127.0.0.1:6666";
@@ -201,7 +240,7 @@ int main() {
     usleep(1000000);
     //ctx.close();
 
-    chime_log_quit();
+    //chime_log_quit();
 
     cout << "main() finished" << endl;
     return 0;
