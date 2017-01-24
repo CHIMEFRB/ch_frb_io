@@ -66,7 +66,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         if (ch->nt_coarse != (int)nt_coarse)
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nt_coarse mismatch");
 
-        if (fpgaN != ch->binning * ch_frb_io::constants::nt_per_assembled_chunk * fpga_counts_per_sample)
+        if (fpgaN != (uint64_t)(ch->binning * ch_frb_io::constants::nt_per_assembled_chunk * fpga_counts_per_sample))
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack fpgaN mismatch");
 
         if (arr[iarr + 0].type != msgpack::type::BIN) throw msgpack::type_error();

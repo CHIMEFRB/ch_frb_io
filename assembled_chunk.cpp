@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <iostream>
+#include <stdarg.h> // for va_start/va_end
 #include <immintrin.h>
 #include <msgpack/fbuffer.hpp>
 #include "assembled_chunk_msgpack.hpp"
@@ -87,12 +88,12 @@ string assembled_chunk::format_filename(const string &pattern) const {
     //   (FPGA0)   -> %012i start FPGA-counts
     //   (FPGAN)   -> %08i  FPGA-counts size
     string s = pattern;
-    s = replaceAll(s, "(BEAM)", stringprintf("%04i", beam_id));
-    s = replaceAll(s, "(CHUNK)", stringprintf("%08llu", ichunk));
-    s = replaceAll(s, "(NCHUNK)", stringprintf("%02i", binning));
-    s = replaceAll(s, "(BINNING)", stringprintf("%02i", binning));
-    s = replaceAll(s, "(FPGA0)", stringprintf("%012llu", fpgacounts_begin()));
-    s = replaceAll(s, "(FPGAN)", stringprintf("%08llu", fpgacounts_N()));
+    s = replaceAll(s, "(BEAM)",    stringprintf("%04i",        beam_id));
+    s = replaceAll(s, "(CHUNK)",   stringprintf("%08"  PRIu64, ichunk));
+    s = replaceAll(s, "(NCHUNK)",  stringprintf("%02i",        binning));
+    s = replaceAll(s, "(BINNING)", stringprintf("%02i",        binning));
+    s = replaceAll(s, "(FPGA0)",   stringprintf("%012" PRIu64, fpgacounts_begin()));
+    s = replaceAll(s, "(FPGAN)",   stringprintf("%08"  PRIu64, fpgacounts_N()));
     return s;
 }
 
