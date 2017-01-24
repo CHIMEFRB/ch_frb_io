@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <stdarg.h> // for va_start/va_end
 #include <thread>
 #include <pthread.h>
 #include <functional>
@@ -13,16 +14,32 @@
 using namespace std;
 
 static string 
+vstringprintf(const char* format, va_list lst) {
+    char temps[256];
+    // truncates if length > size of 'temps'
+    int n = vsnprintf(temps, sizeof(temps), format, lst);
+    if (n < 0)
+        throw runtime_error("vstringprintf failed: " + string(strerror(errno)));
+    if (n < 256)
+        return string(temps);
+    // Try again with larger temp buffer
+    char* temp2 = new char[n+1];
+    n = vsnprintf(temp2, n+1, format, lst);
+    if (n < 0)
+        throw runtime_error("vstringprintf(2) failed: " + string(strerror(errno)));
+    string s(temp2);
+    delete[] temp2;
+    return s;
+}
+
+static string 
 __attribute__ ((format(printf,1,2)))
 stringprintf(const char* format, ...) {
     va_list lst;
-    char temps[256];
     va_start(lst, format);
-    // truncates if length > size of 'temps'
-    if (vsnprintf(temps, sizeof(temps), format, lst) < 0)
-        throw runtime_error("stringprintf failed: " + string(strerror(errno)));
+    string s = vstringprintf(format, lst);
     va_end(lst);
-    return string(temps);
+    return s;
 }
 
 class chime_log_socket {
@@ -50,7 +67,7 @@ public:
     
     void add_server(std::string port) {
         //cout << "chime_log connecting to " << port << endl;
-        if (_socket)
+        if (!_socket)
             throw runtime_error("chime_log_socket::add_server called by socket has not been initialized.");
         _socket->connect(port);
     }
@@ -170,6 +187,16 @@ ostream& chime_log(log_level lev, const char* file, int line, const char* functi
     return chstream;
 }
 
+void
+__attribute__ ((format(printf,5,6)))
+chime_logf(enum log_level lev, const char* file, int line, const char* function, const char* pattern, ...) {
+    va_list lst;
+    va_start(lst, pattern);
+    string s = vstringprintf(pattern, lst);
+    va_end(lst);
+    chime_log(lev, file, line, function) << s << endl;
+}
+
 
 static string msg_string(zmq::message_t &msg) {
     return string(static_cast<const char*>(msg.data()), msg.size());
@@ -177,10 +204,13 @@ static string msg_string(zmq::message_t &msg) {
 
 std::mutex cout_mutex;
 
-static void* server_main(void* varg) {
+static void* server_main(zmq::context_t* ctx, string port) {
+    /*
+    void* varg) {
     std::tuple<zmq::context_t*, string> *args = reinterpret_cast<std::tuple<zmq::context_t*, string>* >(varg);
     zmq::context_t* ctx = std::get<0>(*args);
     string port = std::get<1>(*args);
+     */
 
     zmq::socket_t sock(*ctx, ZMQ_SUB);
     sock.setsockopt(ZMQ_SUBSCRIBE, "", 0);
@@ -209,22 +239,22 @@ static void* server_main(void* varg) {
 }
 
 int main() {
-    //zmq::context_t ctx;
+    zmq::context_t ctx;
     //chime_log_init(&ctx);
 
     chime_log_init(NULL);
 
-    /*
     string port = "tcp://127.0.0.1:6666";
-    //thread serverthread(std::bind(server_main, &ctx, port));
-    pthread_t serverthread;
-    std::tuple<zmq::context_t*, string> args(&ctx, port);
-    if (pthread_create(&serverthread, NULL, server_main, &args)) {
-        cout << "Failed to create server thread." << endl;
-        return -1;
-    }
+    thread serverthread(std::bind(server_main, &ctx, port));
+    serverthread.detach();
     chime_log_add_server(port);
-    //serverthread.detach();
+    /*
+     pthread_t serverthread;
+     std::tuple<zmq::context_t*, string> args(&ctx, port);
+     if (pthread_create(&serverthread, NULL, server_main, &args)) {
+     cout << "Failed to create server thread." << endl;
+     return -1;
+     }
      */
 
     // string port2 = "tcp://127.0.0.1:6667";
@@ -236,6 +266,8 @@ int main() {
     chlog("Hello world");
     chlog("Hello " << 1 << ", " << 2 << ", 3");
     chdebug("Debug" << 42+43);
+
+    chlogf("Gotta love %s style; %03i", "printf", 7);
 
     usleep(1000000);
     //ctx.close();

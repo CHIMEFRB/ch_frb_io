@@ -9,7 +9,20 @@ enum log_level {
 
 std::ostream& chime_log(enum log_level lev, const char* file, int line, const char* function);
 
+void
+__attribute__ ((format(printf,5,6)))
+chime_logf(enum log_level lev, const char* file, int line, const char* function, const char* pattern, ...);
+
+
+// This is the main logging method to use in CHIME/FRB code for
+// distributed logging:
+//
+//  chlog("Hello world: " << 1 << ", " << 2 << ", " << 3);
+//
 #define chlog(...) do { chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__) << __VA_ARGS__ << endl;} while(0)
+
+#define chlogf(pat, ...) do { chime_logf(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, pat, __VA_ARGS__);} while(0)
+
 
 #define chdebug(...) {}
 
