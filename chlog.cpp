@@ -42,6 +42,8 @@ stringprintf(const char* format, ...) {
     return s;
 }
 
+// forward decl
+static void chime_send_log(const string &s);
 class chime_log_socket {
     typedef std::lock_guard<std::mutex> scoped_lock;
 
@@ -72,6 +74,12 @@ public:
         _socket->connect(port);
     }
 
+    void remove_server(std::string port) {
+        if (!_socket)
+            throw runtime_error("chime_log_socket::remove_server called by socket has not been initialized.");
+        _socket->disconnect(port);
+    }
+
     void send(std::string msg) {
         //cout << "chime_log sending message: " << msg << endl;
         if (!_socket)
@@ -89,9 +97,37 @@ protected:
     std::mutex _mutex;
 };
 
+// The chlog function internally creates a string-buffered ostream
+// object that sends a log message when flushed (eg, with an endl).
+// inspired by http://stackoverflow.com/questions/2212776/overload-handling-of-stdendl
+class chime_log_stream : public std::ostream {
+public:
+    chime_log_stream()
+        : std::ostream(&buffer),
+          buffer()
+    {}
+protected:
+    // A little string buffer subclass that intercepts the sync() call.
+    class chstringbuf : public std::stringbuf {
+    public:
+        chstringbuf() {}
+        virtual int sync() {
+            chime_send_log(str());
+            str("");
+            return 0;
+        }
+    };
+    chstringbuf buffer;
+};
+
 // GLOBALS for logging.
 static chime_log_socket logsock;
 static zmq::context_t* logctx = NULL;
+static chime_log_stream logstream;
+
+static void chime_send_log(const string &s) {
+    logsock.send(s);
+}
 
 void chime_log_quit() {
     logsock.close_socket();
@@ -106,20 +142,7 @@ static void delete_logctx() {
     logctx = NULL;
 }
 
-/*
- Initializes the CHIME/FRB distributed logging socket for this node.
-
- If a ZeroMQ context is passed in, it will be used to create the
- socket.  Otherwise, a new context will be created.
-
- NOTE, if a context is passed in, you likely will need to call
- chime_log_quit() to guarantee that the socket is closed before the
- ZeroMQ context is deleted.
-
- (When a context is not passed in, an atexit() handler is registered
- to clean up.)
- */
-void chime_log_init(zmq::context_t* ctx = NULL) {
+void chime_log_init(zmq::context_t* ctx) {
     if (!ctx) {
         if (!logctx) {
             logctx = new zmq::context_t();
@@ -134,47 +157,22 @@ void chime_log_add_server(string port) {
     logsock.add_server(port);
 }
 
-static void chime_send_log(const string &s) {
-    logsock.send(s);
+void chime_log_remove_server(string port) {
+    logsock.remove_server(port);
 }
-
-// inspired by http://stackoverflow.com/questions/2212776/overload-handling-of-stdendl
-class chime_log_stream : public std::ostream {
-public:
-    chime_log_stream()
-        : std::ostream(&buffer),
-          buffer()
-    {}
-protected:
-    // A little string buffer subclass that intercepts the sync() call.
-    class chstringbuf : public std::stringbuf {
-    public:
-        chstringbuf() {}
-
-        virtual int sync() {
-            chime_send_log(str());
-            str("");
-            return 0;
-        }
-    };
-    chstringbuf buffer;
-};
-
-static chime_log_stream chstream;
-
 
 ostream& chime_log(log_level lev, const char* file, int line, const char* function) {
     struct timeval tv;
 
     if (gettimeofday(&tv, NULL)) {
         cout << "Error calling gettimeofday(): " << strerror(errno) << endl;
-        return chstream;
+        return logstream;
     }
 
     struct tm cal;
     if (!gmtime_r(&tv.tv_sec, &cal)) {
         cout << "Error calling gmtime_r(): " << strerror(errno) << endl;
-        return chstream;
+        return logstream;
     }
 
     string datestring = stringprintf("%04i-%02i-%02i-%02i:%02i:%02i.%03i",
@@ -182,9 +180,9 @@ ostream& chime_log(log_level lev, const char* file, int line, const char* functi
                                      cal.tm_hour, cal.tm_min, cal.tm_sec,
                                      int(tv.tv_usec / 1000));
 
-    chstream << "[" << file << ":" << line << " [" << function << "] "
+    logstream << "[" << file << ":" << line << " [" << function << "] "
            << datestring << "] ";
-    return chstream;
+    return logstream;
 }
 
 void
@@ -198,6 +196,9 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 }
 
 
+
+//////////////////// Part of the main() demo -- a log server. ////////////////////////
+
 static string msg_string(zmq::message_t &msg) {
     return string(static_cast<const char*>(msg.data()), msg.size());
 }
@@ -205,13 +206,6 @@ static string msg_string(zmq::message_t &msg) {
 std::mutex cout_mutex;
 
 static void* server_main(zmq::context_t* ctx, string port) {
-    /*
-    void* varg) {
-    std::tuple<zmq::context_t*, string> *args = reinterpret_cast<std::tuple<zmq::context_t*, string>* >(varg);
-    zmq::context_t* ctx = std::get<0>(*args);
-    string port = std::get<1>(*args);
-     */
-
     zmq::socket_t sock(*ctx, ZMQ_SUB);
     sock.setsockopt(ZMQ_SUBSCRIBE, "", 0);
     sock.bind(port);
@@ -240,22 +234,14 @@ static void* server_main(zmq::context_t* ctx, string port) {
 
 int main() {
     zmq::context_t ctx;
-    //chime_log_init(&ctx);
 
+    //chime_log_init(&ctx);
     chime_log_init(NULL);
 
     string port = "tcp://127.0.0.1:6666";
     thread serverthread(std::bind(server_main, &ctx, port));
     serverthread.detach();
     chime_log_add_server(port);
-    /*
-     pthread_t serverthread;
-     std::tuple<zmq::context_t*, string> args(&ctx, port);
-     if (pthread_create(&serverthread, NULL, server_main, &args)) {
-     cout << "Failed to create server thread." << endl;
-     return -1;
-     }
-     */
 
     // string port2 = "tcp://127.0.0.1:6667";
     // thread serverthread2(std::bind(server_main, &ctx, port2));
@@ -270,7 +256,6 @@ int main() {
     chlogf("Gotta love %s style; %03i", "printf", 7);
 
     usleep(1000000);
-    //ctx.close();
 
     //chime_log_quit();
 
