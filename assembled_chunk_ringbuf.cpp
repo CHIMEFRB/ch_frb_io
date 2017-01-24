@@ -106,8 +106,6 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
-    //cout << "packet fpga " << packet.fpga_count << ", ichunk " << packet_ichunk << ", active " << active_chunk0->ichunk << " and " << active_chunk1->ichunk << endl;
-
     if (packet_ichunk >= active_chunk0->ichunk + 2) {
 	//
 	// If we receive a packet whose timestamps extend past the range of our current
@@ -119,15 +117,12 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
-        //cout << "Beam " << beam_id << ": received chunk " << packet_ichunk << "; putting chunk " << active_chunk0->ichunk << endl;
 	this->_put_assembled_chunk(active_chunk0, event_counts);
         // after _put_assembled_chunk(), active_chunk0 has been reset.
         active_chunk0.swap(active_chunk1);
         // note that we've just swapped active_chunk1 down to active_chunk0, so active_chunk1's ichunk is active0 + 1
 	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 1);
-        //cout << "Now active chunks: " << active_chunk0->ichunk << " and " << active_chunk1->ichunk << endl;
     }
-    //assert(active_chunk1->ichunk == active_chunk0->ichunk + 1);
 
     if (packet_ichunk == active_chunk0->ichunk) {
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
@@ -138,7 +133,6 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	active_chunk1->add_packet(packet);
     }
     else {
-        //cout << "assembler miss" << endl;
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
 	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
