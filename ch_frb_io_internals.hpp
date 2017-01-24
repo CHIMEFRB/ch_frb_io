@@ -277,6 +277,9 @@ public:
                           uint64_t* ringbuf_fpga_min,
                           uint64_t* ringbuf_fpga_max);
 
+    // Are we streaming data to disk?
+    std::string stream_filename_pattern;
+
 protected:
     const intensity_network_stream::initializer ini_params;
 
@@ -309,6 +312,7 @@ protected:
     // Processing thread waits here if the ring buffer is empty.
     pthread_cond_t cond_assembled_chunks_added;
 
+    // Where we store chunks (so they can be retrieved by RPC)
     L1Ringbuf* ringbuf;
 
     bool doneflag = false;

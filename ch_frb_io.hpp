@@ -352,6 +352,9 @@ public:
     // has just arrived.
     void inject_assembled_chunk(assembled_chunk* chunk);
 
+    // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
+    void stream_to_files(const std::string& filename_pattern);
+
     ~intensity_network_stream();
 
 protected:
@@ -424,9 +427,13 @@ protected:
     std::vector<int64_t> cumulative_event_counts;
     std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
+    std::string stream_filename;
+
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
+
+    void _wait_for_assemblers_initialized(bool prelocked=false);
 
     void _open_socket();
     void _network_flush_packets();
@@ -480,6 +487,9 @@ struct assembled_chunk : noncopyable {
     uint64_t ichunk = 0;
     uint64_t isample = 0;   // always equal to ichunk * constants::nt_per_assembled_chunk
 
+    // How many original samples have been binned into each sample in this chunk.  Used in the L1 telescoping ring buffer, where binning = 2, 4, 8.
+    int binning = 1;
+
     float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
@@ -489,8 +499,21 @@ struct assembled_chunk : noncopyable {
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
 
+    // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
+    // Replacements:
+    //   (BEAM)    -> %04i beam_id
+    //   (CHUNK)   -> %08i ichunk
+    //   (NCHUNK)  -> %02i  size in chunks
+    //   (BINNING) -> %02i  size in chunks
+    //   (FPGA0)   -> %012i start FPGA-counts
+    //   (FPGAN)   -> %08i  FPGA-counts size
+    std::string format_filename(const std::string &pattern) const;
+
     // the first fpga-counts sample in this chunk
     uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
+
+    // the number of fpga-counts in this chunk
+    uint64_t fpgacounts_N() const { return (constants::nt_per_assembled_chunk * this->fpga_counts_per_sample); }
 
     // the last fpga-counts sample in this chunk + 1
     uint64_t fpgacounts_end() const { return (isample + constants::nt_per_assembled_chunk) * this->fpga_counts_per_sample; }
@@ -499,6 +522,9 @@ struct assembled_chunk : noncopyable {
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
+
+    virtual void decode_subset(float *intensity, float *weights,
+                               int t0, int nt, int stride) const;
 
     // Downsamples (in time) the two given source chunks, writing into the
     // given destination chunk.

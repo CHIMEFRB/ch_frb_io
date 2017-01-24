@@ -1,3 +1,5 @@
+#include <sys/ioctl.h>
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -214,6 +216,30 @@ void intensity_network_stream::join_threads()
 }
 
 
+void intensity_network_stream::stream_to_files(const std::string& filename_pattern) {
+    stream_filename = filename_pattern;
+    pthread_mutex_lock(&this->state_lock);
+    bool inited = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+    if (inited)
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->stream_filename_pattern = filename_pattern;
+}
+
+// Must not hold state_lock when calling this function!
+void intensity_network_stream::_wait_for_assemblers_initialized(bool prelocked) {
+    // wait for assemblers to be initialized...
+    if (!prelocked)
+        pthread_mutex_lock(&this->state_lock);
+
+    while (!this->assemblers_initialized)
+	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+
+    if (!prelocked)
+        pthread_mutex_unlock(&this->state_lock);
+}
+
+
 shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
     if ((assembler_index < 0) || (assembler_index >= nassemblers))
@@ -221,10 +247,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
 
     // Wait for assemblers_initialized flag to be set.
     // After this, it's OK to access 'assemblers' without holding the lock.
-    pthread_mutex_lock(&this->state_lock);
-    while (!this->assemblers_initialized)
-	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
-    pthread_mutex_unlock(&this->state_lock);
+    _wait_for_assemblers_initialized();
 
     // This can happen if end_stream() was called before the assemblers were initialized.
     if (assemblers.size() == 0)
@@ -515,6 +538,14 @@ void intensity_network_stream::_network_thread_body()
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
+        /*{
+            int nqueued = 0;
+            if (ioctl(sockfd, FIONREAD, &nqueued) == -1) {
+                cout << "Failed to call ioctl(FIONREAD)" << endl;
+            }
+            cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
+         }*/
+
         // Increment the number of packets we've received from this sender:
         uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
         uint64_t port = ntohs(sender_addr.sin_port);
@@ -693,7 +724,13 @@ void intensity_network_stream::_assembler_thread_body()
     this->assemblers_initialized = true;
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
-    
+
+    // did a call to stream_to_file() come in while we were waiting
+    // for the assemblers to be initialized?  If so, dispatch that
+    // now.
+    if (stream_filename.length())
+        stream_to_files(stream_filename);
+
     auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
@@ -801,12 +838,9 @@ void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
         this->fp_fpga_count = chunk->isample * chunk->fpga_counts_per_sample;
         this->first_packet_received = true;
         pthread_cond_broadcast(&this->cond_state_changed);
-        // wait for assemblers to be initialized...
-        for (;;) {
-            if (this->assemblers_initialized)
-                break;
-            pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
-        }
+
+        // we already hold the state_lock
+        _wait_for_assemblers_initialized(true);
     }
     pthread_mutex_unlock(&this->state_lock);
 

@@ -33,7 +33,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                                       std::shared_ptr<ch_frb_io::assembled_chunk>& ch) const {
         if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
         //std::cout << "convert msgpack object to shared_ptr<assembled_chunk>..." << std::endl;
-        if (o.via.array.size != 16) throw msgpack::type_error();
+        if (o.via.array.size != 17) throw msgpack::type_error();
         msgpack::object* arr = o.via.array.ptr;
 
         std::string header         = arr[0].as<std::string>();
@@ -51,33 +51,42 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         int nt_coarse              = arr[8].as<int>();
         int nscales                = arr[9].as<int>();
         int ndata                  = arr[10].as<int>();
-        uint64_t ichunk            = arr[11].as<uint64_t>();
-        uint64_t isample           = arr[12].as<uint64_t>();
+        uint64_t fpga0             = arr[11].as<uint64_t>();
+        uint64_t fpgaN             = arr[12].as<uint64_t>();
+        int binning                = arr[13].as<int>();
+        int iarr = 14;
+
+        uint64_t isample = fpga0 / (uint64_t)fpga_counts_per_sample;
+        uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
         ch = ch_frb_io::assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
         ch->isample = isample;
+        ch->binning = binning;
 
         if (ch->nt_coarse != (int)nt_coarse)
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nt_coarse mismatch");
 
-        if (arr[13].type != msgpack::type::BIN) throw msgpack::type_error();
-        if (arr[14].type != msgpack::type::BIN) throw msgpack::type_error();
-        if (arr[15].type != msgpack::type::BIN) throw msgpack::type_error();
+        if (fpgaN != (uint64_t)(ch->binning * ch_frb_io::constants::nt_per_assembled_chunk * fpga_counts_per_sample))
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack fpgaN mismatch");
+
+        if (arr[iarr + 0].type != msgpack::type::BIN) throw msgpack::type_error();
+        if (arr[iarr + 1].type != msgpack::type::BIN) throw msgpack::type_error();
+        if (arr[iarr + 2].type != msgpack::type::BIN) throw msgpack::type_error();
 
         uint nsdata = nscales * sizeof(float);
-        if (arr[13].via.bin.size != nsdata) throw msgpack::type_error();
-        if (arr[14].via.bin.size != nsdata) throw msgpack::type_error();
-        
-        memcpy(ch->scales,  arr[13].via.bin.ptr, nsdata);
-        memcpy(ch->offsets, arr[14].via.bin.ptr, nsdata);
+        if (arr[iarr + 0].via.bin.size != nsdata) throw msgpack::type_error();
+        if (arr[iarr + 1].via.bin.size != nsdata) throw msgpack::type_error();
+
+        memcpy(ch->scales,  arr[iarr + 0].via.bin.ptr, nsdata);
+        memcpy(ch->offsets, arr[iarr + 1].via.bin.ptr, nsdata);
 
         if (comp == comp_none) {
-	  if (arr[15].via.bin.size != (uint)ndata) throw msgpack::type_error();
-            memcpy(ch->data,    arr[15].via.bin.ptr, ndata);
+            if (arr[iarr + 2].via.bin.size != (uint)ndata) throw msgpack::type_error();
+            memcpy(ch->data, arr[iarr + 2].via.bin.ptr, ndata);
         } else if (comp == comp_bitshuffle) {
-	  if (arr[15].via.bin.size != (uint)compressed_size) throw msgpack::type_error();
-            std::cout << "Bitshuffle: decompressing " << compressed_size << " to " << ch->ndata << std::endl;
-            int64_t n = bshuf_decompress_lz4(reinterpret_cast<const void*>(arr[15].via.bin.ptr), ch->data, ch->ndata, 1, 0);
+            if (arr[iarr + 2].via.bin.size != (uint)compressed_size) throw msgpack::type_error();
+            //std::cout << "Bitshuffle: decompressing " << compressed_size << " to " << ch->ndata << std::endl;
+            int64_t n = bshuf_decompress_lz4(reinterpret_cast<const void*>(arr[iarr + 2].via.bin.ptr), ch->data, ch->ndata, 1, 0);
             if (n != compressed_size)
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack bitshuffle decompression failure, code " + std::to_string(n));
         }
@@ -93,7 +102,7 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         // packing member variables as an array.
         //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
         uint8_t version = 1;
-        o.pack_array(16);
+        o.pack_array(17);
         o.pack("assembled_chunk in msgpack format");
         o.pack(version);
 
@@ -145,8 +154,9 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         o.pack(ch->nt_coarse);
         o.pack(ch->nscales);
         o.pack(ch->ndata);
-        o.pack(ch->ichunk);
-        o.pack(ch->isample);
+        o.pack(ch->fpgacounts_begin());
+        o.pack(ch->fpgacounts_N());
+        o.pack(ch->binning);
         // PACK FLOATS AS BINARY
         int nscalebytes = ch->nscales * sizeof(float);
         o.pack_bin(nscalebytes);
@@ -155,9 +165,6 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         o.pack_bin(nscalebytes);
         o.pack_bin_body(reinterpret_cast<const char*>(ch->offsets),
                         nscalebytes);
-
-        //o.pack_bin(ch->ndata);
-        //o.pack_bin_body(reinterpret_cast<const char*>(ch->data), ch->ndata);
         o.pack_bin(data_size);
         o.pack_bin_body(reinterpret_cast<const char*>(data), data_size);
         
