@@ -63,6 +63,10 @@ public:
 
     virtual ~Ringbuf();
 
+    // Noncopyable
+    Ringbuf(const Ringbuf<T> &) = delete;
+    Ringbuf<T> &operator=(const Ringbuf<T> &) = delete;
+
     /*
      Try to push a new frame onto the ring buffer.  If the quota of
      frames has been reached, frames will be popped off the front

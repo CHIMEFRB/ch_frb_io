@@ -15,7 +15,7 @@ extern "C" {
 #include <ch_frb_io.hpp>
 
 
-/** Code for packing objects into msgpack mesages, and vice verse. **/
+/** Code for packing objects into msgpack mesages, and vice versa. **/
 
 namespace msgpack {
 MSGPACK_API_VERSION_NAMESPACE(MSGPACK_DEFAULT_API_NS) {

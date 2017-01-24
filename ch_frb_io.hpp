@@ -510,11 +510,16 @@ struct assembled_chunk : noncopyable {
     std::string format_filename(const std::string &pattern) const;
 
     // the first fpga-counts sample in this chunk
-    uint64_t fpgacounts_begin() const;
+    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
+
     // the last fpga-counts sample in this chunk + 1
+<<<<<<< HEAD
     uint64_t fpgacounts_end() const;
     // the number of fpga-counts in this chunk
     uint64_t fpgacounts_N() const;
+=======
+    uint64_t fpgacounts_end() const { return (isample + constants::nt_per_assembled_chunk) * this->fpga_counts_per_sample; }
+>>>>>>> master
 
     // These are virtual so that subclasses can be written with optimized implementations 
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)

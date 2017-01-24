@@ -60,7 +60,9 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
                                               uint64_t max_fpga_counts)
 {
     vector<shared_ptr<assembled_chunk> > chunks;
+    pthread_mutex_lock(&this->lock);
     ringbuf->retrieve(min_fpga_counts, max_fpga_counts, chunks);
+    pthread_mutex_unlock(&this->lock);
     return chunks;
 }
 
@@ -223,8 +225,14 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
-    this->_put_assembled_chunk(active_chunk0, event_counts);
-    this->_put_assembled_chunk(active_chunk1, event_counts);
+    if (active_chunk0) {
+        cout << "assembled_chunk_ringbuf::end_stream: putting chunk0 " << active_chunk0->ichunk << endl;
+        this->_put_assembled_chunk(active_chunk0, event_counts);
+    }
+    if (active_chunk1) {
+        cout << "assembled_chunk_ringbuf::end_stream: putting chunk1 " << active_chunk1->ichunk << endl;
+        this->_put_assembled_chunk(active_chunk1, event_counts);
+    }
 
     pthread_mutex_lock(&this->lock);
 

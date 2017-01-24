@@ -299,7 +299,6 @@ protected:
     // Currently we take the active window to be two assembled_chunks long, but this could be generalized.
     // When an active chunk is finished, it is added to the ring buffer.
     // Note: the active_chunk pointers are not protected by a lock, but are only accessed by the assembler thread.
-    // Note: active_chunk0->ichunk is always equal to (assembled_ringbuf_pos + assembled_ringbuf_size).
     std::unique_ptr<assembled_chunk> active_chunk0;
     std::unique_ptr<assembled_chunk> active_chunk1;
 

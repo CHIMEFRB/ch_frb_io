@@ -3,6 +3,8 @@ ch-show-intensity-file
 test-intensity-hdf5-file
 test-misc
 test-network-streams
+test-assembled-chunk
+
 *.o
 
 # emacs save files

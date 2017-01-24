@@ -23,13 +23,14 @@ inline double wtval(int ifreq, int ipol, int it)
 
 int main(int argc, char **argv)
 {
-    cout << "Warning: this will create a ~100 MB file in the current directory!\n"
-	 << "If this is OK press return.  If not, press control-C!\n"
-	 << "I AM WAITING, HUMAN: "
-	 << flush;
-    
-    string dummy;
-    getline(cin, dummy);
+    if (argc == 1) {
+        cout << "Warning: this will create a ~100 MB file in the current directory!\n"
+             << "If this is OK press return.  If not, press control-C!\n"
+             << "I AM WAITING, HUMAN: "
+             << flush;
+        string dummy;
+        getline(cin, dummy);
+    }
 
     const char *filename = "test_intensity_hdf5_file.hdf5";
     const int nfreq = 1024;

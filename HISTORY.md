@@ -1,3 +1,14 @@
+- v4: large update from Dustin.
+
+  - Backward incompatible: lz4 and msgpack are now dependencies.
+  - Import bitshuffle code (which adds the "lz4" library as a dependency).
+  - Add assembled_chunk.downsample() method.
+  - Add hdf5 output for assembled_chunks.
+  - Add msgpack i/o for assembled_chunks.
+  - Add multi-level, memory-footprint-limited ring buffer of assembled_chunks.
+  - Add calls to retrieve statistics and assembled_chunks to support RPC calls.
+  - Add debugging calls to inject assembled_chunks into the assembler.
+
 - v3: large update containing an intial implementation of chimefrb networking code.
 
   - Backward incompatible: the C++ source files have been moved from cpp/ to the
