@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <iostream>
 #include <stdarg.h> // for va_start/va_end
+#include <cinttypes>  // PRIu64
 #include <immintrin.h>
 #include <msgpack/fbuffer.hpp>
 #include "assembled_chunk_msgpack.hpp"
@@ -206,8 +207,8 @@ void assembled_chunk::decode_subset(float *intensity, float *weights,
 	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::decode_subset()");
     if (stride < NT)
 	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode_subset()");
-    if (NT > constants::nt_per_assembled_chunk)
-	throw runtime_error("ch_frb_io: bad NT passed to assembled_chunk::decode_subset()");
+    if ((t0 < 0) || (NT < 0) || (t0 + NT > constants::nt_per_assembled_chunk))
+	throw runtime_error("ch_frb_io: bad (t0,NT) passed to assembled_chunk::decode_subset()");
 
     for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
 	const float * scales_f = this->scales  + if_coarse * nt_coarse;
