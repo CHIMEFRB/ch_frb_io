@@ -2,12 +2,15 @@
 #include <map>
 #include <stdarg.h> // for va_start/va_end
 #include <thread>
+#include <mutex>
 #include <functional>
 #include <iostream>
 #include <ostream>
 #include <sstream>
 #include <sys/time.h>
 #include <unistd.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 #include <zmq.hpp>
 #include "chlog.hpp"
 
@@ -232,6 +235,109 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
     string s = vstringprintf(pattern, lst);
     va_end(lst);
     chime_log(lev, file, line, function, s);
+}
+
+
+
+
+chime_log_server::chime_log_server(std::ostream& out,
+                                   zmq::context_t* ctx,
+                                   std::string hostname,
+                                   int port) :
+    _out(out)
+{
+    if (!ctx)
+        ctx = _ctx = new zmq::context_t();
+    _socket = new zmq::socket_t(*ctx, ZMQ_SUB);
+    _socket->setsockopt(ZMQ_SUBSCRIBE, "", 0);
+
+    string addr = "tcp://" + hostname + ":";
+    if (port == -1)
+        addr = addr + "*";
+    else
+        addr = addr + std::to_string(port);
+
+    _socket->bind(addr);
+
+    char addrx[256];
+    size_t addrsz = 256;
+    _socket->getsockopt(ZMQ_LAST_ENDPOINT,
+                        reinterpret_cast<void*>(addrx), &addrsz);
+    _address = string(addrx);
+    //cout << "Bound to address " << _address << endl;
+
+    // When binding "*", the returned address is like "tcp://0.0.0.0:6534".
+    // Replace "0.0.0.0" by my IP address
+    size_t i = _address.find("0.0.0.0");
+    if (i != std::string::npos) {
+        string ipaddress = "0.0.0.0";
+        char name[256];
+        if (gethostname(name, 256)) {
+            cout << "Failed to gethostname(): " << strerror(errno) << endl;
+        } else {
+            //cout << "Hostname: " << name << endl;
+            struct addrinfo* addrs = NULL;
+            if (getaddrinfo(name, NULL, NULL, &addrs)) {
+                cout << "Failed to getaddrinfo(): " << gai_strerror(errno) << endl;
+            } else {
+                struct addrinfo* a;
+                for(a = addrs; a != NULL; a = a->ai_next) {
+                    if (a->ai_family != AF_INET)
+                        continue;
+                    char dots[INET_ADDRSTRLEN];
+                    struct sockaddr_in* sin = reinterpret_cast<struct sockaddr_in*>(a->ai_addr);
+                    if (!inet_ntop(AF_INET, &(sin->sin_addr), dots, INET_ADDRSTRLEN)) {
+                        cout << "Failed to inet_ntop: " << strerror(errno) << endl;
+                    } else {
+                        ipaddress = dots;
+                        //cout << "My address: " << dots << endl;
+                        break;
+                    }
+                }
+                freeaddrinfo(addrs);
+            }
+        }
+        _address.replace(i, 7, ipaddress);
+        //cout << "Replaced address: " << _address << endl;
+    }
+}
+
+chime_log_server::~chime_log_server() {
+    delete _socket;
+    if (_ctx) {
+        delete _ctx;
+    }
+}
+
+std::string chime_log_server::get_address() {
+    return _address;
+}
+
+static string msg_string(zmq::message_t &msg) {
+    return string(static_cast<const char*>(msg.data()), msg.size());
+}
+
+void chime_log_server::run() {
+    for (;;) {
+        zmq::message_t msg;
+        try {
+            if (!_socket->recv(&msg)) {
+                _out << "log server: failed to receive message" << endl;
+                break;
+            }
+        } catch (const zmq::error_t& e) {
+            _out << "log server: error receiving message: " << e.what() << endl;
+            break;
+        }
+        _out << msg_string(msg) << endl;
+    }
+}
+
+// Starts a new thread to run this server.
+std::thread chime_log_server::start() {
+    thread t(std::bind(&chime_log_server::run, this));
+    t.detach();
+    return t;
 }
 
 

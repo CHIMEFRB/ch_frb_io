@@ -2,6 +2,8 @@
 #define _CH_FRB_LOG_HPP
 
 #include <ostream>
+#include <sstream>
+#include <zmq.hpp>
 
 namespace ch_frb_io {
 #if 0
@@ -85,6 +87,37 @@ void chime_log_set_thread_name(std::string name);
 void chime_log_add_server(std::string port);
 
 void chime_log_remove_server(std::string port);
+
+
+
+////////
+// A simple log server that prints messages to cout.
+////////
+class chime_log_server {
+public:
+    chime_log_server(std::ostream& out = std::cout,
+                     zmq::context_t* ctx = NULL,
+                     std::string hostname = "*",
+                     int port = -1);
+
+    ~chime_log_server();
+
+    std::string get_address();
+
+    // Runs main serving loop.  Never returns.
+    void run();
+
+    // Starts a new thread to run this server.
+    std::thread start();
+
+protected:
+    std::ostream& _out;
+    zmq::socket_t* _socket;
+    std::string _address;
+    zmq::context_t* _ctx;
+};
+
+
 
 }
 

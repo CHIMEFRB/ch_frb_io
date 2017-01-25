@@ -55,6 +55,19 @@ void log_client(int num) {
     }
 }
 
+/*
+class mutex_stream : public std::ostream {
+public:
+    mutex_stream() {}
+    template<typename T>
+    basic_ostream& operator<<( T value ) {
+        std::lock_guard<std::mutex> lock(cout_mutex);
+        cout << value;
+        return *this;
+    }
+};
+ */
+
 int main() {
     zmq::context_t ctx;
 
@@ -63,6 +76,19 @@ int main() {
     chime_log_set_thread_name("Main");
     chime_log_open_socket(&ctx);
 
+    chime_log_local(false);
+
+    //mutex_stream ms;
+    //chime_log_server ser(ms, NULL, "127.0.0.1");
+    chime_log_server ser(cout, NULL, "127.0.0.1");
+    cout << "Server addr: " << ser.get_address() << endl;
+    ser.start();
+    chime_log_add_server(ser.get_address());
+
+    //chime_log_server ser2;
+    //cout << "Server addr: " << ser2.get_address() << endl;
+
+    /*
     string port = "tcp://127.0.0.1:6666";
     thread serverthread(std::bind(server_main, &ctx, port, 1));
     serverthread.detach();
@@ -72,6 +98,7 @@ int main() {
     thread serverthread2(std::bind(server_main, &ctx, port2, 2));
     serverthread2.detach();
     chime_log_add_server(port2);
+     */
 
     // What if we connect to a server that doesn't exist?
     string port3 = "tcp://127.0.0.1:6668";
@@ -87,6 +114,7 @@ int main() {
 
     usleep(100000);
 
+    /*
     chime_log_close_socket();
 
     // Now re-open with a new context
@@ -94,6 +122,7 @@ int main() {
 
     chime_log_add_server(port);
     chime_log_add_server(port2);
+     */
 
     // (wait for connect)
     usleep(1000000);
@@ -105,6 +134,8 @@ int main() {
     logger2.join();
 
     usleep(1000000);
+
+    chime_log_close_socket();
 
     cout << "main() finished" << endl;
     return 0;
