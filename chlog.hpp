@@ -15,31 +15,8 @@ enum log_level {
     log_level_err = 4,
 };
 
-// Implementation detail... a string-stream class with a done() method
-// that calls a callback.
-class chime_log_stream : public std::ostringstream {
-    typedef std::function<void(std::string)> callback_func1;
-    typedef std::function<void(void)> callback_func2;
-public:
-    chime_log_stream(callback_func1 cb1, callback_func2 cb2)
-        : std::ostringstream(),
-          callback1(cb1),
-          callback2(cb2)
-    {}
-    void done() {
-        //std::cout << "chime_log_stream.done() -> " << str() << std::endl;
-        //flush();
-        callback1(str());
-        str("");
-        callback2();
-    }
-protected:
-    callback_func1 callback1;
-    callback_func2 callback2;
-};
-
 // Not meant to be called directly; called by preprocessor macro expansion
-chime_log_stream& chime_log(enum log_level lev, const char* file, int line, const char* function);
+void chime_log(enum log_level lev, const char* file, int line, const char* function, std::string logmsg);
 
 // Not meant to be called directly; called by preprocessor macro expansion
 void
@@ -51,24 +28,23 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 //
 //  chlog("Hello world: " << 1 << ", " << 2 << ", " << 3);
 //
-#define chlog(...) \
-    do { \
-        chime_log_stream& ll = chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
-        ll << __VA_ARGS__; \
-        ll.done(); \
+#define chlog(...)                                                      \
+    do {                                                                \
+        std::ostringstream ss;                                          \
+        ss << __VA_ARGS__;                                              \
+        chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, ss.str()); \
     } while(0)
-
 
 // Like chlog, but takes a printf-style format string and arguments.
 //
 //  chlogf("Hello world: I am %03i", 7);
 //
-#define chlogf(pat, ...) \
-    do { chime_logf(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, pat, __VA_ARGS__);} while(0)
+#define chlogf(pat, ...)                                                \
+    do {                                                                \
+        chime_logf(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, pat, __VA_ARGS__); \
+    } while(0)
 
 #define chdebug(...) {}
-
-
 
 /*
  Initializes the CHIME/FRB distributed logging socket for this node.

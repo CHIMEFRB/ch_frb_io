@@ -67,10 +67,7 @@ public:
     chime_log_socket() :
         _ctx(NULL),
         _socket(NULL),
-        _mutex(),
-        _stream(std::bind(&chime_log_socket::send,
-                          this, std::placeholders::_1),
-                std::bind(&chime_log_socket::unlock, this))
+        _mutex()
     {}
 
     ~chime_log_socket() {
@@ -103,37 +100,12 @@ public:
         _socket->disconnect(port);
     }
 
-    void send(std::string msg) {
+    void send(std::string header, std::string msg) {
         if (_socket) {
-            //cout << "send(" << msg << ")" << endl;
-            //scoped_lock l(_mutex);
+            msg = header + " " + msg;
+            scoped_lock l(_mutex);
             _socket->send(static_cast<const void*>(msg.data()), msg.size());
         }
-        {
-            std::lock_guard<std::mutex> lock(cout_mutex);
-            std::thread::id tid = std::this_thread::get_id();
-            cout << "send(): pid/thread " << getpid() << "/" << tid << endl; //msg << endl;
-        }
-    }
-
-    void unlock() {
-        _mutex.unlock();
-        {
-            std::lock_guard<std::mutex> lock(cout_mutex);
-            std::thread::id tid = std::this_thread::get_id();
-            cout << "unlock(): pid/thread " << getpid() << "/" << tid << endl;
-        }
-    }
-
-
-    chime_log_stream& get_stream() {
-        {
-            std::lock_guard<std::mutex> lock(cout_mutex);
-            std::thread::id tid = std::this_thread::get_id();
-            cout << "get_stream: pid/thread " << getpid() << "/" << tid << endl;
-        }
-        _mutex.lock();
-        return _stream;
     }
 
 protected:
@@ -141,8 +113,6 @@ protected:
     zmq::socket_t* _socket;
 
     std::mutex _mutex;
-
-    chime_log_stream _stream;
 };
 
 
@@ -165,7 +135,8 @@ void chime_log_remove_server(string port) {
     logsock.remove_server(port);
 }
 
-chime_log_stream& chime_log(log_level lev, const char* file, int line, const char* function) {
+void chime_log(log_level lev, const char* file, int line, const char* function,
+               string msg) {
     struct timeval tv;
     string datestring;
     if (gettimeofday(&tv, NULL)) {
@@ -185,11 +156,9 @@ chime_log_stream& chime_log(log_level lev, const char* file, int line, const cha
                         (lev == log_level_info ? "INFO" :
                          (lev == log_level_warn ? "WARN" :
                           (lev == log_level_err ? "ERROR" : "XXX"))));
-    string header = stringprintf("%s %s:%i [%s] %s ", levstring.c_str(), file, line, function, datestring.c_str());
+    string header = levstring + stringprintf(" %s:%i [%s]", file, line, function) + datestring;
 
-    chime_log_stream& s = logsock.get_stream();
-    s << header;
-    return s;
+    logsock.send(header, msg);
 }
 
 void
@@ -199,9 +168,7 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
     va_start(lst, pattern);
     string s = vstringprintf(pattern, lst);
     va_end(lst);
-    chime_log_stream& ll = chime_log(lev, file, line, function);
-    ll << s;
-    ll.done();
+    chime_log(lev, file, line, function, s);
 }
 
 
@@ -271,7 +238,7 @@ int main() {
 
     chlogf("Gotta love %s style; %03i", "printf", 7);
 
-    usleep(1000000);
+    usleep(100000);
 
     chime_log_quit();
 
@@ -286,7 +253,7 @@ int main() {
     logger1.join();
     logger2.join();
 
-    usleep(3000000);
+    usleep(1000000);
 
     cout << "main() finished" << endl;
     return 0;
