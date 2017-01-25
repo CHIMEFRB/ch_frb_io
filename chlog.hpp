@@ -64,6 +64,15 @@ void chime_log_open_socket(zmq::context_t* ctx = NULL);
 // Cleans up the distributed logging system.
 void chime_log_close_socket();
 
+// Enable/disable logging to cout as well as to the network.
+void chime_log_local(bool);
+
+// Sets a mnemonic name for this client; default is hostname
+void chime_log_set_name(std::string);
+
+// Sets a mnemonic name for the current thread
+void chime_log_set_thread_name(std::string name);
+
 /*
  Starts sending log messages to the given server address (ZeroMQ
  address string, like "tcp://127.0.0.1:6667").

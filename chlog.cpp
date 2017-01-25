@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <map>
 #include <stdarg.h> // for va_start/va_end
 #include <thread>
 #include <pthread.h>
@@ -59,7 +60,9 @@ public:
         _ctx(NULL),
         _socket(NULL),
         _mutex(),
-        _local(true)
+        _local(true),
+        _name(),
+        _threadnames()
     {}
 
     ~chime_log_socket() {
@@ -69,9 +72,28 @@ public:
             delete _ctx;
     }
 
-    void chime_log_local(bool loc) {
+    void set_local(bool loc) {
         scoped_lock l(_mutex);
         _local = loc;
+    }
+
+    void set_name(std::string name) {
+        _name = name;
+    }
+
+    void set_thread_name(std::string name) {
+        _threadnames[std::this_thread::get_id()] = name;
+    }
+
+    std::string get_thread_name() {
+        std::thread::id tid = std::this_thread::get_id();
+        auto it = _threadnames.find(tid);
+        if (it == _threadnames.end()) {
+            std::ostringstream ss;
+            ss << "Thread-" << tid;
+            return ss.str();
+        }
+        return it->second;
     }
 
     void open_socket(zmq::context_t* ctx) {
@@ -82,6 +104,12 @@ public:
             ctx = _ctx = new zmq::context_t();
         _socket = new zmq::socket_t(*ctx, ZMQ_PUB);
 
+        if (!_name.length()) {
+            char tmp[256];
+            gethostname(tmp, 256);
+            _name = tmp;
+            cout << "Set hostname: " << _name << endl;
+        }
         // Send buffer: ZMQ_SNDHWM: default 1000 messages
     }
 
@@ -110,10 +138,13 @@ public:
         msg = header + " " + msg;
         {
             scoped_lock l(_mutex);
+
+            string tname = get_thread_name();
             if (_local)
-                cout << msg << endl;
+                cout << tname << " " << msg << endl;
             if (!_socket)
                 return;
+            msg = _name + " " + tname + " " + msg;
             _socket->send(static_cast<const void*>(msg.data()), msg.size());
         }
     }
@@ -125,19 +156,38 @@ protected:
     // Mutex used to protect the socket (and also _socket/_ctx state)
     std::mutex _mutex;
 
+    // Print to cout also?
     bool _local;
+
+    // Client name to send
+    std::string _name;
+
+    // Thread name map
+    std::map<std::thread::id, std::string> _threadnames;
 };
 
 
 // GLOBALS for logging.
 static chime_log_socket logsock;
 
+void chime_log_open_socket(zmq::context_t* ctx) {
+    logsock.open_socket(ctx);
+}
+
 void chime_log_close_socket() {
     logsock.close_socket();
 }
 
-void chime_log_open_socket(zmq::context_t* ctx) {
-    logsock.open_socket(ctx);
+void chime_log_local(bool loc) {
+    logsock.set_local(loc);
+}
+
+void chime_log_set_name(std::string name) {
+    logsock.set_name(name);
+}
+
+void chime_log_set_thread_name(std::string name) {
+    logsock.set_thread_name(name);
 }
 
 void chime_log_add_server(string port) {
@@ -169,8 +219,9 @@ void chime_log(log_level lev, const char* file, int line, const char* function,
                         (lev == log_level_info ? "INFO" :
                          (lev == log_level_warn ? "WARN" :
                           (lev == log_level_err ? "ERROR" : "XXX"))));
-    string header = levstring + stringprintf(" %s:%i [%s]", file, line, function) + datestring;
-
+    string header = (levstring +
+                     stringprintf(" %s:%i [%s]", file, line, function) +
+                     datestring);
     logsock.send(header, msg);
 }
 
@@ -228,6 +279,7 @@ static void* server_main(zmq::context_t* ctx, string port, int sid) {
 }
 
 void log_client(int num) {
+    chime_log_set_thread_name(stringprintf("Client-%i", num));
     for (int i=0; i<10; i++) {
         chlog("Hello I am client " << num << ", message " << i);
     }
@@ -237,6 +289,8 @@ int main() {
     zmq::context_t ctx;
 
     // Try opening the socket with a given context.
+    chime_log_set_name("myputer");
+    chime_log_set_thread_name("Main");
     chime_log_open_socket(&ctx);
 
     string port = "tcp://127.0.0.1:6666";
@@ -249,11 +303,9 @@ int main() {
     serverthread2.detach();
     chime_log_add_server(port2);
 
-
     // What if we connect to a server that doesn't exist?
     string port3 = "tcp://127.0.0.1:6668";
     chime_log_add_server(port3);
-
 
     usleep(1000000);
 
