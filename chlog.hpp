@@ -59,7 +59,10 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
  (When a context is not passed in, an atexit() handler is registered
  to clean up.)
  */
-void chime_log_init(zmq::context_t* ctx = NULL);
+void chime_log_open_socket(zmq::context_t* ctx = NULL);
+
+// Cleans up the distributed logging system.
+void chime_log_close_socket();
 
 /*
  Starts sending log messages to the given server address (ZeroMQ
@@ -68,9 +71,6 @@ void chime_log_init(zmq::context_t* ctx = NULL);
 void chime_log_add_server(std::string port);
 
 void chime_log_remove_server(std::string port);
-
-// Cleans up the distributed logging system.
-void chime_log_quit();
 
 }
 

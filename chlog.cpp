@@ -19,15 +19,6 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
-
-//////////////////////
-
-std::mutex cout_mutex;
-
-//////////////////////
-
-
-
 static string 
 vstringprintf(const char* format, va_list lst) {
     char temps[256];
@@ -78,32 +69,41 @@ public:
     }
 
     void open_socket(zmq::context_t* ctx) {
+        scoped_lock l(_mutex);
+        if (_socket)
+            throw runtime_error("chime_log_socket::open_socket called but socket is already open.");
         if (!ctx)
             ctx = _ctx = new zmq::context_t();
         _socket = new zmq::socket_t(*ctx, ZMQ_PUB);
     }
 
     void close_socket() {
-        delete _socket;
+        scoped_lock l(_mutex);
+        if (_socket)
+            delete _socket;
         _socket = NULL;
     }
     
     void add_server(std::string port) {
+        scoped_lock l(_mutex);
         if (!_socket)
             throw runtime_error("chime_log_socket::add_server called but socket has not been initialized.");
         _socket->connect(port);
     }
 
     void remove_server(std::string port) {
+        scoped_lock l(_mutex);
         if (!_socket)
             throw runtime_error("chime_log_socket::remove_server called but socket has not been initialized.");
         _socket->disconnect(port);
     }
 
     void send(std::string header, std::string msg) {
-        if (_socket) {
-            msg = header + " " + msg;
+        msg = header + " " + msg;
+        {
             scoped_lock l(_mutex);
+            if (!_socket)
+                return;
             _socket->send(static_cast<const void*>(msg.data()), msg.size());
         }
     }
@@ -112,6 +112,7 @@ protected:
     zmq::context_t* _ctx;
     zmq::socket_t* _socket;
 
+    // Mutex used to protect the socket (and also _socket/_ctx state)
     std::mutex _mutex;
 };
 
@@ -119,11 +120,11 @@ protected:
 // GLOBALS for logging.
 static chime_log_socket logsock;
 
-void chime_log_quit() {
+void chime_log_close_socket() {
     logsock.close_socket();
 }
 
-void chime_log_init(zmq::context_t* ctx) {
+void chime_log_open_socket(zmq::context_t* ctx) {
     logsock.open_socket(ctx);
 }
 
@@ -176,20 +177,22 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 
 //////////////////// Part of the main() demo -- a log server. ////////////////////////
 
+std::mutex cout_mutex;
+
 static string msg_string(zmq::message_t &msg) {
     return string(static_cast<const char*>(msg.data()), msg.size());
 }
 
-//std::mutex cout_mutex;
-
-static void* server_main(zmq::context_t* ctx, string port) {
+static void* server_main(zmq::context_t* ctx, string port, int sid) {
     zmq::socket_t sock(*ctx, ZMQ_SUB);
     sock.setsockopt(ZMQ_SUBSCRIBE, "", 0);
     sock.bind(port);
-    cout << "server_main: bound " << port << endl;
+    {
+        std::lock_guard<std::mutex> lock(cout_mutex);
+        cout << "server_main " << sid << ": bound " << port << endl;
+    }
     for (;;) {
         zmq::message_t msg;
-        //cout << "server_main: waiting to receive message." << endl;
         try {
             if (!sock.recv(&msg)) {
                 cout << "log server: failed to receive message" << endl;
@@ -202,10 +205,13 @@ static void* server_main(zmq::context_t* ctx, string port) {
 
         {
             std::lock_guard<std::mutex> lock(cout_mutex);
-            cout << "Server received message: " << msg_string(msg) << endl;
+            cout << "Server " << sid << ": " << msg_string(msg) << endl;
         }
     }
-    cout << "server_main done." << endl;
+    {
+        std::lock_guard<std::mutex> lock(cout_mutex);
+        cout << "server_main " << sid << " done." << endl;
+    }
     return NULL;
 }
 
@@ -218,17 +224,18 @@ void log_client(int num) {
 int main() {
     zmq::context_t ctx;
 
-    chime_log_init(&ctx);
-    //chime_log_init(NULL);
+    // Try opening the socket with a given context.
+    chime_log_open_socket(&ctx);
 
     string port = "tcp://127.0.0.1:6666";
-    thread serverthread(std::bind(server_main, &ctx, port));
+    thread serverthread(std::bind(server_main, &ctx, port, 1));
     serverthread.detach();
     chime_log_add_server(port);
 
-    // string port2 = "tcp://127.0.0.1:6667";
-    // thread serverthread2(std::bind(server_main, &ctx, port2));
-    // chime_log_add_server(port2);
+    string port2 = "tcp://127.0.0.1:6667";
+    thread serverthread2(std::bind(server_main, &ctx, port2, 2));
+    serverthread2.detach();
+    chime_log_add_server(port2);
 
     usleep(1000000);
 
@@ -240,11 +247,15 @@ int main() {
 
     usleep(100000);
 
-    chime_log_quit();
+    chime_log_close_socket();
 
-    chime_log_init(NULL);
+    // Now re-open with a new context
+    chime_log_open_socket(NULL);
+
     chime_log_add_server(port);
+    chime_log_add_server(port2);
 
+    // (wait for connect)
     usleep(1000000);
 
     thread logger1(std::bind(log_client, 1));
@@ -258,6 +269,3 @@ int main() {
     cout << "main() finished" << endl;
     return 0;
 }
-
-
-
