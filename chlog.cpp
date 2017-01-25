@@ -58,7 +58,8 @@ public:
     chime_log_socket() :
         _ctx(NULL),
         _socket(NULL),
-        _mutex()
+        _mutex(),
+        _local(true)
     {}
 
     ~chime_log_socket() {
@@ -68,6 +69,11 @@ public:
             delete _ctx;
     }
 
+    void chime_log_local(bool loc) {
+        scoped_lock l(_mutex);
+        _local = loc;
+    }
+
     void open_socket(zmq::context_t* ctx) {
         scoped_lock l(_mutex);
         if (_socket)
@@ -75,6 +81,8 @@ public:
         if (!ctx)
             ctx = _ctx = new zmq::context_t();
         _socket = new zmq::socket_t(*ctx, ZMQ_PUB);
+
+        // Send buffer: ZMQ_SNDHWM: default 1000 messages
     }
 
     void close_socket() {
@@ -102,6 +110,8 @@ public:
         msg = header + " " + msg;
         {
             scoped_lock l(_mutex);
+            if (_local)
+                cout << msg << endl;
             if (!_socket)
                 return;
             _socket->send(static_cast<const void*>(msg.data()), msg.size());
@@ -114,6 +124,8 @@ protected:
 
     // Mutex used to protect the socket (and also _socket/_ctx state)
     std::mutex _mutex;
+
+    bool _local;
 };
 
 
@@ -236,6 +248,12 @@ int main() {
     thread serverthread2(std::bind(server_main, &ctx, port2, 2));
     serverthread2.detach();
     chime_log_add_server(port2);
+
+
+    // What if we connect to a server that doesn't exist?
+    string port3 = "tcp://127.0.0.1:6668";
+    chime_log_add_server(port3);
+
 
     usleep(1000000);
 
