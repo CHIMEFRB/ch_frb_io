@@ -1,4 +1,12 @@
+#ifndef _CH_FRB_LOG_HPP
+#define _CH_FRB_LOG_HPP
+
 #include <ostream>
+
+namespace ch_frb_io {
+#if 0
+}; // pacify emacs c-mode
+#endif
 
 enum log_level {
     log_level_debug = 1,
@@ -7,8 +15,34 @@ enum log_level {
     log_level_err = 4,
 };
 
+
+class chime_log_stream : public std::ostream {
+    typedef std::function<void(std::string)> callback_func;
+public:
+    chime_log_stream(callback_func cb)
+        : std::ostream(&buffer),
+          callback(cb)
+    {}
+
+    /*
+     virtual ~chime_log_stream() {
+     cout << "~chime_log_stream() -> " << buffer.str() << endl;
+     }
+     */
+    void done() {
+        std::cout << "chime_log_stream.done() -> " << buffer.str() << std::endl;
+    }
+
+protected:
+    callback_func callback;
+    std::stringbuf buffer;
+};
+
+
+
+
 // Not meant to be called directly; called by preprocessor macro expansion
-std::ostream& chime_log(enum log_level lev, const char* file, int line, const char* function);
+chime_log_stream& chime_log(enum log_level lev, const char* file, int line, const char* function);
 
 // Not meant to be called directly; called by preprocessor macro expansion
 void
@@ -22,7 +56,11 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 //  chlog("Hello world: " << 1 << ", " << 2 << ", " << 3);
 //
 #define chlog(...) \
-    do { chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__) << __VA_ARGS__ << endl;} while(0)
+    do { \
+        chime_log_stream& ll = chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
+        ll << __VA_ARGS__ << endl; \
+        ll.done(); \
+    } while(0)
 
 
 // Like chlog, but takes a printf-style format string and arguments.
@@ -62,3 +100,6 @@ void chime_log_remove_server(std::string port);
 // Cleans up the distributed logging system.
 void chime_log_quit();
 
+}
+
+#endif
