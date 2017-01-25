@@ -46,6 +46,10 @@ before_install:
   - export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${ZMQ_LIB_DIR}
   - export PKG_CONFIG_DIR=${PKG_CONFIG_DIR}:${ZMQ_LIB_DIR}/pkgconfig
 
+  - cd
+  - wget https://raw.githubusercontent.com/zeromq/cppzmq/master/zmq.hpp
+  - cp zmq.hpp $ZMQ_INC_DIR
+
 script:
   - pwd
   - cd $BUILD_DIR
