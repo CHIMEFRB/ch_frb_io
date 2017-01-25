@@ -8,6 +8,11 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
+// printf into a string...
+std::string 
+__attribute__ ((format(printf,1,2)))
+stringprintf(const char* format, ...);
+
 enum log_level {
     log_level_debug = 1,
     log_level_info = 2,

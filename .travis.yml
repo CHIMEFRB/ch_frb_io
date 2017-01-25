@@ -44,6 +44,7 @@ script:
   - make install
   - ./test-intensity-hdf5-file yes
   - ./test-assembled-chunk
+  - ./test-log
   # Some tests are too slow to run with -O0...
   # - make clean
   # - make COVERAGE=yes
