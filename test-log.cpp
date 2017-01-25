@@ -2,6 +2,7 @@
 #include <thread>
 #include <sstream>
 #include <iostream>
+#include <mutex>
 #include <unistd.h>
 #include <zmq.hpp>
 #include "chlog.hpp"
@@ -55,19 +56,6 @@ void log_client(int num) {
     }
 }
 
-/*
-class mutex_stream : public std::ostream {
-public:
-    mutex_stream() {}
-    template<typename T>
-    basic_ostream& operator<<( T value ) {
-        std::lock_guard<std::mutex> lock(cout_mutex);
-        cout << value;
-        return *this;
-    }
-};
- */
-
 int main() {
     zmq::context_t ctx;
 
@@ -78,8 +66,6 @@ int main() {
 
     chime_log_local(false);
 
-    //mutex_stream ms;
-    //chime_log_server ser(ms, NULL, "127.0.0.1");
     chime_log_server ser(cout, NULL, "127.0.0.1");
     cout << "Server addr: " << ser.get_address() << endl;
     ser.start();
