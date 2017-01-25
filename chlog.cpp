@@ -20,6 +20,14 @@ namespace ch_frb_io {
 #endif
 
 
+//////////////////////
+
+std::mutex cout_mutex;
+
+//////////////////////
+
+
+
 static string 
 vstringprintf(const char* format, va_list lst) {
     char temps[256];
@@ -49,51 +57,6 @@ stringprintf(const char* format, ...) {
     return s;
 }
 
-/*
-// The chlog function internally creates a string-buffered ostream
-// object that sends a log message when flushed (eg, with an endl).
-// inspired by http://stackoverflow.com/questions/2212776/overload-handling-of-stdendl
-class chime_log_stream : public std::ostream {
-    typedef std::function<void(std::string)> callback_func;
-public:
-    chime_log_stream(callback_func cb)
-        : std::ostream(&buffer),
-          buffer(cb)
-    {}
-
-    void done() {
-        cout << "stream done" << endl;
-    }
-
-protected:
-    // A little string buffer subclass that intercepts the sync()
-    // call, sending the buffered string to chime_send_log().
-    class chstringbuf : public std::stringbuf {
-    public:
-        chstringbuf(callback_func cb) :
-            callback(cb) {}
-        virtual int sync() {
-            callback(str());
-            // this resets the string buffer so it can accept the next
-            // line.
-            str("");
-            return 0;
-        }
-    protected:
-        callback_func callback;
-    };
-    chstringbuf buffer;
-};
- */
-
-
-
-
-// forward decl
-static void chime_send_log(const string &s);
-
-
-
 
 // Holds a ZeroMQ socket that is used to talk to multiple logging
 // servers.
@@ -105,7 +68,9 @@ public:
         _ctx(NULL),
         _socket(NULL),
         _mutex(),
-        _stream(std::bind(&chime_log_socket::flush_string, this, std::placeholders::_1))
+        _stream(std::bind(&chime_log_socket::send,
+                          this, std::placeholders::_1),
+                std::bind(&chime_log_socket::unlock, this))
     {}
 
     ~chime_log_socket() {
@@ -113,10 +78,6 @@ public:
             delete _socket;
         if (_ctx)
             delete _ctx;
-    }
-
-    void flush_string(std::string s) {
-        cout << "flush_string " << s << endl;
     }
 
     void open_socket(zmq::context_t* ctx) {
@@ -143,25 +104,37 @@ public:
     }
 
     void send(std::string msg) {
-        if (!_socket)
-            return;
+        if (_socket) {
+            //cout << "send(" << msg << ")" << endl;
+            //scoped_lock l(_mutex);
+            _socket->send(static_cast<const void*>(msg.data()), msg.size());
+        }
         {
-            scoped_lock l(_mutex);
-            size_t n = _socket->send(static_cast<const void*>(msg.data()), msg.size());
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            std::thread::id tid = std::this_thread::get_id();
+            cout << "send(): pid/thread " << getpid() << "/" << tid << endl; //msg << endl;
         }
     }
 
-    /*
-     chime_log_stream& get_stream(std::string header) {
-     return _stream << header;
-     //return chime_log_stream(std::bind(&chime_log_socket::flush_string, this, std::placeholders::_1)) << header;
-     }
-     */
+    void unlock() {
+        _mutex.unlock();
+        {
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            std::thread::id tid = std::this_thread::get_id();
+            cout << "unlock(): pid/thread " << getpid() << "/" << tid << endl;
+        }
+    }
+
+
     chime_log_stream& get_stream() {
+        {
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            std::thread::id tid = std::this_thread::get_id();
+            cout << "get_stream: pid/thread " << getpid() << "/" << tid << endl;
+        }
+        _mutex.lock();
         return _stream;
-     }
-
-
+    }
 
 protected:
     zmq::context_t* _ctx;
@@ -175,30 +148,13 @@ protected:
 
 // GLOBALS for logging.
 static chime_log_socket logsock;
-//static chime_log_stream logstream;
-
-static void chime_send_log(const string &s) {
-    logsock.send(s);
-}
 
 void chime_log_quit() {
     logsock.close_socket();
 }
 
-// an atexit() function.
-/*
-static void delete_logctx() {
-    chime_log_quit();
-    //cout << "delete_logctx()" << endl;
-    if (logctx)
-        delete logctx;
-    logctx = NULL;
-}
- */
-
 void chime_log_init(zmq::context_t* ctx) {
     logsock.open_socket(ctx);
-    //std::atexit(delete_logctx);
 }
 
 void chime_log_add_server(string port) {
@@ -230,7 +186,7 @@ chime_log_stream& chime_log(log_level lev, const char* file, int line, const cha
                          (lev == log_level_warn ? "WARN" :
                           (lev == log_level_err ? "ERROR" : "XXX"))));
     string header = stringprintf("%s %s:%i [%s] %s ", levstring.c_str(), file, line, function, datestring.c_str());
-    //return logsock.get_stream(header);
+
     chime_log_stream& s = logsock.get_stream();
     s << header;
     return s;
@@ -243,7 +199,9 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
     va_start(lst, pattern);
     string s = vstringprintf(pattern, lst);
     va_end(lst);
-    chime_log(lev, file, line, function) << s << endl;
+    chime_log_stream& ll = chime_log(lev, file, line, function);
+    ll << s;
+    ll.done();
 }
 
 
@@ -255,7 +213,7 @@ static string msg_string(zmq::message_t &msg) {
     return string(static_cast<const char*>(msg.data()), msg.size());
 }
 
-std::mutex cout_mutex;
+//std::mutex cout_mutex;
 
 static void* server_main(zmq::context_t* ctx, string port) {
     zmq::socket_t sock(*ctx, ZMQ_SUB);
@@ -285,8 +243,8 @@ static void* server_main(zmq::context_t* ctx, string port) {
 }
 
 void log_client(int num) {
-    for (int i=0; i<100; i++) {
-        chlog("Hello I am client " << i << ", message " << i);
+    for (int i=0; i<10; i++) {
+        chlog("Hello I am client " << num << ", message " << i);
     }
 }
 
@@ -320,12 +278,15 @@ int main() {
     chime_log_init(NULL);
     chime_log_add_server(port);
 
+    usleep(1000000);
+
     thread logger1(std::bind(log_client, 1));
     thread logger2(std::bind(log_client, 2));
 
     logger1.join();
     logger2.join();
 
+    usleep(3000000);
 
     cout << "main() finished" << endl;
     return 0;

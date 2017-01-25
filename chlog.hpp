@@ -15,31 +15,28 @@ enum log_level {
     log_level_err = 4,
 };
 
-
-class chime_log_stream : public std::ostream {
-    typedef std::function<void(std::string)> callback_func;
+// Implementation detail... a string-stream class with a done() method
+// that calls a callback.
+class chime_log_stream : public std::ostringstream {
+    typedef std::function<void(std::string)> callback_func1;
+    typedef std::function<void(void)> callback_func2;
 public:
-    chime_log_stream(callback_func cb)
-        : std::ostream(&buffer),
-          callback(cb)
+    chime_log_stream(callback_func1 cb1, callback_func2 cb2)
+        : std::ostringstream(),
+          callback1(cb1),
+          callback2(cb2)
     {}
-
-    /*
-     virtual ~chime_log_stream() {
-     cout << "~chime_log_stream() -> " << buffer.str() << endl;
-     }
-     */
     void done() {
-        std::cout << "chime_log_stream.done() -> " << buffer.str() << std::endl;
+        //std::cout << "chime_log_stream.done() -> " << str() << std::endl;
+        //flush();
+        callback1(str());
+        str("");
+        callback2();
     }
-
 protected:
-    callback_func callback;
-    std::stringbuf buffer;
+    callback_func1 callback1;
+    callback_func2 callback2;
 };
-
-
-
 
 // Not meant to be called directly; called by preprocessor macro expansion
 chime_log_stream& chime_log(enum log_level lev, const char* file, int line, const char* function);
@@ -49,7 +46,6 @@ void
 __attribute__ ((format(printf,5,6)))
 chime_logf(enum log_level lev, const char* file, int line, const char* function, const char* pattern, ...);
 
-
 // This is the main logging method to use in CHIME/FRB code for
 // distributed logging:
 //
@@ -58,7 +54,7 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 #define chlog(...) \
     do { \
         chime_log_stream& ll = chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
-        ll << __VA_ARGS__ << endl; \
+        ll << __VA_ARGS__; \
         ll.done(); \
     } while(0)
 
