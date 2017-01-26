@@ -9,10 +9,10 @@ INCDIR=$(HOME)/include
 # Directory where executables will be installed
 BINDIR=$(HOME)/bin
 
-MSGPACK_INC_DIR ?= $(HOME)/include
+MSGPACK_INC_DIR ?= /usr/include
 
-ZMQ_INC_DIR ?= $(HOME)/include
-ZMQ_LIB_DIR ?= $(HOME)/lib
+ZMQ_INC_DIR ?= /usr/include
+ZMQ_LIB_DIR ?= /usr/lib64
 
 CXX ?= g++
 
