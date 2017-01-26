@@ -34,6 +34,22 @@ before_install:
   - pwd
   - export MSGPACK_INC_DIR=$(pwd)/msgpack-2.1.0/include
 
+  - cd
+  - cd libzmq
+  - if [ ! -d "zeromq-4.2.1" ]; then (wget https://github.com/zeromq/libzmq/releases/download/v4.2.1/zeromq-4.2.1.tar.gz && tar xzf zeromq-4.2.1.tar.gz); fi
+  - cd zeromq-4.2.1
+  - ./configure --prefix=${HOME}/zmq --disable-perf --disable-curve -disable-curve-keygen --without-docs
+  - make
+  - make install
+  - export ZMQ_INC_DIR=~/zmq/include
+  - export ZMQ_LIB_DIR=~/zmq/lib
+  - export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${ZMQ_LIB_DIR}
+  - export PKG_CONFIG_DIR=${PKG_CONFIG_DIR}:${ZMQ_LIB_DIR}/pkgconfig
+
+  - cd
+  - wget https://raw.githubusercontent.com/zeromq/cppzmq/master/zmq.hpp
+  - cp zmq.hpp $ZMQ_INC_DIR
+
 script:
   - pwd
   - cd $BUILD_DIR
@@ -44,6 +60,7 @@ script:
   - make install
   - ./test-intensity-hdf5-file yes
   - ./test-assembled-chunk
+  - ./test-log
   # Some tests are too slow to run with -O0...
   # - make clean
   # - make COVERAGE=yes
@@ -63,3 +80,6 @@ addons:
 # msgpack in 'trusty' is v0.5.4 -- too early for us.
 #      - libmsgpack-dev
 
+cache:
+  directories:
+  - $HOME/libzmq
