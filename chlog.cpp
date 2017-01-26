@@ -80,14 +80,17 @@ public:
     }
 
     void set_name(std::string name) {
+        scoped_lock l(_mutex);
         _name = name;
     }
 
     void set_thread_name(std::string name) {
+        scoped_lock l(_mutex);
         _threadnames[std::this_thread::get_id()] = name;
     }
 
     std::string get_thread_name() {
+        scoped_lock l(_mutex);
         std::thread::id tid = std::this_thread::get_id();
         auto it = _threadnames.find(tid);
         if (it == _threadnames.end()) {
