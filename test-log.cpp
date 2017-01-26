@@ -90,7 +90,7 @@ int main() {
     string port3 = "tcp://127.0.0.1:6668";
     chime_log_add_server(port3);
 
-    usleep(1000000);
+    usleep(100000);
 
     chlog("Hello world");
     chlog("Hello " << 1 << ", " << 2 << ", 3");
@@ -108,10 +108,9 @@ int main() {
 
     chime_log_add_server(port);
     chime_log_add_server(port2);
-     */
-
     // (wait for connect)
-    usleep(1000000);
+    usleep(100000);
+     */
 
     thread logger1(std::bind(log_client, 1));
     thread logger2(std::bind(log_client, 2));
@@ -119,9 +118,13 @@ int main() {
     logger1.join();
     logger2.join();
 
-    usleep(1000000);
+    usleep(100000);
 
     chime_log_close_socket();
+
+    chime_log_local(true);
+
+    chassert(7 < 4);
 
     cout << "main() finished" << endl;
     return 0;

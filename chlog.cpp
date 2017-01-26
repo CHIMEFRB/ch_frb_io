@@ -89,18 +89,6 @@ public:
         _threadnames[std::this_thread::get_id()] = name;
     }
 
-    std::string get_thread_name() {
-        scoped_lock l(_mutex);
-        std::thread::id tid = std::this_thread::get_id();
-        auto it = _threadnames.find(tid);
-        if (it == _threadnames.end()) {
-            std::ostringstream ss;
-            ss << "Thread-" << tid;
-            return ss.str();
-        }
-        return it->second;
-    }
-
     void open_socket(zmq::context_t* ctx) {
         scoped_lock l(_mutex);
         if (_socket)
@@ -139,22 +127,33 @@ public:
         _socket->disconnect(port);
     }
 
-    void send(std::string header, std::string msg) {
-        msg = header + " " + msg;
-        {
-            scoped_lock l(_mutex);
-
-            string tname = get_thread_name();
-            if (_local)
-                cout << tname << " " << msg << endl;
-            if (!_socket)
-                return;
-            msg = _name + " " + tname + " " + msg;
-            _socket->send(static_cast<const void*>(msg.data()), msg.size());
+    void send(std::string header, std::string msg, bool do_assert) {
+        scoped_lock l(_mutex);
+        string tname = get_thread_name();
+        if (_local) {
+            if (do_assert)
+                // Assume we want to know where it was...
+                cout << header << endl;
+            cout << "[" << tname << "] " << msg << endl;
         }
+        if (!_socket)
+            return;
+        msg = _name + " " + tname + " " + header + " " + msg;
+        _socket->send(static_cast<const void*>(msg.data()), msg.size());
     }
 
 protected:
+    std::string get_thread_name() {
+        std::thread::id tid = std::this_thread::get_id();
+        auto it = _threadnames.find(tid);
+        if (it == _threadnames.end()) {
+            std::ostringstream ss;
+            ss << "Thread-" << tid;
+            return ss.str();
+        }
+        return it->second;
+    }
+
     zmq::context_t* _ctx;
     zmq::socket_t* _socket;
 
@@ -204,7 +203,7 @@ void chime_log_remove_server(string port) {
 }
 
 void chime_log(log_level lev, const char* file, int line, const char* function,
-               string msg) {
+               string msg, bool do_assert) {
     struct timeval tv;
     string datestring;
     if (gettimeofday(&tv, NULL)) {
@@ -225,9 +224,9 @@ void chime_log(log_level lev, const char* file, int line, const char* function,
                          (lev == log_level_warn ? "WARN" :
                           (lev == log_level_err ? "ERROR" : "XXX"))));
     string header = (levstring +
-                     stringprintf(" %s:%i [%s]", file, line, function) +
+                     stringprintf(" %s:%i [%s] ", file, line, function) +
                      datestring);
-    logsock.send(header, msg);
+    logsock.send(header, msg, do_assert);
 }
 
 void

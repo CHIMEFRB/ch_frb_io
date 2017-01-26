@@ -23,7 +23,7 @@ enum log_level {
 };
 
 // Not meant to be called directly; called by preprocessor macro expansion
-void chime_log(enum log_level lev, const char* file, int line, const char* function, std::string logmsg);
+void chime_log(enum log_level lev, const char* file, int line, const char* function, std::string logmsg, bool do_assert=false);
 
 // Not meant to be called directly; called by preprocessor macro expansion
 void
@@ -51,7 +51,18 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
         chime_logf(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, pat, __VA_ARGS__); \
     } while(0)
 
+// If we wanted to compile-out log messages below a certain log level,
+// we could do:
 #define chdebug(...) {}
+
+// Assert that THING is true; log THING and bail out.
+// FIXME -- bail out w/ assert() rather than exit(-1) ??
+#define chassert(THING)                                                 \
+    do { if (!(THING)) {                                                \
+    chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, "Assertion failed: " #THING, true); \
+    usleep(1000000);                                                    \
+    exit(-1);                                                           \
+    } } while(0)
 
 /*
  Initializes the CHIME/FRB distributed logging socket for this node.
