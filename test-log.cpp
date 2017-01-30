@@ -66,10 +66,10 @@ int main() {
 
     chime_log_local(false);
 
-    chime_log_server ser(cout, NULL, "127.0.0.1");
-    cout << "Server addr: " << ser.get_address() << endl;
-    ser.start();
-    chime_log_add_server(ser.get_address());
+    chime_log_server* ser = new chime_log_server(cout, NULL, "127.0.0.1");
+    cout << "Server addr: " << ser->get_address() << endl;
+    ser->start();
+    chime_log_add_server(ser->get_address());
 
     //chime_log_server ser2;
     //cout << "Server addr: " << ser2.get_address() << endl;
@@ -129,6 +129,7 @@ int main() {
     // Don't assert(false) when you want your unit tests to succeed!
     //chassert(7 < 4);
 
-    cout << "main() finished" << endl;
+    delete ser;
+
     return 0;
 }
