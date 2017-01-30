@@ -245,7 +245,8 @@ chime_log_server::chime_log_server(std::ostream& out,
                                    zmq::context_t* ctx,
                                    const std::string &hostname,
                                    int port) :
-    _out(out)
+    _out(out),
+    _quit(false)
 {
     if (!ctx)
         ctx = _ctx = new zmq::context_t();
@@ -319,9 +320,32 @@ static string msg_string(zmq::message_t &msg) {
 }
 
 void chime_log_server::run() {
+
+    void* p_sock = *_socket;
+    zmq_pollitem_t pollitems[] = {
+        { p_sock, 0, ZMQ_POLLIN, 0 },
+    };
+
     for (;;) {
         zmq::message_t msg;
         try {
+
+            int r = zmq::poll(pollitems, 1, 1000);
+            if (r == -1) {
+                cout << "log server: zmq::poll error: " << strerror(errno) << endl;
+                break;
+            }
+
+            if (_quit) {
+                cout << "log server: _quit!" << endl;
+                break;
+            }
+
+            if (!pollitems[0].revents & ZMQ_POLLIN) {
+                cout << "log server: no input ready" << endl;
+                continue;
+            }
+
             if (!_socket->recv(&msg)) {
                 _out << "log server: failed to receive message" << endl;
                 break;
@@ -332,6 +356,7 @@ void chime_log_server::run() {
         }
         _out << msg_string(msg) << endl;
     }
+    cout << "log server: exiting" << endl;
 }
 
 // Starts a new thread to run this server.
@@ -339,6 +364,10 @@ std::thread chime_log_server::start() {
     thread t(std::bind(&chime_log_server::run, this));
     t.detach();
     return t;
+}
+
+void chime_log_server::stop() {
+    _quit = true;
 }
 
 

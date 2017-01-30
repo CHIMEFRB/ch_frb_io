@@ -121,11 +121,15 @@ public:
     // Starts a new thread to run this server.
     std::thread start();
 
+    // Signals the server thread to stop.
+    void stop();
+
 protected:
     std::ostream& _out;
     zmq::socket_t* _socket;
     std::string _address;
     zmq::context_t* _ctx;
+    bool _quit;
 };
 
 

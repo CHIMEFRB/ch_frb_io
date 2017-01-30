@@ -130,6 +130,9 @@ int main() {
     // Don't assert(false) when you want your unit tests to succeed!
     //chassert(7 < 4);
 
+    ser->stop();
+    usleep(1100000);
+
     delete ser;
     usleep(100000);
 
