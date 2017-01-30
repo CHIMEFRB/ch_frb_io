@@ -57,12 +57,12 @@ void log_client(int num) {
 }
 
 int main() {
-    zmq::context_t ctx;
+  zmq::context_t* ctx = new zmq::context_t();
 
     // Try opening the socket with a given context.
     chime_log_set_name("myputer");
     chime_log_set_thread_name("Main");
-    chime_log_open_socket(&ctx);
+    chime_log_open_socket(ctx);
 
     chime_log_local(false);
 
@@ -121,6 +121,7 @@ int main() {
     usleep(100000);
 
     chime_log_close_socket();
+    usleep(100000);
 
     chime_log_local(true);
 
@@ -129,6 +130,8 @@ int main() {
     // Don't assert(false) when you want your unit tests to succeed!
     //chassert(7 < 4);
 
-    cout << "main() finished" << endl;
+    delete ctx;
+    usleep(100000);
+
     return 0;
 }
