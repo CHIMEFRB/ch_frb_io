@@ -321,7 +321,7 @@ static string msg_string(zmq::message_t &msg) {
 
 void chime_log_server::run() {
 
-    void* p_sock = *_socket;
+    void* p_sock = _socket->operator void*();
     zmq_pollitem_t pollitems[] = {
         { p_sock, 0, ZMQ_POLLIN, 0 },
     };
