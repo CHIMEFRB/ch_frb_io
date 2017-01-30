@@ -187,8 +187,14 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 }
 
 void assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
+    uint64_t ich = chunk->ichunk;
     unique_ptr<assembled_chunk> uch(chunk);
     _put_assembled_chunk(uch, NULL);
+    // Danger: monkey with the active_chunk0, active_chunk1 variables,
+    // which are not lock-protected and only supposed to be accessed
+    // by the assembler thread.
+    active_chunk0 = this->_make_assembled_chunk(ich + 1);
+    active_chunk1 = this->_make_assembled_chunk(ich + 2);
 }
 
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)
