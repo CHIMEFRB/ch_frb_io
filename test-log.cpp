@@ -19,7 +19,7 @@ static string msg_string(zmq::message_t &msg) {
 static void* server_main(zmq::context_t* ctx, string port, int sid) {
     zmq::socket_t sock(*ctx, ZMQ_SUB);
     sock.setsockopt(ZMQ_SUBSCRIBE, "", 0);
-    sock.bind(port);
+    sock.bind(port.c_str());
     {
         std::lock_guard<std::mutex> lock(cout_mutex);
         cout << "server_main " << sid << ": bound " << port << endl;
