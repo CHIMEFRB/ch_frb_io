@@ -124,7 +124,10 @@ int main() {
 
     chime_log_local(true);
 
-    chassert(7 < 4);
+    chassert(4 < 7);
+
+    // Don't assert(false) when you want your unit tests to succeed!
+    //chassert(7 < 4);
 
     cout << "main() finished" << endl;
     return 0;
