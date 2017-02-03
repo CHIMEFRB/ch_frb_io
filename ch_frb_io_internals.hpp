@@ -255,6 +255,9 @@ public:
     // Debugging: inject the given chunk
     void inject_assembled_chunk(assembled_chunk* chunk);
 
+    // Debugging: print state
+    void print_state();
+
     // Called by processing threads, via intensity_network_stream::get_assembled_chunk().
     // Returns the next assembled_chunk from the ring buffer, blocking if necessary to wait for data.
     // If the ring buffer is empty and end_stream() has been called, it returns an empty pointer

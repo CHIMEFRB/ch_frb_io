@@ -55,6 +55,11 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     delete ringbuf;
 }
 
+void assembled_chunk_ringbuf::print_state() {
+    cout << "Beam " << beam_id << endl;
+    ringbuf->print();
+}
+
 vector<shared_ptr<assembled_chunk> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
                                               uint64_t max_fpga_counts)

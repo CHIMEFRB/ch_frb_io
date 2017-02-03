@@ -226,6 +226,14 @@ void intensity_network_stream::stream_to_files(const std::string& filename_patte
             (*it)->stream_filename_pattern = filename_pattern;
 }
 
+void intensity_network_stream::print_state() {
+    cout << "Intensity network stream state:" << endl;
+    for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
+        cout << "--Assembler:" << endl;
+        (*it)->print_state();
+    }
+}
+
 // Must not hold state_lock when calling this function!
 void intensity_network_stream::_wait_for_assemblers_initialized(bool prelocked) {
     // wait for assemblers to be initialized...

@@ -355,6 +355,9 @@ public:
     // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
     void stream_to_files(const std::string& filename_pattern);
 
+    // For debugging: print state.
+    void print_state();
+
     ~intensity_network_stream();
 
 protected:
