@@ -172,19 +172,29 @@ void L1Ringbuf::print() {
 }
 
 void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
-                         vector<shared_ptr<assembled_chunk> >& chunks) {
+                         vector<pair<shared_ptr<assembled_chunk>, uint64_t> >& chunks) {
+    uint64_t where;
     // Check chunks queued for downstream processing
+    where = L1RB_DOWNSTREAM;
     for (auto it = _q.begin(); it != _q.end(); it++)
         if (assembled_chunk_overlaps_range(*it, min_fpga_counts, max_fpga_counts))
-            chunks.push_back(*it);
+            chunks.push_back(make_pair(*it, where));
 
     // Check ring buffers
     for (size_t i=0; i<_nbins; i++) {
-        _rb[i]->snapshot(chunks, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
+        vector<shared_ptr<assembled_chunk> > ch;
+        // uhhh, nice
+        where = ((i == 0) ? L1RB_LEVEL1 : ((i == 1) ? L1RB_LEVEL2 : ((i == 2) ? L1RB_LEVEL3 : L1RB_LEVEL4)));
+        _rb[i]->snapshot(ch, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
+        for (auto it = ch.begin(); it != ch.end(); it++)
+            chunks.push_back(make_pair(*it, where));
+
         // Check the chunks that have been "dropped" but are waiting to be binned down.
         if ((i < _nbins-1) && (_dropped[i]) &&
-            assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts))
-            chunks.push_back(_dropped[i]);
+            assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts)) {
+            where = ((i == 0) ? L1RB_WAIT1 : ((i == 1) ? L1RB_WAIT2 : L1RB_WAIT3));
+            chunks.push_back(make_pair(_dropped[i], where));
+        }
     }
 }
 

@@ -367,12 +367,12 @@ intensity_network_stream::get_statistics() {
     return R;
 }
 
-vector< vector< shared_ptr<assembled_chunk> > >
+vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
 intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
                                                 uint64_t min_fpga_counts,
                                                 uint64_t max_fpga_counts)
 {
-    vector< vector< shared_ptr<assembled_chunk> > > R;
+    vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > > R;
 
     pthread_mutex_lock(&this->state_lock);
     bool assemblers_init = this->assemblers_initialized;
@@ -385,7 +385,7 @@ intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
 
     for (size_t ib=0; ib<beams.size(); ib++) {
         uint64_t beam = beams[ib];
-        vector<shared_ptr<assembled_chunk> > chunks;
+        vector<pair<shared_ptr<assembled_chunk>, uint64_t > > chunks;
         // Which of my assemblers (if any) is handling the requested beam?
         for (int i=0; i<nbeams; i++) {
 	    if (this->ini_params.beam_ids[i] != (int)beam)

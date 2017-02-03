@@ -264,7 +264,7 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
 
-    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+    std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
     // Returns stats about the ring buffer.
     //  *ringbuf_fpga_next* is the FPGA-counts of the next chunk that will be delivered to get_assembled_chunk().

@@ -60,11 +60,11 @@ void assembled_chunk_ringbuf::print_state() {
     ringbuf->print();
 }
 
-vector<shared_ptr<assembled_chunk> >
+vector<pair<shared_ptr<assembled_chunk>, uint64_t> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
                                               uint64_t max_fpga_counts)
 {
-    vector<shared_ptr<assembled_chunk> > chunks;
+    vector<pair<shared_ptr<assembled_chunk>, uint64_t> > chunks;
     pthread_mutex_lock(&this->lock);
     ringbuf->retrieve(min_fpga_counts, max_fpga_counts, chunks);
     pthread_mutex_unlock(&this->lock);

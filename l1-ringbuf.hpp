@@ -34,6 +34,17 @@ protected:
     virtual void dropping(std::shared_ptr<ch_frb_io::assembled_chunk> t);
 };
 
+enum l1_ringbuf_level {
+    L1RB_DOWNSTREAM = 1,
+    L1RB_LEVEL1 = 2,
+    L1RB_LEVEL2 = 4,
+    L1RB_LEVEL3 = 8,
+    L1RB_LEVEL4 = 0x10,
+    L1RB_WAIT1 = 0x20,
+    L1RB_WAIT2 = 0x40,
+    L1RB_WAIT3 = 0x80
+};
+
 class L1Ringbuf {
     friend class AssembledChunkRingbuf;
 
@@ -92,7 +103,7 @@ public:
      applied; likewise for max_fpga_counts.
      */
     void retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
-                  std::vector<std::shared_ptr<ch_frb_io::assembled_chunk> >&chunks);
+                  std::vector<std::pair<std::shared_ptr<ch_frb_io::assembled_chunk>, uint64_t> > &chunks);
 
 public:
     uint64_t _beam_id;
