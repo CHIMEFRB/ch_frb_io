@@ -153,16 +153,16 @@ void L1Ringbuf::print() {
     for (auto it = _q.begin(); it != _q.end(); it++) {
         cout << (*it)->ichunk << " ";
     }
-    cout << "];" << endl;
+    cout << "]" << endl;
     for (size_t i=0; i<_nbins; i++) {
         vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
-        cout << "  binning " << i << ": [ ";
+        cout << "  binning " << i << ":  [ ";
         for (auto it = v.begin(); it != v.end(); it++) {
             cout << (*it)->ichunk << " ";
         }
         cout << "]" << endl;
         if (i < _nbins-1) {
-            cout << "  dropped " << i << ": ";
+            cout << "  dropped " << i << ":  ";
             if (_dropped[i])
                 cout << _dropped[i]->ichunk << endl;
             else

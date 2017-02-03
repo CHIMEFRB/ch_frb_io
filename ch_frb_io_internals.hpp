@@ -253,7 +253,7 @@ public:
     void end_stream(int64_t *event_counts);
 
     // Debugging: inject the given chunk
-    void inject_assembled_chunk(assembled_chunk* chunk);
+    bool inject_assembled_chunk(assembled_chunk* chunk);
 
     // Debugging: print state
     void print_state();
@@ -293,7 +293,7 @@ protected:
 
     // Helper function: adds assembled chunk to the ring buffer
     // Post-condition: chunk has been reset().
-    void _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
+    bool _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
     // Helper function: allocates new assembled chunk
     std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);

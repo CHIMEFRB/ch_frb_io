@@ -348,9 +348,10 @@ public:
     std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> &beams,
                                                                                          uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    // For debugging/testing purposes: pretend that the given assembled_chunk
-    // has just arrived.
-    void inject_assembled_chunk(assembled_chunk* chunk);
+    // For debugging/testing purposes: pretend that the given
+    // assembled_chunk has just arrived.  Returns true if there was
+    // room in the ring buffer for the new chunk.
+    bool inject_assembled_chunk(assembled_chunk* chunk);
 
     // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
     void stream_to_files(const std::string& filename_pattern);

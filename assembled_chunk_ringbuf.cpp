@@ -144,7 +144,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     }
 }
 
-void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
+bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
@@ -176,7 +176,7 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	pthread_mutex_unlock(&this->lock);
         if (event_counts)
             event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
-	return;
+	return true;
     }
 
     // If we get here, the ring buffer was full.
@@ -189,17 +189,19 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
     if (ini_params.throw_exception_on_buffer_drop)
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
+    return false;
 }
 
-void assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
+bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
     uint64_t ich = chunk->ichunk;
     unique_ptr<assembled_chunk> uch(chunk);
-    _put_assembled_chunk(uch, NULL);
+    bool worked = _put_assembled_chunk(uch, NULL);
     // Danger: monkey with the active_chunk0, active_chunk1 variables,
     // which are not lock-protected and only supposed to be accessed
     // by the assembler thread.
     active_chunk0 = this->_make_assembled_chunk(ich + 1);
     active_chunk1 = this->_make_assembled_chunk(ich + 2);
+    return worked;
 }
 
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)

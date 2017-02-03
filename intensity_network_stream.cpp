@@ -836,7 +836,7 @@ void intensity_network_stream::_assembler_thread_body()
     }
 }
 
-void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
+bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
 
     pthread_mutex_lock(&this->state_lock);
     if (!first_packet_received) {
@@ -858,10 +858,11 @@ void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
     const int *assembler_beam_ids = &ini_params.beam_ids[0];
     for (int i = 0; i < nassemblers; i++) {
         if (assembler_beam_ids[i] == chunk->beam_id) {
-            assemblers[i]->inject_assembled_chunk(chunk);
-            break;
+            return assemblers[i]->inject_assembled_chunk(chunk);
         }
     }
+    cout << "inject_assembled_chunk: no match for beam " << chunk->beam_id << endl;
+    return false;
 }
 
 // Called whenever the assembler thread exits (on all exit paths)
