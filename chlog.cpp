@@ -79,23 +79,14 @@ public:
         _local = loc;
     }
 
-    void set_name(std::string name) {
+    void set_name(const std::string &name) {
+        scoped_lock l(_mutex);
         _name = name;
     }
 
-    void set_thread_name(std::string name) {
+    void set_thread_name(const std::string &name) {
+        scoped_lock l(_mutex);
         _threadnames[std::this_thread::get_id()] = name;
-    }
-
-    std::string get_thread_name() {
-        std::thread::id tid = std::this_thread::get_id();
-        auto it = _threadnames.find(tid);
-        if (it == _threadnames.end()) {
-            std::ostringstream ss;
-            ss << "Thread-" << tid;
-            return ss.str();
-        }
-        return it->second;
     }
 
     void open_socket(zmq::context_t* ctx) {
@@ -122,36 +113,47 @@ public:
         _socket = NULL;
     }
     
-    void add_server(std::string port) {
+    void add_server(const std::string &port) {
         scoped_lock l(_mutex);
         if (!_socket)
             throw runtime_error("chime_log_socket::add_server called but socket has not been initialized.");
-        _socket->connect(port);
+        _socket->connect(port.c_str());
     }
 
-    void remove_server(std::string port) {
+    void remove_server(const std::string &port) {
         scoped_lock l(_mutex);
         if (!_socket)
             throw runtime_error("chime_log_socket::remove_server called but socket has not been initialized.");
-        _socket->disconnect(port);
+        _socket->disconnect(port.c_str());
     }
 
-    void send(std::string header, std::string msg) {
-        msg = header + " " + msg;
-        {
-            scoped_lock l(_mutex);
-
-            string tname = get_thread_name();
-            if (_local)
-                cout << tname << " " << msg << endl;
-            if (!_socket)
-                return;
-            msg = _name + " " + tname + " " + msg;
-            _socket->send(static_cast<const void*>(msg.data()), msg.size());
+    void send(std::string header, std::string msg, bool do_assert) {
+        scoped_lock l(_mutex);
+        string tname = get_thread_name();
+        if (_local) {
+            if (do_assert)
+                // Assume we want to know where it was...
+                cout << header << endl;
+            cout << "[" << tname << "] " << msg << endl;
         }
+        if (!_socket)
+            return;
+        msg = _name + " " + tname + " " + header + " " + msg;
+        _socket->send(static_cast<const void*>(msg.data()), msg.size());
     }
 
 protected:
+    std::string get_thread_name() {
+        std::thread::id tid = std::this_thread::get_id();
+        auto it = _threadnames.find(tid);
+        if (it == _threadnames.end()) {
+            std::ostringstream ss;
+            ss << "Thread-" << tid;
+            return ss.str();
+        }
+        return it->second;
+    }
+
     zmq::context_t* _ctx;
     zmq::socket_t* _socket;
 
@@ -184,24 +186,24 @@ void chime_log_local(bool loc) {
     logsock.set_local(loc);
 }
 
-void chime_log_set_name(std::string name) {
+void chime_log_set_name(const std::string &name) {
     logsock.set_name(name);
 }
 
-void chime_log_set_thread_name(std::string name) {
+void chime_log_set_thread_name(const std::string &name) {
     logsock.set_thread_name(name);
 }
 
-void chime_log_add_server(string port) {
+void chime_log_add_server(const std::string &port) {
     logsock.add_server(port);
 }
 
-void chime_log_remove_server(string port) {
+void chime_log_remove_server(const std::string &port) {
     logsock.remove_server(port);
 }
 
 void chime_log(log_level lev, const char* file, int line, const char* function,
-               string msg) {
+               const std::string &msg, bool do_assert) {
     struct timeval tv;
     string datestring;
     if (gettimeofday(&tv, NULL)) {
@@ -222,9 +224,9 @@ void chime_log(log_level lev, const char* file, int line, const char* function,
                          (lev == log_level_warn ? "WARN" :
                           (lev == log_level_err ? "ERROR" : "XXX"))));
     string header = (levstring +
-                     stringprintf(" %s:%i [%s]", file, line, function) +
+                     stringprintf(" %s:%i [%s] ", file, line, function) +
                      datestring);
-    logsock.send(header, msg);
+    logsock.send(header, msg, do_assert);
 }
 
 void
@@ -239,12 +241,12 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
 
 
 
-
 chime_log_server::chime_log_server(std::ostream& out,
                                    zmq::context_t* ctx,
-                                   std::string hostname,
+                                   const std::string &hostname,
                                    int port) :
-    _out(out)
+    _out(out),
+    _quit(false)
 {
     if (!ctx)
         ctx = _ctx = new zmq::context_t();
@@ -257,7 +259,7 @@ chime_log_server::chime_log_server(std::ostream& out,
     else
         addr = addr + std::to_string(port);
 
-    _socket->bind(addr);
+    _socket->bind(addr.c_str());
 
     char addrx[256];
     size_t addrsz = 256;
@@ -318,9 +320,32 @@ static string msg_string(zmq::message_t &msg) {
 }
 
 void chime_log_server::run() {
+
+    void* p_sock = _socket->operator void*();
+    zmq_pollitem_t pollitems[] = {
+        { p_sock, 0, ZMQ_POLLIN, 0 },
+    };
+
     for (;;) {
         zmq::message_t msg;
         try {
+
+            int r = zmq::poll(pollitems, 1, 1000);
+            if (r == -1) {
+                cout << "log server: zmq::poll error: " << strerror(errno) << endl;
+                break;
+            }
+
+            if (_quit) {
+                cout << "log server: _quit!" << endl;
+                break;
+            }
+
+            if (!pollitems[0].revents & ZMQ_POLLIN) {
+                cout << "log server: no input ready" << endl;
+                continue;
+            }
+
             if (!_socket->recv(&msg)) {
                 _out << "log server: failed to receive message" << endl;
                 break;
@@ -331,6 +356,7 @@ void chime_log_server::run() {
         }
         _out << msg_string(msg) << endl;
     }
+    cout << "log server: exiting" << endl;
 }
 
 // Starts a new thread to run this server.
@@ -338,6 +364,10 @@ std::thread chime_log_server::start() {
     thread t(std::bind(&chime_log_server::run, this));
     t.detach();
     return t;
+}
+
+void chime_log_server::stop() {
+    _quit = true;
 }
 
 

@@ -30,7 +30,7 @@ OPTIMIZE ?= yes
 ifeq ($(OPTIMIZE), yes)
     OPT_FLAGS := -O3 -funroll-loops
 else
-    OPT_FLAGS := -O0
+    OPT_FLAGS := -O0 -g
 endif
 
 COVERAGE ?= no

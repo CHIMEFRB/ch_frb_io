@@ -19,7 +19,7 @@ static string msg_string(zmq::message_t &msg) {
 static void* server_main(zmq::context_t* ctx, string port, int sid) {
     zmq::socket_t sock(*ctx, ZMQ_SUB);
     sock.setsockopt(ZMQ_SUBSCRIBE, "", 0);
-    sock.bind(port);
+    sock.bind(port.c_str());
     {
         std::lock_guard<std::mutex> lock(cout_mutex);
         cout << "server_main " << sid << ": bound " << port << endl;
@@ -57,19 +57,19 @@ void log_client(int num) {
 }
 
 int main() {
-    zmq::context_t ctx;
+  zmq::context_t* ctx = new zmq::context_t();
 
     // Try opening the socket with a given context.
     chime_log_set_name("myputer");
     chime_log_set_thread_name("Main");
-    chime_log_open_socket(&ctx);
+    chime_log_open_socket(ctx);
 
     chime_log_local(false);
 
-    chime_log_server ser(cout, NULL, "127.0.0.1");
-    cout << "Server addr: " << ser.get_address() << endl;
-    ser.start();
-    chime_log_add_server(ser.get_address());
+    chime_log_server* ser = new chime_log_server(cout, NULL, "127.0.0.1");
+    cout << "Server addr: " << ser->get_address() << endl;
+    ser->start();
+    chime_log_add_server(ser->get_address());
 
     //chime_log_server ser2;
     //cout << "Server addr: " << ser2.get_address() << endl;
@@ -90,7 +90,7 @@ int main() {
     string port3 = "tcp://127.0.0.1:6668";
     chime_log_add_server(port3);
 
-    usleep(1000000);
+    usleep(100000);
 
     chlog("Hello world");
     chlog("Hello " << 1 << ", " << 2 << ", 3");
@@ -108,10 +108,9 @@ int main() {
 
     chime_log_add_server(port);
     chime_log_add_server(port2);
-     */
-
     // (wait for connect)
-    usleep(1000000);
+    usleep(100000);
+     */
 
     thread logger1(std::bind(log_client, 1));
     thread logger2(std::bind(log_client, 2));
@@ -119,10 +118,26 @@ int main() {
     logger1.join();
     logger2.join();
 
-    usleep(1000000);
+    usleep(100000);
 
     chime_log_close_socket();
+    usleep(100000);
 
-    cout << "main() finished" << endl;
+    chime_log_local(true);
+
+    chassert(4 < 7);
+
+    // Don't assert(false) when you want your unit tests to succeed!
+    //chassert(7 < 4);
+
+    ser->stop();
+    usleep(1100000);
+
+    delete ser;
+    usleep(100000);
+
+    delete ctx;
+    usleep(100000);
+
     return 0;
 }

@@ -535,7 +535,9 @@ void intensity_network_stream::_network_thread_body()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
 		continue;  // normal timeout
-	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
+	    if (errno == EINTR)
+                continue; // this can happen when running in gdb
+            throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
         /*{
