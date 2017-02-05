@@ -159,11 +159,8 @@ intensity_hdf5_file::intensity_hdf5_file(const string &filename_, bool noisy) :
 	wmax = max(wmax, (double)weights[i]);
     }
 
-    if (wmax <= 0.0)
-	throw runtime_error(filename + ": weight array is all zeros, this is currently considered an error");
-
     this->frac_ungapped = (double)nt_file / (double)nt_logical;
-    this->frac_unmasked = wsum / wmax / (float)(nfreq*npol*nt_file);
+    this->frac_unmasked = (wmax > 0.0) ? (wsum / wmax / (float)(nfreq*npol*nt_file)) : 0.0;
 
     if (noisy)
 	cerr << "read " << filename << ", frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked << endl;
