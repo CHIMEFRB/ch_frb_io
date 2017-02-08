@@ -203,6 +203,8 @@ struct udp_packet_ringbuf : noncopyable {
     // Throws an exception if called after end-of-stream.
     bool put_packet_list(std::unique_ptr<udp_packet_list> &p, bool is_blocking);
 
+    void get_size(int* currsize, int* maxsize);
+
     // Note!  The pointer 'p' is _swapped_ with the udp_packet_list which is extracted from the ring buffer.
     // In other words, when get_packet_list() returns, the original udp_packet_list will be "recycled" (rather than freed).
     // Returns true on success (possibly after blocking), returns false if ring buffer is empty and stream has ended.

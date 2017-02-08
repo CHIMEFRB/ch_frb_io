@@ -321,6 +321,11 @@ intensity_network_stream::get_statistics() {
     m["count_assembler_drops"    ] = counts[event_type::assembled_chunk_dropped];
     m["count_assembler_queued"   ] = counts[event_type::assembled_chunk_queued];
 
+    int currsize, maxsize;
+    unassembled_ringbuf->get_size(&currsize, &maxsize);
+    m["udp_ringbuf_size"] = currsize;
+    m["udp_ringbuf_maxsize"] = maxsize;
+
     int nbeams = this->ini_params.beam_ids.size();
     m["nbeams"] = nbeams;
     R.push_back(m);

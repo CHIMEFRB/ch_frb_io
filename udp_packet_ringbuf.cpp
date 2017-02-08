@@ -34,6 +34,14 @@ udp_packet_ringbuf::~udp_packet_ringbuf()
     pthread_cond_destroy(&cond_packets_removed);
 }
 
+void udp_packet_ringbuf::get_size(int* currsize, int* maxsize) {
+    pthread_mutex_lock(&this->lock);
+    if (currsize)
+        *currsize = ringbuf_size;
+    if (maxsize)
+        *maxsize = ringbuf_capacity;
+    pthread_mutex_unlock(&this->lock);
+}
 
 bool udp_packet_ringbuf::put_packet_list(unique_ptr<udp_packet_list> &p, bool is_blocking)
 {    
