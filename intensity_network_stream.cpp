@@ -421,10 +421,6 @@ void intensity_network_stream::_network_thread_body()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    // Advance stream state to "network_thread_started"...
-    this->network_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-
     // ...and wait for it to advance to "stream_started"
     for (;;) {
 	if (this->stream_end_requested) {
@@ -645,12 +641,8 @@ void intensity_network_stream::assembler_thread_main() {
 
 void intensity_network_stream::_assembler_thread_body()
 {
-    // Set the assembler_thread_started flag...
     pthread_mutex_lock(&this->state_lock);
-    this->assembler_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-
-    // ... and wait for first_packet_received flag to be set
+    // wait for first_packet_received flag to be set
     for (;;) {
    	if (this->stream_end_requested) {
 	    // This case can arise if end_stream() is called early

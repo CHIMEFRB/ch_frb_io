@@ -425,8 +425,6 @@ protected:
 
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;       // threads wait here for state to change
-    bool assembler_thread_started = false;   // set by assembler thread on startup
-    bool network_thread_started = false;     // set by network thread on startup
     bool stream_started = false;             // set asynchonously by calling start_stream()
     bool first_packet_received = false;      // set by network thread
     bool assemblers_initialized = false;     // set by assembler thread
