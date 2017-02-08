@@ -377,17 +377,18 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 {
     pthread_mutex_lock(&this->state_lock);
 
-    while (!this->first_packet_received)
+    while (!this->first_packet_received) {
 	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     
-    if (this->stream_end_requested) {
-	// end_stream() was called before first packet was received
-	pthread_mutex_unlock(&this->state_lock);
-	nupfreq = 0;
-	nt_per_packet = 0;
-	fpga_counts_per_sample = 0;
-	fpga_count = 0;
-	return false;
+        if (this->stream_end_requested) {
+            // end_stream() was called before first packet was received
+            pthread_mutex_unlock(&this->state_lock);
+            nupfreq = 0;
+            nt_per_packet = 0;
+            fpga_counts_per_sample = 0;
+            fpga_count = 0;
+            return false;
+        }
     }
     
     pthread_mutex_unlock(&this->state_lock);
@@ -421,7 +422,7 @@ void intensity_network_stream::_network_thread_body()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    // ...and wait for it to advance to "stream_started"
+    // Wait for "stream_started"
     for (;;) {
 	if (this->stream_end_requested) {
 	    // This case can arise if end_stream() is called early
