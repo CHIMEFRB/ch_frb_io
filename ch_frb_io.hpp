@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <memory>
 #include <random>
+#include <thread>
 #include <hdf5.h>
 
 namespace ch_frb_io {
@@ -412,8 +413,9 @@ protected:
     // Used only by the assembler thread
     std::vector<int64_t> assembler_thread_event_subcounts;
 
-    pthread_t network_thread;
-    pthread_t assembler_thread;
+    std::thread network_thread;
+    std::thread assembler_thread;
+
     char _pad3[constants::cache_line_size];
 
     // State model.  These flags are protected by the state_lock and are set in sequence.
@@ -448,8 +450,8 @@ protected:
     void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
 
-    static void *network_pthread_main(void *);
-    static void *assembler_pthread_main(void *);
+    void network_thread_main();
+    void assembler_thread_main();
 
     // Private methods called by the network thread.    
     void _network_thread_body();

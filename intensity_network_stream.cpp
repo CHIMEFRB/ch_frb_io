@@ -1,3 +1,4 @@
+#include <functional>
 #include <sys/ioctl.h>
 
 #include <sys/types.h>
@@ -18,40 +19,19 @@ namespace ch_frb_io {
 //
 // class intensity_network_stream
 
-
 // Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const initializer &x)
 {
+    // not using make_shared because constructor is protected
     intensity_network_stream *retp = new intensity_network_stream(x);
     shared_ptr<intensity_network_stream> ret(retp);
 
     ret->_open_socket();
 
-    // Spawn assembler thread.  Note that we pass a bare pointer to an object ('ret') on our stack
-    // and this pointer will be invalid after make() returns.  Therefore, the assembler thread only
-    // dereferences the pointer before it sets the assembler_thread_started flag, and make() waits for this
-    // flag to be set before it returns.  The same synchronization logic applies to the network thread.
-
-    int err = pthread_create(&ret->assembler_thread, NULL, assembler_pthread_main, (void *) &ret);
-    if (err)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
-    
-    // Wait for assembler thread to start
-    pthread_mutex_lock(&ret->state_lock);
-    while (!ret->assembler_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);    
-
+    // Spawn assembler thread.
+    ret->assembler_thread = std::thread(std::bind(&intensity_network_stream::assembler_thread_main, ret));
     // Spawn network thread
-    err = pthread_create(&ret->network_thread, NULL, network_pthread_main, (void *) &ret);
-    if (err)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
-    
-    // Wait for network thread to start
-    pthread_mutex_lock(&ret->state_lock);
-    while (!ret->network_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);    
+    ret->network_thread = std::thread(std::bind(&intensity_network_stream::network_thread_main, ret));
 
     return ret;
 }
@@ -206,13 +186,8 @@ void intensity_network_stream::join_threads()
     this->join_called = true;
     pthread_mutex_unlock(&this->state_lock);
 
-    int err = pthread_join(network_thread, NULL);
-    if (err)
-	throw runtime_error("ch_frb_io: couldn't join network thread [input]");
-
-    err = pthread_join(assembler_thread, NULL);
-    if (err)
-	throw runtime_error("ch_frb_io: couldn't join assembler thread");
+    network_thread.join();
+    assembler_thread.join();
 }
 
 
@@ -431,31 +406,16 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 // Network thread
 
 
-// static member function
-void *intensity_network_stream::network_pthread_main(void *opaque_arg)
-{
-    if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_pthread_main()");
-    
-    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
-    shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
-    shared_ptr<intensity_network_stream> stream = *arg;
-
-    if (!stream)
-	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
-
+void intensity_network_stream::network_thread_main() {
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     try {
-	stream->_network_thread_body();
+	_network_thread_body();
     } catch (...) {
-	stream->_network_thread_exit();
+	_network_thread_exit();
 	throw;
     }
-    
-    stream->_network_thread_exit();
-    return NULL;
+    _network_thread_exit();
 }
-
 
 void intensity_network_stream::_network_thread_body()
 {
@@ -671,31 +631,17 @@ void intensity_network_stream::_put_unassembled_packets()
 // assembler thread
 
 
-// static member function
-void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
-{
-    if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_pthread_main()");
-
-    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
-    shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
-    shared_ptr<intensity_network_stream> stream = *arg;
-
-    if (!stream)
-	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to assembler_thread_main()");
-
+void intensity_network_stream::assembler_thread_main() {
+    //shared_ptr<intensity_network_stream> stream) {
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     try {
-	stream->_assembler_thread_body();
+	_assembler_thread_body();
     } catch (...) {
-	stream->_assembler_thread_exit();
+	_assembler_thread_exit();
 	throw;
     }
-
-    stream->_assembler_thread_exit();
-    return NULL;
+    _assembler_thread_exit();
 }
-
 
 void intensity_network_stream::_assembler_thread_body()
 {
