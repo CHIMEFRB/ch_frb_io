@@ -40,8 +40,10 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
     nassemblers(ini_params_.beam_ids.size()),
-    network_thread_recv_usec(0),
-    network_thread_processing_usec(0),
+    network_thread_waiting_usec(0),
+    network_thread_working_usec(0),
+    assembler_thread_waiting_usec(0),
+    assembler_thread_working_usec(0)
 {
     // Argument checking
 
@@ -300,8 +302,10 @@ intensity_network_stream::get_statistics() {
     m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
     m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
     m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
-    m["network_thread_recv_usec"] = network_thread_recv_usec;
-    m["network_thread_processing_usec"] = network_thread_processing_usec;
+    m["network_thread_waiting_usec"] = network_thread_waiting_usec;
+    m["network_thread_working_usec"] = network_thread_working_usec;
+    m["assembler_thread_waiting_usec"] = assembler_thread_waiting_usec;
+    m["assembler_thread_working_usec"] = assembler_thread_working_usec;
 
     vector<int64_t> counts = get_event_counts();
     m["count_bytes_received"     ] = counts[event_type::byte_received];
@@ -499,7 +503,7 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	timestamp = usec_between(tv_ini, xgettimeofday());
-        network_thread_processing_usec += (timestamp - curr_timestamp);
+        network_thread_working_usec += (timestamp - curr_timestamp);
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
@@ -510,7 +514,7 @@ void intensity_network_stream::_network_thread_body()
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 
 	curr_timestamp = usec_between(tv_ini, xgettimeofday());
-        network_thread_recv_usec += (curr_timestamp - timestamp);
+        network_thread_waiting_usec += (curr_timestamp - timestamp);
 
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
@@ -645,7 +649,6 @@ void intensity_network_stream::_put_unassembled_packets()
 
 
 void intensity_network_stream::assembler_thread_main() {
-    //shared_ptr<intensity_network_stream> stream) {
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     try {
 	_assembler_thread_body();
@@ -699,9 +702,21 @@ void intensity_network_stream::_assembler_thread_body()
     auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
+    struct timeval tva, tvb;
+    tva = xgettimeofday();
+
     // Main packet loop
 
-    while (unassembled_ringbuf->get_packet_list(packet_list)) {
+    while (1) {
+        tvb = xgettimeofday();
+        assembler_thread_working_usec += usec_between(tva, tvb);
+
+        if (!unassembled_ringbuf->get_packet_list(packet_list))
+            break;
+
+        tva = xgettimeofday();
+        assembler_thread_waiting_usec += usec_between(tvb, tva);
+
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list->get_packet_data(ipacket);
             int packet_nbytes = packet_list->get_packet_nbytes(ipacket);

@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <cstdint>
 #include <atomic>
 #include <random>
 #include <thread>
@@ -395,12 +396,18 @@ protected:
 
     // Written by network thread, read by outside thread
     // How much wall time do we spend waiting in recvfrom() vs processing?
-    std::atomic_uint64_t network_thread_recv_usec;
-    std::atomic_uint64_t network_thread_processing_usec;
+    std::atomic<uint64_t> network_thread_waiting_usec;
+    std::atomic<uint64_t> network_thread_working_usec;
 
     // I'm not sure how much it actually helps bottom-line performace, but it seemed like a good idea
     // to insert padding so that data accessed by different threads is in different cache lines.
     char _pad1[constants::cache_line_size];
+
+    // Written by assembler thread, read by outside thread
+    std::atomic<uint64_t> assembler_thread_waiting_usec;
+    std::atomic<uint64_t> assembler_thread_working_usec;
+
+    char _pad1b[constants::cache_line_size];
 
     // Used only by the network thread (not protected by lock)
     //
