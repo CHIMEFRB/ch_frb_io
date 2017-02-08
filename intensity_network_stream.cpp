@@ -39,7 +39,9 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
-    nassemblers(ini_params_.beam_ids.size())
+    nassemblers(ini_params_.beam_ids.size()),
+    network_thread_recv_usec(0),
+    network_thread_processing_usec(0),
 {
     // Argument checking
 
@@ -209,7 +211,9 @@ void intensity_network_stream::print_state() {
     }
 }
 
-// Must not hold state_lock when calling this function!
+// Waits for the "assemblers_initialized" flag.
+// If "prelocked = True", assume the state_lock mutex is already held,
+// otherwise, it will be locked & unlocked on entry/exit.
 void intensity_network_stream::_wait_for_assemblers_initialized(bool prelocked) {
     // wait for assemblers to be initialized...
     if (!prelocked)
@@ -259,9 +263,11 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 
 unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
+    // Quickly grab a copy of perhost_packets
     pthread_mutex_lock(&this->event_lock);
     unordered_map<uint64_t, uint64_t> raw(perhost_packets);
     pthread_mutex_unlock(&this->event_lock);
+
     // Convert to strings
     unordered_map<string, uint64_t> rtn;
     for (auto it = raw.begin(); it != raw.end(); it++) {
@@ -294,6 +300,8 @@ intensity_network_stream::get_statistics() {
     m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
     m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
     m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
+    m["network_thread_recv_usec"] = network_thread_recv_usec;
+    m["network_thread_processing_usec"] = network_thread_processing_usec;
 
     vector<int64_t> counts = get_event_counts();
     m["count_bytes_received"     ] = counts[event_type::byte_received];
@@ -459,9 +467,11 @@ void intensity_network_stream::_network_thread_body()
     uint64_t cancellation_check_timestamp = 0;
     bool is_first_packet = true;
 
+    // All timestamps are in microseconds relative to tv_ini.
+    uint64_t curr_timestamp = 0;
+
     for (;;) {
-	// All timestamps are in microseconds relative to tv_ini.
-	uint64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        uint64_t timestamp;
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
@@ -488,14 +498,20 @@ void intensity_network_stream::_network_thread_body()
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
+	timestamp = usec_between(tv_ini, xgettimeofday());
+        network_thread_processing_usec += (timestamp - curr_timestamp);
+
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
-
-        // Read from socket, recording the sender IP & port.
+        // Record the sender IP & port here
         sockaddr_in sender_addr;
         int slen = sizeof(sender_addr);
         int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
+
+	curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        network_thread_recv_usec += (curr_timestamp - timestamp);
+
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))

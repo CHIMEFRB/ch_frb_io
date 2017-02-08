@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <atomic>
 #include <random>
 #include <thread>
 #include <hdf5.h>
@@ -392,6 +393,11 @@ protected:
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
+    // Written by network thread, read by outside thread
+    // How much wall time do we spend waiting in recvfrom() vs processing?
+    std::atomic_uint64_t network_thread_recv_usec;
+    std::atomic_uint64_t network_thread_processing_usec;
+
     // I'm not sure how much it actually helps bottom-line performace, but it seemed like a good idea
     // to insert padding so that data accessed by different threads is in different cache lines.
     char _pad1[constants::cache_line_size];
@@ -425,6 +431,7 @@ protected:
 
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;       // threads wait here for state to change
+
     bool stream_started = false;             // set asynchonously by calling start_stream()
     bool first_packet_received = false;      // set by network thread
     bool assemblers_initialized = false;     // set by assembler thread
