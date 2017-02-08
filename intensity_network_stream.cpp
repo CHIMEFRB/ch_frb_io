@@ -530,13 +530,13 @@ void intensity_network_stream::_network_thread_body()
             throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
-        /*{
+        {
             int nqueued = 0;
             if (ioctl(sockfd, FIONREAD, &nqueued) == -1) {
                 cout << "Failed to call ioctl(FIONREAD)" << endl;
             }
             cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
-         }*/
+        }
 
         // Increment the number of packets we've received from this sender:
         uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
