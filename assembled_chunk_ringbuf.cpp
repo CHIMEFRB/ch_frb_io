@@ -169,9 +169,9 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // Convert unique_ptr into bare pointer, and reset unique_ptr.
     assembled_chunk* ch = chunk.release();
     // Try to add to ringbuf...
-    bool added = ringbuf->push(ch);
+    shared_ptr<assembled_chunk> sch = ringbuf->push(ch);
 
-    if (added) {
+    if (sch) {
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
         if (event_counts)

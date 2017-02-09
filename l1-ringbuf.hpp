@@ -53,10 +53,10 @@ public:
 
     /*
      Tries to enqueue an assembled_chunk.  If no space can be
-     allocated, returns false.  The ring buffer now assumes ownership
-     of the assembled_chunk.
+     allocated, returns an empty shared_ptr.  The ring buffer now
+     assumes ownership of the assembled_chunk.
      */
-    bool push(ch_frb_io::assembled_chunk* ch);
+    std::shared_ptr<ch_frb_io::assembled_chunk> push(ch_frb_io::assembled_chunk* ch);
 
     /*
      Returns the next assembled_chunk for downstream processing.

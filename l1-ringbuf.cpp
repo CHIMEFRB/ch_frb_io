@@ -72,12 +72,12 @@ L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
  allocated, returns false.  The ring buffer now assumes ownership
  of the assembled_chunk.
  */
-bool L1Ringbuf::push(assembled_chunk* ch) {
+shared_ptr<assembled_chunk> L1Ringbuf::push(assembled_chunk* ch) {
     shared_ptr<assembled_chunk> p = _rb[0]->push(ch);
     if (!p)
-        return false;
+        return p;
     _q.push_back(p);
-    return true;
+    return p;
 }
 
 /*
