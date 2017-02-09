@@ -205,6 +205,46 @@ void intensity_network_stream::stream_to_files(const std::string& filename_patte
             (*it)->stream_filename_pattern = filename_pattern;
 }
 
+void intensity_network_stream::add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback) {
+    pthread_mutex_lock(&this->state_lock);
+    bool inited = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+    if (inited)
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->chunk_callbacks.push_back(callback);
+    else
+        chunk_callbacks.push_back(callback);
+}
+
+/*
+ std::function has no sensible == operator, so how do we do this?!
+
+void intensity_network_stream::remove_assembled_chunk_callback(std::function<void()> callback) {
+    pthread_mutex_lock(&this->state_lock);
+    bool inited = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+    if (inited)
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
+            std::vector<std::function<void()> > &vec = (*it)->chunk_callbacks;
+            for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
+                if ((*it2) == callback) {
+                    vec.erase(it2);
+                    break;
+                }
+            }
+        }
+    else {
+        std::vector<std::function<void()> > &vec = chunk_callbacks;
+        for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
+            if ((*it2) == callback) {
+                vec.erase(it2);
+                break;
+            }
+        }
+    }
+}
+ */
+
 void intensity_network_stream::print_state() {
     cout << "Intensity network stream state:" << endl;
     for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
@@ -698,14 +738,27 @@ void intensity_network_stream::_assembler_thread_body()
 
     pthread_mutex_lock(&this->state_lock);
     this->assemblers_initialized = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
 
     // did a call to stream_to_file() come in while we were waiting
     // for the assemblers to be initialized?  If so, dispatch that
     // now.
-    if (stream_filename.length())
-        stream_to_files(stream_filename);
+    if (stream_filename.length()) {
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->stream_filename_pattern = stream_filename;
+    }
+
+    // did calls to add_assembled_chunk_callback come in while we were
+    // waiting for the assembers?  If so, dispatch now.
+    if (chunk_callbacks.size()) {
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->chunk_callbacks.insert((*it)->chunk_callbacks.end(),
+                                          chunk_callbacks.begin(),
+                                          chunk_callbacks.end());
+        chunk_callbacks.clear();
+    }
+
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);
 
     auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];

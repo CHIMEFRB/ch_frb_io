@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 #include <unordered_map>
 #include <memory>
 #include <cstdint>
@@ -364,6 +365,12 @@ public:
     // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
     void stream_to_files(const std::string& filename_pattern);
 
+    // For debugging/testing: request that the given callback be
+    // called each time an assembled_chunk is enqueued in the ring
+    // buffer.
+    void add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
+    //void remove_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
+
     // For debugging: print state.
     void print_state();
 
@@ -453,6 +460,8 @@ protected:
     std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
     std::string stream_filename;
+
+    std::vector<std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.

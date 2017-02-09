@@ -285,6 +285,9 @@ public:
     // Are we streaming data to disk?
     std::string stream_filename_pattern;
 
+    // Debugging: callbacks for each enqueued assembled_chunk.
+    std::vector< std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
+
 protected:
     const intensity_network_stream::initializer ini_params;
 

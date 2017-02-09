@@ -42,7 +42,9 @@ enum l1_ringbuf_level {
     L1RB_LEVEL4 = 0x10,
     L1RB_WAIT1 = 0x20,
     L1RB_WAIT2 = 0x40,
-    L1RB_WAIT3 = 0x80
+    L1RB_WAIT3 = 0x80,
+    // queued for writing in the L1 RPC system
+    L1RB_WRITEQUEUE = 0x100,
 };
 
 class L1Ringbuf {

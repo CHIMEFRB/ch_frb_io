@@ -174,6 +174,12 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     if (sch) {
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
+
+        // Call any callbacks for chunks being added.
+        for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {
+            (*it)(sch);
+        }
+
         if (event_counts)
             event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
 	return true;

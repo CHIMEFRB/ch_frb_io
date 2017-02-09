@@ -68,8 +68,8 @@ L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
 }
 
 /*
- Tries to enqueue an assembled_chunk.  If no space can be
- allocated, returns false.  The ring buffer now assumes ownership
+ Tries to enqueue an assembled_chunk.  If no space can be allocated,
+ returns an empty shared_ptr.  The ring buffer now assumes ownership
  of the assembled_chunk.
  */
 shared_ptr<assembled_chunk> L1Ringbuf::push(assembled_chunk* ch) {
