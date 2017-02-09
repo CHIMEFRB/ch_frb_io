@@ -399,6 +399,8 @@ protected:
     std::atomic<uint64_t> network_thread_waiting_usec;
     std::atomic<uint64_t> network_thread_working_usec;
 
+    std::atomic<uint64_t> socket_queued_bytes;
+
     // I'm not sure how much it actually helps bottom-line performace, but it seemed like a good idea
     // to insert padding so that data accessed by different threads is in different cache lines.
     char _pad1[constants::cache_line_size];

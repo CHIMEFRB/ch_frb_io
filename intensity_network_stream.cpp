@@ -326,6 +326,8 @@ intensity_network_stream::get_statistics() {
     m["udp_ringbuf_size"] = currsize;
     m["udp_ringbuf_maxsize"] = maxsize;
 
+    m["count_bytes_queued"] = socket_queued_bytes;
+
     int nbeams = this->ini_params.beam_ids.size();
     m["nbeams"] = nbeams;
     R.push_back(m);
@@ -535,7 +537,8 @@ void intensity_network_stream::_network_thread_body()
             if (ioctl(sockfd, FIONREAD, &nqueued) == -1) {
                 cout << "Failed to call ioctl(FIONREAD)" << endl;
             }
-            cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
+            socket_queued_bytes = nqueued;
+            //cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
         }
 
         // Increment the number of packets we've received from this sender:
