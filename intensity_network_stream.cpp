@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -279,7 +280,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     _wait_for_assemblers_initialized();
 
     // This can happen if end_stream() was called before the assemblers were initialized.
-    if (assemblers.size() == 0)
+    if ((assemblers.size() == 0) || stream_end_requested)
 	return shared_ptr<assembled_chunk> ();
 
     return assemblers[assembler_index]->get_assembled_chunk(wait);
@@ -733,8 +734,9 @@ void intensity_network_stream::_assembler_thread_body()
     // states into a single state, but this led to transient packet loss which was problematic for unit tests.)
 
     this->assemblers.resize(nassemblers);
-    for (int ix = 0; ix < nassemblers; ix++)
+    for (int ix = 0; ix < nassemblers; ix++) {
 	assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], nupfreq, nt_per_packet, fpga_counts_per_sample, this->fp_fpga_count);
+    }
 
     pthread_mutex_lock(&this->state_lock);
     this->assemblers_initialized = true;
