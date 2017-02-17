@@ -211,9 +211,15 @@ void intensity_network_ostream::_open_socket()
         struct sockaddr_in server_address;
         memset(&server_address, 0, sizeof(server_address));
         server_address.sin_family = AF_INET;
-        inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
+        int err = inet_pton(AF_INET, ini_params.bind_ip.c_str(), &server_address.sin_addr);
+        if (err != 1) {
+            string errstr = "ch_frb_io: failed to parse bind_ip: \"" + ini_params.bind_ip + "\"";
+            if (err == -1)
+                errstr += ": " + string(strerror(errno));
+            throw runtime_error(errstr);
+        }
         server_address.sin_port = htons(ini_params.bind_port);
-        int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+        err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
         if (err < 0)
             throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
     }

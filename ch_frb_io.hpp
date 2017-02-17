@@ -644,6 +644,7 @@ public:
 	float wt_cutoff = constants::default_wt_cutoff;
 	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
         int bind_port = 0; // 0: don't bind; send from randomly assigned port
+        std::string bind_ip = "0.0.0.0";
 
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
