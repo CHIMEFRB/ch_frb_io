@@ -1,4 +1,3 @@
-//
 // This file defines
 //
 //   template<typename T> T lexical_cast(const std::string &x);
@@ -14,12 +13,9 @@
 //
 // Note that a more general implementation of lexical_cast is already defined in boost, and considered 
 // for inclusion in C++ TR2, but it's not in C++11, so we're forced to define it here!
-//
 
-#include <stdlib.h>
-#include <limits.h>
-#include <math.h>
-#include <iostream>
+#include <cstdlib>
+#include <climits>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -36,6 +32,7 @@ template<> const char *typestr<int>()       { return "int"; }
 template<> const char *typestr<double>()    { return "double"; }
 template<> const char *typestr<float>()     { return "float"; }
 template<> const char *typestr<uint16_t>()  { return "uint16_t"; }
+template<> const char *typestr<bool>()      { return "bool"; }
 
 
 // trivial case: convert string -> string
@@ -114,6 +111,20 @@ template<> bool lexical_cast(const string &x, float &ret)
     return (endptr != ptr) && (ret != -HUGE_VALF) && (ret != HUGE_VALF) && is_all_spaces(endptr);
 }
 
+template<> bool lexical_cast(const string &x, bool &ret)
+{
+    const char *ptr = x.c_str();
+
+    if (!strcasecmp(ptr,"t") || !strcasecmp(ptr,"true"))
+	ret = true;
+    else if (!strcasecmp(ptr,"f") || !strcasecmp(ptr,"false"))
+	ret = false;
+    else
+	return false;
+
+    return true;
+}
+
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -174,6 +185,12 @@ void test_lexical_cast()
     check_convert_fails<double>(" oops ");
     check_convert_fails<double>("5x");
     check_convert_fails<double>("-1.3e20x");
+    
+    check_convert<bool>("t",true);
+    check_convert<bool>("TRUE",true);
+    check_convert<bool>("F",false);
+    check_convert<bool>("False",false);
+    check_convert_fails<bool>("False2");
 
     cerr << "test_lexical_cast(): success\n";
 }

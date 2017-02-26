@@ -719,12 +719,12 @@ template<typename T> extern bool lexical_cast(const std::string &x, T &ret);
 template<typename T> extern const char *typestr();
 
 // Version of lexical_cast() which throws exception on failure.
-template<typename T> inline T lexical_cast(const std::string &x)
+template<typename T> inline T lexical_cast(const std::string &x, const char *name="string")
 {
     T ret;
     if (lexical_cast(x, ret))
 	return ret;
-    throw std::runtime_error("couldn't convert string '" + x + "' to " + typestr<T>());
+    throw std::runtime_error("couldn't convert " + std::string(name) + "='" + x + "' to " + typestr<T>());
 }
 
 // Unit tests
