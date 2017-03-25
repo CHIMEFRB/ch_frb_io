@@ -417,7 +417,7 @@ void intensity_network_ostream::_network_thread_body()
 	    if ((target_gbps > 0.0) && (npackets_tot > 0)) {
 		int64_t t1 = 8.0e-3 * nbytes_tot / target_gbps;
 		int64_t t2 = prev_tstamp + int64_t(0.8 * 8.0e-3 * prev_packet_nbytes / target_gbps);
-		int64_t target_timestamp = min(t1,t2);
+		int64_t target_timestamp = max(t1,t2);
 
 		if (tstamp < target_timestamp) {
 		    xusleep(target_timestamp - tstamp);
