@@ -7,9 +7,11 @@
 
 #include <string>
 #include <vector>
-#include <unordered_map>
 #include <memory>
 #include <random>
+#include <iostream>
+#include <unordered_map>
+
 #include <hdf5.h>
 
 namespace ch_frb_io {
@@ -629,6 +631,7 @@ public:
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
 	bool throw_exception_on_buffer_drop = false;
+	bool print_status_at_end = true;
     };
 
     const initializer ini_params;
@@ -683,7 +686,9 @@ public:
 
     // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
     void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
-    
+
+    void print_status(std::ostream &os = std::cout);
+
 protected:
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;
@@ -722,7 +727,7 @@ protected:
     virtual ssize_t _send(int socket, const uint8_t* packet, int nbytes, int flags);
 
     void _open_socket();
-    void _announce_end_of_stream();
+    void _send_end_of_stream_packets();
 };
 
 

@@ -445,7 +445,10 @@ void intensity_network_ostream::_network_thread_body()
 	}
     }
 
-    this->_announce_end_of_stream();
+    this->_send_end_of_stream_packets();
+
+    if (ini_params.print_status_at_end)
+	this->print_status();
 }
 
 ssize_t intensity_network_ostream::_send(int socket, const uint8_t* packet, int nbytes, int flags) {
@@ -463,18 +466,16 @@ void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,
 }
 
 
-void intensity_network_ostream::_announce_end_of_stream()
+void intensity_network_ostream::_send_end_of_stream_packets()
 {
     // Send end-of-stream packets.  (This isn't part of the packet protocol, but the network _input_
     // stream contains an option to shut down gracefully if a special packet with nbeams=nupfreq=nt=0
     // is received.)
     //
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
-    // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
+    // reaches the other side, but we'll make a best effort by sending 5 packets separated by 0.1 sec.
 
-    cerr << "ch_frb_io: network output thread sending end-of-stream packets\n";
-
-    for (int ipacket = 0; ipacket < 10; ipacket++) {
+    for (int ipacket = 0; ipacket < 5; ipacket++) {
 	vector<uint8_t> packet(24, uint8_t(0));
 	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
@@ -494,18 +495,38 @@ void intensity_network_ostream::_announce_end_of_stream()
 
 	break;
     }
+}
 
-    // End-of-stream summary info
+
+void intensity_network_ostream::print_status(ostream &os)
+{
+    int64_t tstamp = 0;
+    int64_t npackets = 0;
+    int64_t nbytes = 0;
+
+    this->get_statistics(tstamp, npackets, nbytes);
+
+    // Gather output into a single contiguous C-string, in order
+    // to reduce probability of interleaved output in multithreaded case.
 
     stringstream ss;
-    ss << "ch_frb_io: network output thread exiting, npackets_sent=" << npackets_sent;
-    if (npackets_sent >= 2)
-	ss << ", gbps=" << (8.0e-3 * nbytes_sent / double(curr_timestamp));
+
+    ss << "ch_frb_io output stream: dst=" << ini_params.dstname
+       << ", nbeams=" << nbeams << ", nfreq_coarse=" << nfreq_coarse_per_chunk
+       << ", npackets=" << npackets;
+
+    if (npackets >= 2)
+	ss << ", gbps=" << (8.0e-3 * nbytes / double(tstamp));
+
     if (target_gbps > 0.0)
 	ss << ", target_gbps=" << target_gbps;
+
     ss << "\n";
 
-    cerr << ss.str();
+    string s = ss.str();
+    const char *cstr = s.c_str();
+
+    os << cstr;
 }
 
 
