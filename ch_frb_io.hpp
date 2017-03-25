@@ -44,6 +44,11 @@ class assembled_chunk_ringbuf;
 
 namespace constants {
     static constexpr int cache_line_size = 64;
+    
+    // Number of seconds per FPGA count.  This "magic number" appears in multiple libraries
+    // (ch_frb_io, rf_pipelines, ch_vdif_assembler).  FIXME: it would be better to keep it
+    // in one place, to avoid any possibility of having it get out-of-sync.
+    static constexpr double dt_fpga = 2.56e-6;
 
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse_tot = 1024;
@@ -69,7 +74,6 @@ namespace constants {
     static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
     static constexpr int recv_socket_timeout_usec = 10000;   // 0.01 sec
     static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
-    static constexpr double default_gbps = 1.0;              // default transmit rate for output stream
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size
@@ -101,6 +105,7 @@ namespace constants {
     static constexpr int max_allowed_nupfreq = 64;
     static constexpr int max_allowed_nt_per_packet = 1024;
     static constexpr int max_allowed_fpga_counts_per_sample = 3200;
+    static constexpr double max_allowed_output_gbps = 10.0;
 };
 
 
@@ -219,7 +224,7 @@ struct intensity_hdf5_ofile {
     // and freq1_MHz=400.
     //
     // The optional 'ipos0' and 'time0' args are:
-    //   ipos0 = index of first sample in file (in downsampled units, i.e. one sample is ~1.3 msec, not ~2.5 usec)
+    //   ipos0 = index of first sample in file (in downsampled units, i.e. one sample is ~1 msec, not ~2.56 usec)
     //   time0 = arrival time of first sample in file (in seconds).
     //
     // The meaning of the 'bitshuffle' arg is:
@@ -595,7 +600,15 @@ public:
     //        (nbeams, coarse_freq_ids.size(), nupfreq, nt_per_chunk)
     //     and will generally correspond to multiple packets.
     //
-    //   - The target_gbps arg enables throttling of the output to some target bandwidth in Gbps.
+    //   - If throttle=false, then UDP packets will be written as quickly as possible.
+    //     If throttle=true, then the packet-throttling logic works as follows:
+    //
+    //        - If target_gbps > 0.0, then packets will be transmitted at the
+    //          specified rate in Gbps.
+    //
+    //        - If target_gbps = 0, then the packet transmit rate will be inferred
+    //          from the value of 'fpga_counts_per_sample', assuming 2.56 usec per
+    //          fpga count.  (This is the default.)
 
     struct initializer {
 	std::string dstname;
@@ -608,8 +621,10 @@ public:
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	float wt_cutoff = constants::default_wt_cutoff;
-	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
         int bind_port = 0; // 0: don't bind; send from randomly assigned port
+
+	bool throttle = true;
+	double target_gbps = 0.0;
 
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
@@ -632,7 +647,12 @@ public:
     const uint64_t fpga_counts_per_sample;
     const uint64_t fpga_counts_per_packet;
     const uint64_t fpga_counts_per_chunk;
-    const double target_gbps;
+
+    // Note: this->target_gpbs is not identical to ini_params.target_gpbs, since there is a case 
+    // (ini_params.throttle=true and ini_params.target_gbps=0) where ini_params.target_gbps is zero, 
+    // but this->target_gbps has a nonzero value inferred from 'fpga_counts_per_sample'.
+
+    double target_gbps = 0.0;
 
     // It's convenient to initialize intensity_network_ostreams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns a network thread which runs
