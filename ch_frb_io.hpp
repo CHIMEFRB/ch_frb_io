@@ -286,7 +286,11 @@ public:
 
     struct initializer {
 	std::vector<int> beam_ids;
+
+	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
+	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
+
 	bool mandate_reference_kernels = false;
 	bool mandate_fast_kernels = false;
 	bool emit_warning_on_buffer_drop = true;

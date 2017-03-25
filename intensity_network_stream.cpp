@@ -475,12 +475,14 @@ void intensity_network_stream::_network_thread_body()
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
-	
     server_address.sin_family = AF_INET;
-    inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
     server_address.sin_port = htons(ini_params.udp_port);
 
-    int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+    int err = inet_pton(AF_INET, ini_params.ipaddr.c_str(), &server_address.sin_addr);
+    if (err <= 0)
+	throw runtime_error(ini_params.ipaddr + ": inet_pton() failed (note that no DNS lookup is done, the argument must be a numerical IP address)");
+
+    err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
