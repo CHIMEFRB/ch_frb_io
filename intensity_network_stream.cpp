@@ -436,6 +436,8 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
 
+    pin_thread_to_cores(stream->ini_params.network_thread_cores);
+
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     try {
 	stream->_network_thread_body();
@@ -677,6 +679,8 @@ void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
 
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to assembler_thread_main()");
+
+    pin_thread_to_cores(stream->ini_params.assembler_thread_cores);
 
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     try {

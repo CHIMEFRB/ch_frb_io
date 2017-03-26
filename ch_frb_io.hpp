@@ -300,6 +300,10 @@ public:
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
         std::vector<int> ringbuf_n;
+
+	// If nonempty, threads will be pinned to given list of cores.
+	std::vector<int> network_thread_cores;
+	std::vector<int> assembler_thread_cores;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
@@ -738,6 +742,9 @@ protected:
 // -------------------------------------------------------------------------------------------------
 //
 // Miscellaneous
+
+
+extern void pin_thread_to_cores(const std::vector<int> &core_list);
 
 
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
