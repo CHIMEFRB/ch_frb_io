@@ -159,11 +159,12 @@ void intensity_network_stream::start_stream()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    if (stream_started) {
+    if (stream_end_requested) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on running, completed, or cancelled stream");
+	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called completed or cancelled stream");
     }
 
+    // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);

@@ -334,7 +334,7 @@ public:
     static std::shared_ptr<intensity_network_stream> make(const initializer &ini_params);
 
     // High level control.
-    void start_stream();         // tells network thread to start listening for packets
+    void start_stream();         // tells network thread to start listening for packets (if stream has already started, this is not an error)
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
