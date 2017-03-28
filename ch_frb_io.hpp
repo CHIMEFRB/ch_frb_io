@@ -640,6 +640,7 @@ public:
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
 	bool throw_exception_on_buffer_drop = false;
+	bool send_end_of_stream_packets = true;
 	bool print_status_at_end = true;
     };
 
