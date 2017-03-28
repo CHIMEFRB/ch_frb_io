@@ -492,7 +492,7 @@ void intensity_network_stream::_network_thread_body()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets on port " + to_string(ini_params.udp_port) + "\n");
+    cerr << ("ch_frb_io: listening for packets, ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + "\n");
 
     // Main packet loop
 
