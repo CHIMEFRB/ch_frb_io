@@ -436,6 +436,7 @@ protected:
     bool assemblers_initialized = false;     // set by assembler thread
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
+    bool threads_joined = false;             // set when both threads (network + assembler) are joined
     char _pad4[constants::cache_line_size];
 
     pthread_mutex_t event_lock;

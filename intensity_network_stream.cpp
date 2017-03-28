@@ -159,7 +159,7 @@ void intensity_network_stream::start_stream()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    if (stream_end_requested) {
+    if (stream_end_requested || join_called) {
 	pthread_mutex_unlock(&this->state_lock);
 	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called completed or cancelled stream");
     }
@@ -200,20 +200,30 @@ void intensity_network_stream::join_threads()
     }
 
     if (join_called) {
+	while (!threads_joined)
+	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_threads()");
+	return;
     }
 
     this->join_called = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 
+    // Join network thread
     int err = pthread_join(network_thread, NULL);
     if (err)
 	throw runtime_error("ch_frb_io: couldn't join network thread [input]");
 
+    // Join assembler thread
     err = pthread_join(assembler_thread, NULL);
     if (err)
 	throw runtime_error("ch_frb_io: couldn't join assembler thread");
+
+    pthread_mutex_lock(&this->state_lock);
+    this->threads_joined = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);    
 }
 
 
