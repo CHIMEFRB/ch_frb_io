@@ -439,9 +439,12 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
     pin_thread_to_cores(stream->ini_params.network_thread_cores);
 
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
 	stream->_network_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
 	stream->_network_thread_exit();
 	throw;
     }
@@ -683,9 +686,12 @@ void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
     pin_thread_to_cores(stream->ini_params.assembler_thread_cores);
 
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
 	stream->_assembler_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
 	stream->_assembler_thread_exit();
 	throw;
     }

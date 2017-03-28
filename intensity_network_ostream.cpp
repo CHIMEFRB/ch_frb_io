@@ -347,7 +347,8 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 
     try {
 	stream->_network_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << endl;
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
