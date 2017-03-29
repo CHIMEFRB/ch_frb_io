@@ -671,7 +671,7 @@ void intensity_network_stream::_put_unassembled_packets()
 	if (ini_params.emit_warning_on_buffer_drop)
 	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
 	if (ini_params.throw_exception_on_buffer_drop)
-	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
+	    throw runtime_error("ch_frb_io: unassembled packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
     }
 }
 
