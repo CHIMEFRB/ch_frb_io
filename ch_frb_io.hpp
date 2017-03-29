@@ -58,51 +58,24 @@ namespace constants {
     // For an explanation of this parameter, see class intensity_network_ostream below 
     static constexpr double default_wt_cutoff = 0.3;
 
-    // Network parameters.
-    //
-    // The recv_socket_timeout determines how frequently the network thread wakes up, while blocked waiting
-    // for packets.  The purpose of the periodic wakeup is to check whether intensity_network_stream::end_stream()
-    // has been called, and check the timeout for flushing data to assembler threads.
-    //
-    // The max packet size params have been chosen around ~9KB, as appropriate for 1 Gbps ethernet
-    // with jumbo frames and no fragmentation.
-    //
-    // The stream_cancellation_latency_usec arg determines how frequently the network thread checks whether
-    // intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
-    // the packet read loop, since it requires acquiring a lock.)
-
     static constexpr int default_udp_port = 10252;
-    static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
-    static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
-    static constexpr int recv_socket_timeout_usec = 10000;   // 0.01 sec
-    static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size
-    static constexpr int recv_socket_bufsize = 4 * 1024 * 1024;
-    static constexpr int send_socket_bufsize = 4 * 1024 * 1024;
+    static constexpr int default_socket_bufsize = 4 * 1024 * 1024;
 #else
-    static constexpr int recv_socket_bufsize = 128 * 1024 * 1024;
-    static constexpr int send_socket_bufsize = 128 * 1024 * 1024;
+    static constexpr int default_socket_bufsize = 128 * 1024 * 1024;
 #endif
 
     // This applies to the ring buffer between the network _output_ thread, and callers of
     // intensity_network_ostream::send_chunk().
     static constexpr int output_ringbuf_capacity = 8;
 
-    // Ring buffer between network _input_ thread and assembler thread.
-    static constexpr int unassembled_ringbuf_capacity = 16;
-    static constexpr int max_unassembled_packets_per_list = 16384;
-    static constexpr int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
-    static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
-
-    // Ring buffers between assembler thread and processing threads.
-    static constexpr int assembled_ringbuf_capacity = 8;
-    static constexpr int assembled_ringbuf_nlevels = 4;
-
     static constexpr int nt_per_assembled_chunk = 1024;
 
-    // These parameters don't really affect anything but appear in range-checking asserts.
+    // These parameters don't really affect anything but appear in asserts.
+    static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
+    static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
     static constexpr int max_allowed_beam_id = 65535;
     static constexpr int max_allowed_nupfreq = 64;
     static constexpr int max_allowed_nt_per_packet = 1024;
@@ -299,11 +272,44 @@ public:
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
-        std::vector<int> ringbuf_n;
 
 	// If nonempty, threads will be pinned to given list of cores.
 	std::vector<int> network_thread_cores;
 	std::vector<int> assembler_thread_cores;
+
+	// The recv_socket_timeout determines how frequently the network thread wakes up, while blocked waiting
+	// for packets.  The purpose of the periodic wakeup is to check whether intensity_network_stream::end_stream()
+	// has been called, and check the timeout for flushing data to assembler threads.
+	//
+	// The stream_cancellation_latency_usec arg determines how frequently the network thread checks whether
+	// intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
+	// the packet read loop, since it requires acquiring a lock.)
+
+	int socket_bufsize = constants::default_socket_bufsize;
+	int socket_timeout_usec = 10000;                // 0.01 sec
+	int stream_cancellation_latency_usec = 10000;   // 0.01 sec
+
+	// Ring buffer between network thread and assembler thread.
+	int unassembled_ringbuf_capacity = 16;
+	int max_unassembled_packets_per_list = 16384;
+	int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
+	int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
+
+	// Ring buffers between assembler thread and processing threads.
+	//
+	// The ring buffers are parameterized by 'ringbuf_n', a vector whose
+	// length is the number of downsampling levels, and whose elements are
+	// the number of assembled_chunks at each level.
+	//
+	// As a shortcut, if ringbuf_n is an empty vector, then it will be
+	// initialized to a vector whose length is 'assembled_ringbuf_nlevels'
+	// and whose entries are all equal to 'assembled_ringbuf_capacity'.
+
+        std::vector<int> ringbuf_n;
+	int assembled_ringbuf_capacity = 16;
+	int assembled_ringbuf_nlevels = 4;
+
+	int max_packet_size = 9000;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
@@ -374,7 +380,7 @@ public:
 
 protected:
     // Constant after construction, so not protected by lock
-    const initializer ini_params;
+    initializer ini_params;
     const int nassemblers = 0;
 
     // This is initialized by the assembler thread before it sets 'first_packet_received' flag.

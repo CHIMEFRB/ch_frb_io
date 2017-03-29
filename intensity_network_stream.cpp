@@ -63,6 +63,10 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 {
     // Argument checking
 
+    // FIXME I recently "promoted" a lot of compile-time constants to members of
+    // intensity_network_stream::initializer.  Now that this has been done, it
+    // would make sense to add a lot more checks here!
+
     if (nassemblers == 0)
 	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
 
@@ -85,15 +89,22 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    // As explained in ch_frb_io.hpp, if ini_params.ringbuf_n is an empty vector, then
+    // it should default to a vector whose length is ini_params.assembled_ringbuf_nlevels
+    // and whose entries are all equal to ini_params.assembled_ringbuf_capacity.
+
+    if (ini_params.ringbuf_n.size() == 0)
+	ini_params.ringbuf_n = vector<int> (ini_params.assembled_ringbuf_nlevels, ini_params.assembled_ringbuf_capacity);
+
     // All initializations except the socket (which is initialized in _open_socket()),
     // and the assemblers (which are initalized when the first packet is received).
 
-    int capacity = constants::unassembled_ringbuf_capacity;
-    int max_npackets = constants::max_unassembled_packets_per_list;
-    int max_nbytes = constants::max_unassembled_nbytes_per_list;
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
+								 ini_params.max_unassembled_packets_per_list, 
+								 ini_params.max_unassembled_nbytes_per_list);
 
-    this->incoming_packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    this->incoming_packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list,
+							       ini_params.max_unassembled_nbytes_per_list);
 
     this->cumulative_event_counts = vector<int64_t> (event_type::num_types, 0);
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
@@ -122,15 +133,15 @@ intensity_network_stream::~intensity_network_stream()
 // so that the socket will always be closed if an exception is thrown somewhere.
 void intensity_network_stream::_open_socket()
 {
-    const int socket_bufsize = constants::recv_socket_bufsize;
-    const struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+    // FIXME assumes timeout < 1 sec
+    const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
 
     this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
     // bufsize
-    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
 
@@ -517,7 +528,7 @@ void intensity_network_stream::_network_thread_body()
 	uint64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
 
 	// Periodically check whether stream has been cancelled by end_stream().
-	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
+	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->state_lock);
 
 	    if (this->stream_end_requested) {
@@ -536,7 +547,7 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
-	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
+	if (curr_timestamp > incoming_packet_list_timestamp + ini_params.unassembled_ringbuf_timeout_usec) {
             _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
@@ -547,7 +558,7 @@ void intensity_network_stream::_network_thread_body()
         // Read from socket, recording the sender IP & port.
         sockaddr_in sender_addr;
         int slen = sizeof(sender_addr);
-        int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+        int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
@@ -755,8 +766,8 @@ void intensity_network_stream::_assembler_thread_body()
     // now.
     if (stream_filename.length())
         stream_to_files(stream_filename);
-
-    auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    
+    auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
     // Main packet loop

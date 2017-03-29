@@ -219,7 +219,7 @@ void intensity_network_ostream::_open_socket()
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: couldn't create udp socket: ") + strerror(errno));
 
-    int socket_bufsize = constants::send_socket_bufsize;
+    int socket_bufsize = constants::default_socket_bufsize;
     err = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
