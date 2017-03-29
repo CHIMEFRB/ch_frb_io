@@ -897,8 +897,8 @@ void intensity_network_stream::_assembler_thread_exit()
     // Make sure all event counts are accumulated.
     this->_add_event_counts(assembler_thread_event_subcounts);
 
-    // The rest of this routine just prints a summary.
-
+#if 0
+    // Decided to remove this summary info!
     vector<int64_t> counts = this->get_event_counts();
 
     stringstream ss;
@@ -917,6 +917,7 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
 
     cerr << ss.str().c_str();
+#endif
 }
 
 
