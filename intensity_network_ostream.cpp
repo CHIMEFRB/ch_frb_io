@@ -446,7 +446,8 @@ void intensity_network_ostream::_network_thread_body()
 	}
     }
 
-    this->_send_end_of_stream_packets();
+    if (ini_params.send_end_of_stream_packets)
+	this->_send_end_of_stream_packets();
 
     if (ini_params.print_status_at_end)
 	this->print_status();
