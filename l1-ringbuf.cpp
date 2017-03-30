@@ -49,14 +49,13 @@ L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
     _rb(),
     _dropped()
 {
-    if (ringbuf_n.size() == 0) {
-        // ringbuffer sizes per binning level -- if specified,
-        // overrides the number of levels and their sizes.  Otherwise,
-        // take defaults
-        for (int i=0; i<constants::assembled_ringbuf_nlevels; i++)
-            ringbuf_n.push_back(constants::assembled_ringbuf_capacity);
-    }
     _nbins = ringbuf_n.size();
+    
+    // We should never get an empty vector here, since the intensity_network_stream
+    // constructor now contains logic to replace an empty vector by a sensible default.
+    if (_nbins == 0)
+	throw runtime_error("ch_frb_io: internal error: empty ringbuf_n vector in L1Ringbuf constructor");
+
     // Create the ring buffer objects for each time binning
     // (0 = native rate, 1 = binned by 2, ...)
     for (size_t i=0; i<_nbins; i++)

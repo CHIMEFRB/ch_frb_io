@@ -62,11 +62,15 @@ struct intensity_packet {
     uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
 
+    static inline int header_size(int nbeams, int nfreq_coarse)
+    {
+	return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+    }
+
     static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
     {
-	int header_size = 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
 	int data_size = nbeams * nfreq_coarse * nupfreq * nt_per_packet;
-	return header_size + data_size;
+	return header_size(nbeams, nfreq_coarse) + data_size;
     }
 
 

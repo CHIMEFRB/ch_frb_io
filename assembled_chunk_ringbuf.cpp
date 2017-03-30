@@ -35,6 +35,7 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    // Note that 
     ringbuf = new L1Ringbuf(beam_id_, ini_params.ringbuf_n);
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
@@ -238,14 +239,11 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
-    if (active_chunk0) {
-        cout << "assembled_chunk_ringbuf::end_stream: putting chunk0 " << active_chunk0->ichunk << endl;
+    if (active_chunk0)
         this->_put_assembled_chunk(active_chunk0, event_counts);
-    }
-    if (active_chunk1) {
-        cout << "assembled_chunk_ringbuf::end_stream: putting chunk1 " << active_chunk1->ichunk << endl;
+
+    if (active_chunk1)
         this->_put_assembled_chunk(active_chunk1, event_counts);
-    }
 
     pthread_mutex_lock(&this->lock);
 

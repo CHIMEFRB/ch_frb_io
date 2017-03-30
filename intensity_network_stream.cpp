@@ -48,6 +48,10 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 {
     // Argument checking
 
+    // FIXME I recently "promoted" a lot of compile-time constants to members of
+    // intensity_network_stream::initializer.  Now that this has been done, it
+    // would make sense to add a lot more checks here!
+
     if (nassemblers == 0)
 	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
 
@@ -70,15 +74,22 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    // As explained in ch_frb_io.hpp, if ini_params.ringbuf_n is an empty vector, then
+    // it should default to a vector whose length is ini_params.assembled_ringbuf_nlevels
+    // and whose entries are all equal to ini_params.assembled_ringbuf_capacity.
+
+    if (ini_params.ringbuf_n.size() == 0)
+	ini_params.ringbuf_n = vector<int> (ini_params.assembled_ringbuf_nlevels, ini_params.assembled_ringbuf_capacity);
+
     // All initializations except the socket (which is initialized in _open_socket()),
     // and the assemblers (which are initalized when the first packet is received).
 
-    int capacity = constants::unassembled_ringbuf_capacity;
-    int max_npackets = constants::max_unassembled_packets_per_list;
-    int max_nbytes = constants::max_unassembled_nbytes_per_list;
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
+								 ini_params.max_unassembled_packets_per_list, 
+								 ini_params.max_unassembled_nbytes_per_list);
 
-    this->incoming_packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    this->incoming_packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list,
+							       ini_params.max_unassembled_nbytes_per_list);
 
     this->cumulative_event_counts = vector<int64_t> (event_type::num_types, 0);
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
@@ -107,15 +118,15 @@ intensity_network_stream::~intensity_network_stream()
 // so that the socket will always be closed if an exception is thrown somewhere.
 void intensity_network_stream::_open_socket()
 {
-    const int socket_bufsize = constants::recv_socket_bufsize;
-    const struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+    // FIXME assumes timeout < 1 sec
+    const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
 
     this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
     // bufsize
-    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
 
@@ -144,11 +155,12 @@ void intensity_network_stream::start_stream()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    if (stream_started) {
+    if (stream_end_requested || join_called) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on running, completed, or cancelled stream");
+	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called completed or cancelled stream");
     }
 
+    // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
@@ -184,15 +196,23 @@ void intensity_network_stream::join_threads()
     }
 
     if (join_called) {
+	while (!threads_joined)
+	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_threads()");
+	return;
     }
 
     this->join_called = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 
     network_thread.join();
     assembler_thread.join();
+
+    pthread_mutex_lock(&this->state_lock);
+    this->threads_joined = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);    
 }
 
 
@@ -468,10 +488,16 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 
 
 void intensity_network_stream::network_thread_main() {
+
+    pin_thread_to_cores(stream->ini_params.network_thread_cores);
+
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
 	_network_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
 	_network_thread_exit();
 	throw;
     }
@@ -500,16 +526,18 @@ void intensity_network_stream::_network_thread_body()
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
-	
     server_address.sin_family = AF_INET;
-    inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
     server_address.sin_port = htons(ini_params.udp_port);
 
-    int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+    int err = inet_pton(AF_INET, ini_params.ipaddr.c_str(), &server_address.sin_addr);
+    if (err <= 0)
+	throw runtime_error(ini_params.ipaddr + ": inet_pton() failed (note that no DNS lookup is done, the argument must be a numerical IP address)");
+
+    err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets on port " + to_string(ini_params.udp_port) + "\n");
+    cerr << ("ch_frb_io: listening for packets, ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + "\n");
 
     // Main packet loop
 
@@ -526,7 +554,7 @@ void intensity_network_stream::_network_thread_body()
         uint64_t timestamp;
 
 	// Periodically check whether stream has been cancelled by end_stream().
-	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
+	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->state_lock);
 
 	    if (this->stream_end_requested) {
@@ -545,7 +573,7 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
-	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
+	if (curr_timestamp > incoming_packet_list_timestamp + ini_params.unassembled_ringbuf_timeout_usec) {
             _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
@@ -558,7 +586,7 @@ void intensity_network_stream::_network_thread_body()
         // Record the sender IP & port here
         sockaddr_in sender_addr;
         int slen = sizeof(sender_addr);
-        int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+        int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 
 	curr_timestamp = usec_between(tv_ini, xgettimeofday());
@@ -687,7 +715,7 @@ void intensity_network_stream::_put_unassembled_packets()
 	if (ini_params.emit_warning_on_buffer_drop)
 	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
 	if (ini_params.throw_exception_on_buffer_drop)
-	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
+	    throw runtime_error("ch_frb_io: unassembled packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
     }
 }
 
@@ -698,10 +726,16 @@ void intensity_network_stream::_put_unassembled_packets()
 
 
 void intensity_network_stream::assembler_thread_main() {
+
+    pin_thread_to_cores(stream->ini_params.assembler_thread_cores);
+
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
 	_assembler_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
 	_assembler_thread_exit();
 	throw;
     }
@@ -762,7 +796,8 @@ void intensity_network_stream::_assembler_thread_body()
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 
-    auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
+
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
     struct timeval tva, tvb;
@@ -916,8 +951,8 @@ void intensity_network_stream::_assembler_thread_exit()
     // Make sure all event counts are accumulated.
     this->_add_event_counts(assembler_thread_event_subcounts);
 
-    // The rest of this routine just prints a summary.
-
+#if 0
+    // Decided to remove this summary info!
     vector<int64_t> counts = this->get_event_counts();
 
     stringstream ss;
@@ -936,6 +971,7 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
 
     cerr << ss.str().c_str();
+#endif
 }
 
 
