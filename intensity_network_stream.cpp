@@ -489,7 +489,7 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 
 void intensity_network_stream::network_thread_main() {
 
-    pin_thread_to_cores(stream->ini_params.network_thread_cores);
+    pin_thread_to_cores(ini_params.network_thread_cores);
 
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
@@ -727,7 +727,7 @@ void intensity_network_stream::_put_unassembled_packets()
 
 void intensity_network_stream::assembler_thread_main() {
 
-    pin_thread_to_cores(stream->ini_params.assembler_thread_cores);
+    pin_thread_to_cores(ini_params.assembler_thread_cores);
 
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
