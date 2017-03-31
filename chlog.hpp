@@ -39,7 +39,7 @@ chime_logf(enum log_level lev, const char* file, int line, const char* function,
     do {                                                                \
         std::ostringstream ss;                                          \
         ss << __VA_ARGS__;                                              \
-        chime_log(log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, ss.str()); \
+        chime_log(ch_frb_io::log_level_info, __FILE__, __LINE__, __PRETTY_FUNCTION__, ss.str()); \
     } while(0)
 
 // Like chlog, but takes a printf-style format string and arguments.

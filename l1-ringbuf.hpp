@@ -34,6 +34,19 @@ protected:
     virtual void dropping(std::shared_ptr<ch_frb_io::assembled_chunk> t);
 };
 
+enum l1_ringbuf_level {
+    L1RB_DOWNSTREAM = 1,
+    L1RB_LEVEL1 = 2,
+    L1RB_LEVEL2 = 4,
+    L1RB_LEVEL3 = 8,
+    L1RB_LEVEL4 = 0x10,
+    L1RB_WAIT1 = 0x20,
+    L1RB_WAIT2 = 0x40,
+    L1RB_WAIT3 = 0x80,
+    // queued for writing in the L1 RPC system
+    L1RB_WRITEQUEUE = 0x100,
+};
+
 class L1Ringbuf {
     friend class AssembledChunkRingbuf;
 
@@ -42,10 +55,10 @@ public:
 
     /*
      Tries to enqueue an assembled_chunk.  If no space can be
-     allocated, returns false.  The ring buffer now assumes ownership
-     of the assembled_chunk.
+     allocated, returns an empty shared_ptr.  The ring buffer now
+     assumes ownership of the assembled_chunk.
      */
-    bool push(ch_frb_io::assembled_chunk* ch);
+    std::shared_ptr<ch_frb_io::assembled_chunk> push(ch_frb_io::assembled_chunk* ch);
 
     /*
      Returns the next assembled_chunk for downstream processing.
@@ -92,7 +105,7 @@ public:
      applied; likewise for max_fpga_counts.
      */
     void retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
-                  std::vector<std::shared_ptr<ch_frb_io::assembled_chunk> >&chunks);
+                  std::vector<std::pair<std::shared_ptr<ch_frb_io::assembled_chunk>, uint64_t> > &chunks);
 
 public:
     uint64_t _beam_id;

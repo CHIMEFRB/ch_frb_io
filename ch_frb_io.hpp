@@ -7,9 +7,15 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 #include <unordered_map>
 #include <memory>
+#include <cstdint>
+#include <atomic>
 #include <random>
+#include <thread>
+#include <iostream>
+
 #include <hdf5.h>
 
 namespace ch_frb_io {
@@ -44,6 +50,11 @@ class assembled_chunk_ringbuf;
 
 namespace constants {
     static constexpr int cache_line_size = 64;
+    
+    // Number of seconds per FPGA count.  This "magic number" appears in multiple libraries
+    // (ch_frb_io, rf_pipelines, ch_vdif_assembler).  FIXME: it would be better to keep it
+    // in one place, to avoid any possibility of having it get out-of-sync.
+    static constexpr double dt_fpga = 2.56e-6;
 
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse_tot = 1024;
@@ -51,56 +62,29 @@ namespace constants {
     // For an explanation of this parameter, see class intensity_network_ostream below 
     static constexpr double default_wt_cutoff = 0.3;
 
-    // Network parameters.
-    //
-    // The recv_socket_timeout determines how frequently the network thread wakes up, while blocked waiting
-    // for packets.  The purpose of the periodic wakeup is to check whether intensity_network_stream::end_stream()
-    // has been called, and check the timeout for flushing data to assembler threads.
-    //
-    // The max packet size params have been chosen around ~9KB, as appropriate for 1 Gbps ethernet
-    // with jumbo frames and no fragmentation.
-    //
-    // The stream_cancellation_latency_usec arg determines how frequently the network thread checks whether
-    // intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
-    // the packet read loop, since it requires acquiring a lock.)
-
     static constexpr int default_udp_port = 10252;
-    static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
-    static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
-    static constexpr int recv_socket_timeout_usec = 10000;   // 0.01 sec
-    static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
-    static constexpr double default_gbps = 1.0;              // default transmit rate for output stream
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size
-    static constexpr int recv_socket_bufsize = 4 * 1024 * 1024;
-    static constexpr int send_socket_bufsize = 4 * 1024 * 1024;
+    static constexpr int default_socket_bufsize = 4 * 1024 * 1024;
 #else
-    static constexpr int recv_socket_bufsize = 128 * 1024 * 1024;
-    static constexpr int send_socket_bufsize = 128 * 1024 * 1024;
+    static constexpr int default_socket_bufsize = 128 * 1024 * 1024;
 #endif
 
     // This applies to the ring buffer between the network _output_ thread, and callers of
     // intensity_network_ostream::send_chunk().
     static constexpr int output_ringbuf_capacity = 8;
 
-    // Ring buffer between network _input_ thread and assembler thread.
-    static constexpr int unassembled_ringbuf_capacity = 16;
-    static constexpr int max_unassembled_packets_per_list = 16384;
-    static constexpr int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
-    static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
-
-    // Ring buffers between assembler thread and processing threads.
-    static constexpr int assembled_ringbuf_capacity = 8;
-    static constexpr int assembled_ringbuf_nlevels = 4;
-
     static constexpr int nt_per_assembled_chunk = 1024;
 
-    // These parameters don't really affect anything but appear in range-checking asserts.
+    // These parameters don't really affect anything but appear in asserts.
+    static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
+    static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
     static constexpr int max_allowed_beam_id = 65535;
     static constexpr int max_allowed_nupfreq = 64;
     static constexpr int max_allowed_nt_per_packet = 1024;
     static constexpr int max_allowed_fpga_counts_per_sample = 3200;
+    static constexpr double max_allowed_output_gbps = 10.0;
 };
 
 
@@ -219,7 +203,7 @@ struct intensity_hdf5_ofile {
     // and freq1_MHz=400.
     //
     // The optional 'ipos0' and 'time0' args are:
-    //   ipos0 = index of first sample in file (in downsampled units, i.e. one sample is ~1.3 msec, not ~2.5 usec)
+    //   ipos0 = index of first sample in file (in downsampled units, i.e. one sample is ~1 msec, not ~2.56 usec)
     //   time0 = arrival time of first sample in file (in seconds).
     //
     // The meaning of the 'bitshuffle' arg is:
@@ -279,7 +263,11 @@ public:
 
     struct initializer {
 	std::vector<int> beam_ids;
+
+	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
+	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
+
 	bool mandate_reference_kernels = false;
 	bool mandate_fast_kernels = false;
 	bool emit_warning_on_buffer_drop = true;
@@ -288,7 +276,44 @@ public:
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
+
+	// If nonempty, threads will be pinned to given list of cores.
+	std::vector<int> network_thread_cores;
+	std::vector<int> assembler_thread_cores;
+
+	// The recv_socket_timeout determines how frequently the network thread wakes up, while blocked waiting
+	// for packets.  The purpose of the periodic wakeup is to check whether intensity_network_stream::end_stream()
+	// has been called, and check the timeout for flushing data to assembler threads.
+	//
+	// The stream_cancellation_latency_usec arg determines how frequently the network thread checks whether
+	// intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
+	// the packet read loop, since it requires acquiring a lock.)
+
+	int socket_bufsize = constants::default_socket_bufsize;
+	int socket_timeout_usec = 10000;                // 0.01 sec
+	int stream_cancellation_latency_usec = 10000;   // 0.01 sec
+
+	// Ring buffer between network thread and assembler thread.
+	int unassembled_ringbuf_capacity = 16;
+	int max_unassembled_packets_per_list = 16384;
+	int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
+	int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
+
+	// Ring buffers between assembler thread and processing threads.
+	//
+	// The ring buffers are parameterized by 'ringbuf_n', a vector whose
+	// length is the number of downsampling levels, and whose elements are
+	// the number of assembled_chunks at each level.
+	//
+	// As a shortcut, if ringbuf_n is an empty vector, then it will be
+	// initialized to a vector whose length is 'assembled_ringbuf_nlevels'
+	// and whose entries are all equal to 'assembled_ringbuf_capacity'.
+
         std::vector<int> ringbuf_n;
+	int assembled_ringbuf_capacity = 16;
+	int assembled_ringbuf_nlevels = 4;
+
+	int max_packet_size = 9000;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
@@ -319,7 +344,7 @@ public:
     static std::shared_ptr<intensity_network_stream> make(const initializer &ini_params);
 
     // High level control.
-    void start_stream();         // tells network thread to start listening for packets
+    void start_stream();         // tells network thread to start listening for packets (if stream has already started, this is not an error)
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
@@ -345,21 +370,36 @@ public:
 
     std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
-    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> &beams,
-                                                                                         uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+    // Retrieves chunks from one or more ring buffers.  The uint64_t
+    // return value is a bitmask of l1_ringbuf_level values saying
+    // where in the ringbuffer the chunk was found; this is an
+    // implementation detail revealed for debugging purposes
+    std::vector< std::vector< std::pair<std::shared_ptr<assembled_chunk>, uint64_t> > >
+    get_ringbuf_snapshots(std::vector<uint64_t> &beams,
+                          uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    // For debugging/testing purposes: pretend that the given assembled_chunk
-    // has just arrived.
-    void inject_assembled_chunk(assembled_chunk* chunk);
+    // For debugging/testing purposes: pretend that the given
+    // assembled_chunk has just arrived.  Returns true if there was
+    // room in the ring buffer for the new chunk.
+    bool inject_assembled_chunk(assembled_chunk* chunk);
 
     // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
     void stream_to_files(const std::string& filename_pattern);
+
+    // For debugging/testing: request that the given callback be
+    // called each time an assembled_chunk is enqueued in the ring
+    // buffer.
+    void add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
+    //void remove_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
+
+    // For debugging: print state.
+    void print_state();
 
     ~intensity_network_stream();
 
 protected:
     // Constant after construction, so not protected by lock
-    const initializer ini_params;
+    initializer ini_params;
     const int nassemblers = 0;
 
     // This is initialized by the assembler thread before it sets 'first_packet_received' flag.
@@ -382,9 +422,22 @@ protected:
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
+    // Written by network thread, read by outside thread
+    // How much wall time do we spend waiting in recvfrom() vs processing?
+    std::atomic<uint64_t> network_thread_waiting_usec;
+    std::atomic<uint64_t> network_thread_working_usec;
+
+    std::atomic<uint64_t> socket_queued_bytes;
+
     // I'm not sure how much it actually helps bottom-line performace, but it seemed like a good idea
     // to insert padding so that data accessed by different threads is in different cache lines.
     char _pad1[constants::cache_line_size];
+
+    // Written by assembler thread, read by outside thread
+    std::atomic<uint64_t> assembler_thread_waiting_usec;
+    std::atomic<uint64_t> assembler_thread_working_usec;
+
+    char _pad1b[constants::cache_line_size];
 
     // Used only by the network thread (not protected by lock)
     //
@@ -403,8 +456,9 @@ protected:
     // Used only by the assembler thread
     std::vector<int64_t> assembler_thread_event_subcounts;
 
-    pthread_t network_thread;
-    pthread_t assembler_thread;
+    std::thread network_thread;
+    std::thread assembler_thread;
+
     char _pad3[constants::cache_line_size];
 
     // State model.  These flags are protected by the state_lock and are set in sequence.
@@ -414,13 +468,13 @@ protected:
 
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;       // threads wait here for state to change
-    bool assembler_thread_started = false;   // set by assembler thread on startup
-    bool network_thread_started = false;     // set by network thread on startup
+
     bool stream_started = false;             // set asynchonously by calling start_stream()
     bool first_packet_received = false;      // set by network thread
     bool assemblers_initialized = false;     // set by assembler thread
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
+    bool threads_joined = false;             // set when both threads (network + assembler) are joined
     char _pad4[constants::cache_line_size];
 
     pthread_mutex_t event_lock;
@@ -428,6 +482,8 @@ protected:
     std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
     std::string stream_filename;
+
+    std::vector<std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
@@ -439,8 +495,8 @@ protected:
     void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
 
-    static void *network_pthread_main(void *);
-    static void *assembler_pthread_main(void *);
+    void network_thread_main();
+    void assembler_thread_main();
 
     // Private methods called by the network thread.    
     void _network_thread_body();
@@ -595,7 +651,15 @@ public:
     //        (nbeams, coarse_freq_ids.size(), nupfreq, nt_per_chunk)
     //     and will generally correspond to multiple packets.
     //
-    //   - The target_gbps arg enables throttling of the output to some target bandwidth in Gbps.
+    //   - If throttle=false, then UDP packets will be written as quickly as possible.
+    //     If throttle=true, then the packet-throttling logic works as follows:
+    //
+    //        - If target_gbps > 0.0, then packets will be transmitted at the
+    //          specified rate in Gbps.
+    //
+    //        - If target_gbps = 0, then the packet transmit rate will be inferred
+    //          from the value of 'fpga_counts_per_sample', assuming 2.56 usec per
+    //          fpga count.  (This is the default.)
 
     struct initializer {
 	std::string dstname;
@@ -608,12 +672,17 @@ public:
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	float wt_cutoff = constants::default_wt_cutoff;
-	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
         int bind_port = 0; // 0: don't bind; send from randomly assigned port
+        std::string bind_ip = "0.0.0.0";
+
+	bool throttle = true;
+	double target_gbps = 0.0;
 
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
 	bool throw_exception_on_buffer_drop = false;
+	bool send_end_of_stream_packets = true;
+	bool print_status_at_end = true;
     };
 
     const initializer ini_params;
@@ -632,7 +701,12 @@ public:
     const uint64_t fpga_counts_per_sample;
     const uint64_t fpga_counts_per_packet;
     const uint64_t fpga_counts_per_chunk;
-    const double target_gbps;
+
+    // Note: this->target_gpbs is not identical to ini_params.target_gpbs, since there is a case 
+    // (ini_params.throttle=true and ini_params.target_gbps=0) where ini_params.target_gbps is zero, 
+    // but this->target_gbps has a nonzero value inferred from 'fpga_counts_per_sample'.
+
+    double target_gbps = 0.0;
 
     // It's convenient to initialize intensity_network_ostreams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns a network thread which runs
@@ -663,7 +737,9 @@ public:
 
     // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
     void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
-    
+
+    void print_status(std::ostream &os = std::cout);
+
 protected:
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;
@@ -702,13 +778,16 @@ protected:
     virtual ssize_t _send(int socket, const uint8_t* packet, int nbytes, int flags);
 
     void _open_socket();
-    void _announce_end_of_stream();
+    void _send_end_of_stream_packets();
 };
 
 
 // -------------------------------------------------------------------------------------------------
 //
 // Miscellaneous
+
+
+extern void pin_thread_to_cores(const std::vector<int> &core_list);
 
 
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)

@@ -35,6 +35,7 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    // Note that 
     ringbuf = new L1Ringbuf(beam_id_, ini_params.ringbuf_n);
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
@@ -55,11 +56,16 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     delete ringbuf;
 }
 
-vector<shared_ptr<assembled_chunk> >
+void assembled_chunk_ringbuf::print_state() {
+    cout << "Beam " << beam_id << endl;
+    ringbuf->print();
+}
+
+vector<pair<shared_ptr<assembled_chunk>, uint64_t> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
                                               uint64_t max_fpga_counts)
 {
-    vector<shared_ptr<assembled_chunk> > chunks;
+    vector<pair<shared_ptr<assembled_chunk>, uint64_t> > chunks;
     pthread_mutex_lock(&this->lock);
     ringbuf->retrieve(min_fpga_counts, max_fpga_counts, chunks);
     pthread_mutex_unlock(&this->lock);
@@ -139,7 +145,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     }
 }
 
-void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
+bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
@@ -164,14 +170,20 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // Convert unique_ptr into bare pointer, and reset unique_ptr.
     assembled_chunk* ch = chunk.release();
     // Try to add to ringbuf...
-    bool added = ringbuf->push(ch);
+    shared_ptr<assembled_chunk> sch = ringbuf->push(ch);
 
-    if (added) {
+    if (sch) {
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
+
+        // Call any callbacks for chunks being added.
+        for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {
+            (*it)(sch);
+        }
+
         if (event_counts)
             event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
-	return;
+	return true;
     }
 
     // If we get here, the ring buffer was full.
@@ -184,17 +196,19 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
     if (ini_params.throw_exception_on_buffer_drop)
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
+    return false;
 }
 
-void assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
+bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
     uint64_t ich = chunk->ichunk;
     unique_ptr<assembled_chunk> uch(chunk);
-    _put_assembled_chunk(uch, NULL);
+    bool worked = _put_assembled_chunk(uch, NULL);
     // Danger: monkey with the active_chunk0, active_chunk1 variables,
     // which are not lock-protected and only supposed to be accessed
     // by the assembler thread.
     active_chunk0 = this->_make_assembled_chunk(ich + 1);
     active_chunk1 = this->_make_assembled_chunk(ich + 2);
+    return worked;
 }
 
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)
@@ -225,14 +239,11 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
-    if (active_chunk0) {
-        cout << "assembled_chunk_ringbuf::end_stream: putting chunk0 " << active_chunk0->ichunk << endl;
+    if (active_chunk0)
         this->_put_assembled_chunk(active_chunk0, event_counts);
-    }
-    if (active_chunk1) {
-        cout << "assembled_chunk_ringbuf::end_stream: putting chunk1 " << active_chunk1->ichunk << endl;
+
+    if (active_chunk1)
         this->_put_assembled_chunk(active_chunk1, event_counts);
-    }
 
     pthread_mutex_lock(&this->lock);
 

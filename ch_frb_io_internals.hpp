@@ -62,11 +62,15 @@ struct intensity_packet {
     uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
 
+    static inline int header_size(int nbeams, int nfreq_coarse)
+    {
+	return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+    }
+
     static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
     {
-	int header_size = 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
 	int data_size = nbeams * nfreq_coarse * nupfreq * nt_per_packet;
-	return header_size + data_size;
+	return header_size(nbeams, nfreq_coarse) + data_size;
     }
 
 
@@ -203,6 +207,8 @@ struct udp_packet_ringbuf : noncopyable {
     // Throws an exception if called after end-of-stream.
     bool put_packet_list(std::unique_ptr<udp_packet_list> &p, bool is_blocking);
 
+    void get_size(int* currsize, int* maxsize);
+
     // Note!  The pointer 'p' is _swapped_ with the udp_packet_list which is extracted from the ring buffer.
     // In other words, when get_packet_list() returns, the original udp_packet_list will be "recycled" (rather than freed).
     // Returns true on success (possibly after blocking), returns false if ring buffer is empty and stream has ended.
@@ -253,7 +259,10 @@ public:
     void end_stream(int64_t *event_counts);
 
     // Debugging: inject the given chunk
-    void inject_assembled_chunk(assembled_chunk* chunk);
+    bool inject_assembled_chunk(assembled_chunk* chunk);
+
+    // Debugging: print state
+    void print_state();
 
     // Called by processing threads, via intensity_network_stream::get_assembled_chunk().
     // Returns the next assembled_chunk from the ring buffer, blocking if necessary to wait for data.
@@ -261,7 +270,7 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
 
-    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+    std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
     // Returns stats about the ring buffer.
     //  *ringbuf_fpga_next* is the FPGA-counts of the next chunk that will be delivered to get_assembled_chunk().
@@ -280,6 +289,9 @@ public:
     // Are we streaming data to disk?
     std::string stream_filename_pattern;
 
+    // Debugging: callbacks for each enqueued assembled_chunk.
+    std::vector< std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
+
 protected:
     const intensity_network_stream::initializer ini_params;
 
@@ -290,7 +302,7 @@ protected:
 
     // Helper function: adds assembled chunk to the ring buffer
     // Post-condition: chunk has been reset().
-    void _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
+    bool _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
     // Helper function: allocates new assembled chunk
     std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);

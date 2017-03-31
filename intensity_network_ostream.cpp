@@ -95,10 +95,15 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq (or uninitalized)");
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample (or uninitialized)");
+
     if (ini_params.wt_cutoff <= 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be > 0");
-    if (target_gbps < 0.0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected target_gbps to be >= 0.0");
+    if (ini_params.target_gbps < 0.0)
+	throw runtime_error("ch_frb_io::intensity_network_ostream::initializer::target_gbps is negative");
+    if (ini_params.target_gbps > constants::max_allowed_output_gbps)
+	throw runtime_error("ch_frb_io::intensity_network_ostream::initializer::target_gbps is > max_allowed_output_gbps, presumably unintentional");
+    if (!ini_params.throttle && (ini_params.target_gbps != 0.0))
+	throw runtime_error("ch_frb_io::intensity_network_ostream::initializer::throttle is false, but target_gbps is nonzero, suspect this is a misconfiguration");
 
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
@@ -117,6 +122,18 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 	for (unsigned int j = 0; j < i; j++)
 	    if (ini_params.coarse_freq_ids[i] == ini_params.coarse_freq_ids[j])
 		throw runtime_error("intensity_network_ostream constructor: duplicate coarse_freq_id");
+    }
+
+    if (ini_params.throttle && (target_gbps == 0.0)) {
+	// Infer target_gbps from fpga_counts_per_sample.
+	double num = (8.0e-9 * nbytes_per_packet) * (nfreq_coarse_per_chunk / nfreq_coarse_per_packet);   // gigabits
+	double den = (fpga_counts_per_packet * constants::dt_fpga);    // seconds
+	this->target_gbps = num / den;
+    }
+
+    if (target_gbps > constants::max_allowed_output_gbps) {
+	throw runtime_error("ch_frb_io::intensity_network_ostream:: inferred target_gbps(=" + to_string(target_gbps)
+			    + ") is > max_allowed_output_gbps(=" + to_string(constants::max_allowed_output_gbps) + ")");
     }
 
     // Parse dstname (expect string of the form HOSTNAME[:PORT])
@@ -202,7 +219,7 @@ void intensity_network_ostream::_open_socket()
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: couldn't create udp socket: ") + strerror(errno));
 
-    int socket_bufsize = constants::send_socket_bufsize;
+    int socket_bufsize = constants::default_socket_bufsize;
     err = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
@@ -211,9 +228,15 @@ void intensity_network_ostream::_open_socket()
         struct sockaddr_in server_address;
         memset(&server_address, 0, sizeof(server_address));
         server_address.sin_family = AF_INET;
-        inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
+        int err = inet_pton(AF_INET, ini_params.bind_ip.c_str(), &server_address.sin_addr);
+        if (err != 1) {
+            string errstr = "ch_frb_io: failed to parse bind_ip: \"" + ini_params.bind_ip + "\"";
+            if (err == -1)
+                errstr += ": " + string(strerror(errno));
+            throw runtime_error(errstr);
+        }
         server_address.sin_port = htons(ini_params.bind_port);
-        int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+        err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
         if (err < 0)
             throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
     }
@@ -330,7 +353,8 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 
     try {
 	stream->_network_thread_body();
-    } catch (...) {
+    } catch (exception &e) {
+	cerr << e.what() << endl;
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
@@ -348,10 +372,29 @@ void intensity_network_ostream::_network_thread_body()
     pthread_mutex_unlock(&state_lock);
 
     auto packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
-    int last_packet_nbytes = 0;
-
-    // to be initialized when first packet is sent
+    
+    // To be initialized when first packet is sent.
     struct timeval tv_ini;
+
+    // Thread-local timestamps and counters.  
+    //
+    // Note that 'class intensity_network_ostream' defines three thread-shared members, which
+    // will be kept in sync with their thread-local counterparts:
+    //
+    //    curr_timestamp <-> tstamp
+    //    npackets_sent  <-> npackets_tot
+    //    nbytes_sent    <-> nbytes_tot
+    //
+    // At the bottom of the packet loop below, we acquire the lock and update the thread-shared
+    // versions.  In the body of the loop, we use the thread-locals so that we don't need
+    // to acquire the lock repeatedly.  This scheme is safe because these variables are only 
+    // modified by the network thread (i.e. other threads only access them read-only).
+
+    int64_t prev_packet_nbytes = 0;
+    int64_t prev_tstamp = 0;
+    int64_t nbytes_tot = 0;     // not to be confused with thread-shared variable this->nbytes_sent
+    int64_t npackets_tot = 0;   // not to be confused with this->npackets_sent
+    int64_t tstamp = 0;         // not to be confused with this->curr_timestamp
     
     // Loop over packet_lists
     for (;;) {
@@ -363,23 +406,29 @@ void intensity_network_ostream::_network_thread_body()
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
 	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 
-            pthread_mutex_lock(&statistics_lock);
-	    if (npackets_sent == 0)
+	    if (npackets_tot == 0)
 		tv_ini = xgettimeofday();
 
-	    int64_t last_timestamp = this->curr_timestamp;
-            int64_t tstamp = this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
-            int64_t npackets = this->npackets_sent;
-            pthread_mutex_unlock(&statistics_lock);
+	    tstamp = usec_between(tv_ini, xgettimeofday());
 
 	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
-	    if ((target_gbps > 0.0) && (npackets > 0)) {
-		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
+	    //
+	    // t1 = "global" target timestamp based on cumulative transmission so far.  In normal
+	    //      operation this will determine the time when the new packet is sent.
+	    //
+	    // t2 = "local" target timestamp based on transmission time of previous packet.  We
+	    //      compute this below with a fudge factor of 0.8.  The idea is that in a situation
+	    //      where the cumulative transfer has fallen behind, we can temporarily transmit
+	    //      20% faster while we catch up.
+
+	    if ((target_gbps > 0.0) && (npackets_tot > 0)) {
+		int64_t t1 = 8.0e-3 * nbytes_tot / target_gbps;
+		int64_t t2 = prev_tstamp + int64_t(0.8 * 8.0e-3 * prev_packet_nbytes / target_gbps);
+		int64_t target_timestamp = max(t1,t2);
+
 		if (tstamp < target_timestamp) {
 		    xusleep(target_timestamp - tstamp);
-                    pthread_mutex_lock(&statistics_lock);
-		    curr_timestamp = target_timestamp;
-                    pthread_mutex_unlock(&statistics_lock);
+		    tstamp = target_timestamp;
 		}
 	    }
 
@@ -389,15 +438,25 @@ void intensity_network_ostream::_network_thread_body()
 	    if (n != packet_nbytes)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(packet_nbytes) + " bytes?!");
 
-	    last_packet_nbytes = packet_nbytes;
+	    prev_packet_nbytes = packet_nbytes;
+	    prev_tstamp = tstamp;
+	    nbytes_tot += packet_nbytes;
+	    npackets_tot++;
+
+	    // Keep thread-shared variables in sync with thread-locals, as described above.
             pthread_mutex_lock(&statistics_lock);
-	    this->nbytes_sent += packet_nbytes;
-	    this->npackets_sent++;
+	    this->curr_timestamp = tstamp;
+	    this->nbytes_sent = nbytes_tot;
+	    this->npackets_sent = npackets_tot;
             pthread_mutex_unlock(&statistics_lock);
 	}
     }
 
-    this->_announce_end_of_stream();
+    if (ini_params.send_end_of_stream_packets)
+	this->_send_end_of_stream_packets();
+
+    if (ini_params.print_status_at_end)
+	this->print_status();
 }
 
 ssize_t intensity_network_ostream::_send(int socket, const uint8_t* packet, int nbytes, int flags) {
@@ -415,18 +474,16 @@ void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,
 }
 
 
-void intensity_network_ostream::_announce_end_of_stream()
+void intensity_network_ostream::_send_end_of_stream_packets()
 {
     // Send end-of-stream packets.  (This isn't part of the packet protocol, but the network _input_
     // stream contains an option to shut down gracefully if a special packet with nbeams=nupfreq=nt=0
     // is received.)
     //
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
-    // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
+    // reaches the other side, but we'll make a best effort by sending 5 packets separated by 0.1 sec.
 
-    cerr << "ch_frb_io: network output thread sending end-of-stream packets\n";
-
-    for (int ipacket = 0; ipacket < 10; ipacket++) {
+    for (int ipacket = 0; ipacket < 5; ipacket++) {
 	vector<uint8_t> packet(24, uint8_t(0));
 	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
@@ -446,18 +503,38 @@ void intensity_network_ostream::_announce_end_of_stream()
 
 	break;
     }
+}
 
-    // End-of-stream summary info
+
+void intensity_network_ostream::print_status(ostream &os)
+{
+    int64_t tstamp = 0;
+    int64_t npackets = 0;
+    int64_t nbytes = 0;
+
+    this->get_statistics(tstamp, npackets, nbytes);
+
+    // Gather output into a single contiguous C-string, in order
+    // to reduce probability of interleaved output in multithreaded case.
 
     stringstream ss;
-    ss << "ch_frb_io: network output thread exiting, npackets_sent=" << npackets_sent;
-    if (npackets_sent >= 2)
-	ss << ", gbps=" << (8.0e-3 * nbytes_sent / double(curr_timestamp));
+
+    ss << "ch_frb_io output stream: dst=" << ini_params.dstname
+       << ", nbeams=" << nbeams << ", nfreq_coarse=" << nfreq_coarse_per_chunk
+       << ", npackets=" << npackets;
+
+    if (npackets >= 2)
+	ss << ", gbps=" << (8.0e-3 * nbytes / double(tstamp));
+
     if (target_gbps > 0.0)
 	ss << ", target_gbps=" << target_gbps;
+
     ss << "\n";
 
-    cerr << ss.str();
+    string s = ss.str();
+    const char *cstr = s.c_str();
+
+    os << cstr;
 }
 
 

@@ -49,14 +49,13 @@ L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
     _rb(),
     _dropped()
 {
-    if (ringbuf_n.size() == 0) {
-        // ringbuffer sizes per binning level -- if specified,
-        // overrides the number of levels and their sizes.  Otherwise,
-        // take defaults
-        for (int i=0; i<constants::assembled_ringbuf_nlevels; i++)
-            ringbuf_n.push_back(constants::assembled_ringbuf_capacity);
-    }
     _nbins = ringbuf_n.size();
+    
+    // We should never get an empty vector here, since the intensity_network_stream
+    // constructor now contains logic to replace an empty vector by a sensible default.
+    if (_nbins == 0)
+	throw runtime_error("ch_frb_io: internal error: empty ringbuf_n vector in L1Ringbuf constructor");
+
     // Create the ring buffer objects for each time binning
     // (0 = native rate, 1 = binned by 2, ...)
     for (size_t i=0; i<_nbins; i++)
@@ -68,16 +67,16 @@ L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
 }
 
 /*
- Tries to enqueue an assembled_chunk.  If no space can be
- allocated, returns false.  The ring buffer now assumes ownership
+ Tries to enqueue an assembled_chunk.  If no space can be allocated,
+ returns an empty shared_ptr.  The ring buffer now assumes ownership
  of the assembled_chunk.
  */
-bool L1Ringbuf::push(assembled_chunk* ch) {
+shared_ptr<assembled_chunk> L1Ringbuf::push(assembled_chunk* ch) {
     shared_ptr<assembled_chunk> p = _rb[0]->push(ch);
     if (!p)
-        return false;
+        return p;
     _q.push_back(p);
-    return true;
+    return p;
 }
 
 /*
@@ -153,16 +152,16 @@ void L1Ringbuf::print() {
     for (auto it = _q.begin(); it != _q.end(); it++) {
         cout << (*it)->ichunk << " ";
     }
-    cout << "];" << endl;
+    cout << "]" << endl;
     for (size_t i=0; i<_nbins; i++) {
         vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
-        cout << "  binning " << i << ": [ ";
+        cout << "  binning " << i << ":  [ ";
         for (auto it = v.begin(); it != v.end(); it++) {
             cout << (*it)->ichunk << " ";
         }
         cout << "]" << endl;
         if (i < _nbins-1) {
-            cout << "  dropped " << i << ": ";
+            cout << "  dropped " << i << ":  ";
             if (_dropped[i])
                 cout << _dropped[i]->ichunk << endl;
             else
@@ -172,19 +171,29 @@ void L1Ringbuf::print() {
 }
 
 void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
-                         vector<shared_ptr<assembled_chunk> >& chunks) {
+                         vector<pair<shared_ptr<assembled_chunk>, uint64_t> >& chunks) {
+    uint64_t where;
     // Check chunks queued for downstream processing
+    where = L1RB_DOWNSTREAM;
     for (auto it = _q.begin(); it != _q.end(); it++)
         if (assembled_chunk_overlaps_range(*it, min_fpga_counts, max_fpga_counts))
-            chunks.push_back(*it);
+            chunks.push_back(make_pair(*it, where));
 
     // Check ring buffers
     for (size_t i=0; i<_nbins; i++) {
-        _rb[i]->snapshot(chunks, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
+        vector<shared_ptr<assembled_chunk> > ch;
+        // uhhh, nice
+        where = ((i == 0) ? L1RB_LEVEL1 : ((i == 1) ? L1RB_LEVEL2 : ((i == 2) ? L1RB_LEVEL3 : L1RB_LEVEL4)));
+        _rb[i]->snapshot(ch, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
+        for (auto it = ch.begin(); it != ch.end(); it++)
+            chunks.push_back(make_pair(*it, where));
+
         // Check the chunks that have been "dropped" but are waiting to be binned down.
         if ((i < _nbins-1) && (_dropped[i]) &&
-            assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts))
-            chunks.push_back(_dropped[i]);
+            assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts)) {
+            where = ((i == 0) ? L1RB_WAIT1 : ((i == 1) ? L1RB_WAIT2 : L1RB_WAIT3));
+            chunks.push_back(make_pair(_dropped[i], where));
+        }
     }
 }
 

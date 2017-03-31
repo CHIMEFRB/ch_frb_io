@@ -1,3 +1,4 @@
+#include <functional>
 #include <sys/ioctl.h>
 
 #include <sys/types.h>
@@ -5,6 +6,7 @@
 #include <arpa/inet.h>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -18,40 +20,19 @@ namespace ch_frb_io {
 //
 // class intensity_network_stream
 
-
 // Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const initializer &x)
 {
+    // not using make_shared because constructor is protected
     intensity_network_stream *retp = new intensity_network_stream(x);
     shared_ptr<intensity_network_stream> ret(retp);
 
     ret->_open_socket();
 
-    // Spawn assembler thread.  Note that we pass a bare pointer to an object ('ret') on our stack
-    // and this pointer will be invalid after make() returns.  Therefore, the assembler thread only
-    // dereferences the pointer before it sets the assembler_thread_started flag, and make() waits for this
-    // flag to be set before it returns.  The same synchronization logic applies to the network thread.
-
-    int err = pthread_create(&ret->assembler_thread, NULL, assembler_pthread_main, (void *) &ret);
-    if (err)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
-    
-    // Wait for assembler thread to start
-    pthread_mutex_lock(&ret->state_lock);
-    while (!ret->assembler_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);    
-
+    // Spawn assembler thread.
+    ret->assembler_thread = std::thread(std::bind(&intensity_network_stream::assembler_thread_main, ret));
     // Spawn network thread
-    err = pthread_create(&ret->network_thread, NULL, network_pthread_main, (void *) &ret);
-    if (err)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
-    
-    // Wait for network thread to start
-    pthread_mutex_lock(&ret->state_lock);
-    while (!ret->network_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);    
+    ret->network_thread = std::thread(std::bind(&intensity_network_stream::network_thread_main, ret));
 
     return ret;
 }
@@ -59,9 +40,17 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
-    nassemblers(ini_params_.beam_ids.size())
+    nassemblers(ini_params_.beam_ids.size()),
+    network_thread_waiting_usec(0),
+    network_thread_working_usec(0),
+    assembler_thread_waiting_usec(0),
+    assembler_thread_working_usec(0)
 {
     // Argument checking
+
+    // FIXME I recently "promoted" a lot of compile-time constants to members of
+    // intensity_network_stream::initializer.  Now that this has been done, it
+    // would make sense to add a lot more checks here!
 
     if (nassemblers == 0)
 	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
@@ -85,15 +74,22 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    // As explained in ch_frb_io.hpp, if ini_params.ringbuf_n is an empty vector, then
+    // it should default to a vector whose length is ini_params.assembled_ringbuf_nlevels
+    // and whose entries are all equal to ini_params.assembled_ringbuf_capacity.
+
+    if (ini_params.ringbuf_n.size() == 0)
+	ini_params.ringbuf_n = vector<int> (ini_params.assembled_ringbuf_nlevels, ini_params.assembled_ringbuf_capacity);
+
     // All initializations except the socket (which is initialized in _open_socket()),
     // and the assemblers (which are initalized when the first packet is received).
 
-    int capacity = constants::unassembled_ringbuf_capacity;
-    int max_npackets = constants::max_unassembled_packets_per_list;
-    int max_nbytes = constants::max_unassembled_nbytes_per_list;
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
+								 ini_params.max_unassembled_packets_per_list, 
+								 ini_params.max_unassembled_nbytes_per_list);
 
-    this->incoming_packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    this->incoming_packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list,
+							       ini_params.max_unassembled_nbytes_per_list);
 
     this->cumulative_event_counts = vector<int64_t> (event_type::num_types, 0);
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
@@ -122,15 +118,15 @@ intensity_network_stream::~intensity_network_stream()
 // so that the socket will always be closed if an exception is thrown somewhere.
 void intensity_network_stream::_open_socket()
 {
-    const int socket_bufsize = constants::recv_socket_bufsize;
-    const struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+    // FIXME assumes timeout < 1 sec
+    const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
 
     this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
     // bufsize
-    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
 
@@ -159,11 +155,12 @@ void intensity_network_stream::start_stream()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    if (stream_started) {
+    if (stream_end_requested || join_called) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on running, completed, or cancelled stream");
+	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called completed or cancelled stream");
     }
 
+    // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
@@ -199,20 +196,23 @@ void intensity_network_stream::join_threads()
     }
 
     if (join_called) {
+	while (!threads_joined)
+	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_threads()");
+	return;
     }
 
     this->join_called = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 
-    int err = pthread_join(network_thread, NULL);
-    if (err)
-	throw runtime_error("ch_frb_io: couldn't join network thread [input]");
+    network_thread.join();
+    assembler_thread.join();
 
-    err = pthread_join(assembler_thread, NULL);
-    if (err)
-	throw runtime_error("ch_frb_io: couldn't join assembler thread");
+    pthread_mutex_lock(&this->state_lock);
+    this->threads_joined = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);    
 }
 
 
@@ -226,7 +226,57 @@ void intensity_network_stream::stream_to_files(const std::string& filename_patte
             (*it)->stream_filename_pattern = filename_pattern;
 }
 
-// Must not hold state_lock when calling this function!
+void intensity_network_stream::add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback) {
+    pthread_mutex_lock(&this->state_lock);
+    bool inited = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+    if (inited)
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->chunk_callbacks.push_back(callback);
+    else
+        chunk_callbacks.push_back(callback);
+}
+
+/*
+ std::function has no sensible == operator, so how do we do this?!
+
+void intensity_network_stream::remove_assembled_chunk_callback(std::function<void()> callback) {
+    pthread_mutex_lock(&this->state_lock);
+    bool inited = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+    if (inited)
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
+            std::vector<std::function<void()> > &vec = (*it)->chunk_callbacks;
+            for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
+                if ((*it2) == callback) {
+                    vec.erase(it2);
+                    break;
+                }
+            }
+        }
+    else {
+        std::vector<std::function<void()> > &vec = chunk_callbacks;
+        for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
+            if ((*it2) == callback) {
+                vec.erase(it2);
+                break;
+            }
+        }
+    }
+}
+ */
+
+void intensity_network_stream::print_state() {
+    cout << "Intensity network stream state:" << endl;
+    for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
+        cout << "--Assembler:" << endl;
+        (*it)->print_state();
+    }
+}
+
+// Waits for the "assemblers_initialized" flag.
+// If "prelocked = True", assume the state_lock mutex is already held,
+// otherwise, it will be locked & unlocked on entry/exit.
 void intensity_network_stream::_wait_for_assemblers_initialized(bool prelocked) {
     // wait for assemblers to be initialized...
     if (!prelocked)
@@ -250,7 +300,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     _wait_for_assemblers_initialized();
 
     // This can happen if end_stream() was called before the assemblers were initialized.
-    if (assemblers.size() == 0)
+    if ((assemblers.size() == 0) || stream_end_requested)
 	return shared_ptr<assembled_chunk> ();
 
     return assemblers[assembler_index]->get_assembled_chunk(wait);
@@ -276,9 +326,11 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 
 unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
+    // Quickly grab a copy of perhost_packets
     pthread_mutex_lock(&this->event_lock);
     unordered_map<uint64_t, uint64_t> raw(perhost_packets);
     pthread_mutex_unlock(&this->event_lock);
+
     // Convert to strings
     unordered_map<string, uint64_t> rtn;
     for (auto it = raw.begin(); it != raw.end(); it++) {
@@ -311,6 +363,10 @@ intensity_network_stream::get_statistics() {
     m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
     m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
     m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
+    m["network_thread_waiting_usec"] = network_thread_waiting_usec;
+    m["network_thread_working_usec"] = network_thread_working_usec;
+    m["assembler_thread_waiting_usec"] = assembler_thread_waiting_usec;
+    m["assembler_thread_working_usec"] = assembler_thread_working_usec;
 
     vector<int64_t> counts = get_event_counts();
     m["count_bytes_received"     ] = counts[event_type::byte_received];
@@ -325,6 +381,13 @@ intensity_network_stream::get_statistics() {
     m["count_assembler_misses"   ] = counts[event_type::assembler_miss];
     m["count_assembler_drops"    ] = counts[event_type::assembled_chunk_dropped];
     m["count_assembler_queued"   ] = counts[event_type::assembled_chunk_queued];
+
+    int currsize, maxsize;
+    unassembled_ringbuf->get_size(&currsize, &maxsize);
+    m["udp_ringbuf_size"] = currsize;
+    m["udp_ringbuf_maxsize"] = maxsize;
+
+    m["count_bytes_queued"] = socket_queued_bytes;
 
     int nbeams = this->ini_params.beam_ids.size();
     m["nbeams"] = nbeams;
@@ -359,12 +422,12 @@ intensity_network_stream::get_statistics() {
     return R;
 }
 
-vector< vector< shared_ptr<assembled_chunk> > >
+vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
 intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
                                                 uint64_t min_fpga_counts,
                                                 uint64_t max_fpga_counts)
 {
-    vector< vector< shared_ptr<assembled_chunk> > > R;
+    vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > > R;
 
     pthread_mutex_lock(&this->state_lock);
     bool assemblers_init = this->assemblers_initialized;
@@ -377,7 +440,7 @@ intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
 
     for (size_t ib=0; ib<beams.size(); ib++) {
         uint64_t beam = beams[ib];
-        vector<shared_ptr<assembled_chunk> > chunks;
+        vector<pair<shared_ptr<assembled_chunk>, uint64_t > > chunks;
         // Which of my assemblers (if any) is handling the requested beam?
         for (int i=0; i<nbeams; i++) {
 	    if (this->ini_params.beam_ids[i] != (int)beam)
@@ -394,17 +457,18 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 {
     pthread_mutex_lock(&this->state_lock);
 
-    while (!this->first_packet_received)
+    while (!this->first_packet_received) {
 	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     
-    if (this->stream_end_requested) {
-	// end_stream() was called before first packet was received
-	pthread_mutex_unlock(&this->state_lock);
-	nupfreq = 0;
-	nt_per_packet = 0;
-	fpga_counts_per_sample = 0;
-	fpga_count = 0;
-	return false;
+        if (this->stream_end_requested) {
+            // end_stream() was called before first packet was received
+            pthread_mutex_unlock(&this->state_lock);
+            nupfreq = 0;
+            nt_per_packet = 0;
+            fpga_counts_per_sample = 0;
+            fpga_count = 0;
+            return false;
+        }
     }
     
     pthread_mutex_unlock(&this->state_lock);
@@ -423,41 +487,28 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 // Network thread
 
 
-// static member function
-void *intensity_network_stream::network_pthread_main(void *opaque_arg)
-{
-    if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_pthread_main()");
-    
-    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
-    shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
-    shared_ptr<intensity_network_stream> stream = *arg;
+void intensity_network_stream::network_thread_main() {
 
-    if (!stream)
-	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
+    pin_thread_to_cores(ini_params.network_thread_cores);
 
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
-	stream->_network_thread_body();
-    } catch (...) {
-	stream->_network_thread_exit();
+	_network_thread_body();
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
+	_network_thread_exit();
 	throw;
     }
-    
-    stream->_network_thread_exit();
-    return NULL;
+    _network_thread_exit();
 }
-
 
 void intensity_network_stream::_network_thread_body()
 {
     pthread_mutex_lock(&this->state_lock);
 
-    // Advance stream state to "network_thread_started"...
-    this->network_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-
-    // ...and wait for it to advance to "stream_started"
+    // Wait for "stream_started"
     for (;;) {
 	if (this->stream_end_requested) {
 	    // This case can arise if end_stream() is called early
@@ -475,16 +526,18 @@ void intensity_network_stream::_network_thread_body()
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
-	
     server_address.sin_family = AF_INET;
-    inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
     server_address.sin_port = htons(ini_params.udp_port);
 
-    int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+    int err = inet_pton(AF_INET, ini_params.ipaddr.c_str(), &server_address.sin_addr);
+    if (err <= 0)
+	throw runtime_error(ini_params.ipaddr + ": inet_pton() failed (note that no DNS lookup is done, the argument must be a numerical IP address)");
+
+    err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets on port " + to_string(ini_params.udp_port) + "\n");
+    cerr << ("ch_frb_io: listening for packets, ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + "\n");
 
     // Main packet loop
 
@@ -494,12 +547,14 @@ void intensity_network_stream::_network_thread_body()
     uint64_t cancellation_check_timestamp = 0;
     bool is_first_packet = true;
 
+    // All timestamps are in microseconds relative to tv_ini.
+    uint64_t curr_timestamp = 0;
+
     for (;;) {
-	// All timestamps are in microseconds relative to tv_ini.
-	uint64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        uint64_t timestamp;
 
 	// Periodically check whether stream has been cancelled by end_stream().
-	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
+	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->state_lock);
 
 	    if (this->stream_end_requested) {
@@ -518,19 +573,25 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
-	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
+	if (curr_timestamp > incoming_packet_list_timestamp + ini_params.unassembled_ringbuf_timeout_usec) {
             _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
+	timestamp = usec_between(tv_ini, xgettimeofday());
+        network_thread_working_usec += (timestamp - curr_timestamp);
+
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
-
-        // Read from socket, recording the sender IP & port.
+        // Record the sender IP & port here
         sockaddr_in sender_addr;
         int slen = sizeof(sender_addr);
-        int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+        int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
+
+	curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        network_thread_waiting_usec += (curr_timestamp - timestamp);
+
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
@@ -540,13 +601,14 @@ void intensity_network_stream::_network_thread_body()
             throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
-        /*{
+        {
             int nqueued = 0;
             if (ioctl(sockfd, FIONREAD, &nqueued) == -1) {
                 cout << "Failed to call ioctl(FIONREAD)" << endl;
             }
-            cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
-         }*/
+            socket_queued_bytes = nqueued;
+            //cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
+        }
 
         // Increment the number of packets we've received from this sender:
         uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
@@ -653,7 +715,7 @@ void intensity_network_stream::_put_unassembled_packets()
 	if (ini_params.emit_warning_on_buffer_drop)
 	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
 	if (ini_params.throw_exception_on_buffer_drop)
-	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
+	    throw runtime_error("ch_frb_io: unassembled packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
     }
 }
 
@@ -663,40 +725,27 @@ void intensity_network_stream::_put_unassembled_packets()
 // assembler thread
 
 
-// static member function
-void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
-{
-    if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_pthread_main()");
+void intensity_network_stream::assembler_thread_main() {
 
-    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
-    shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
-    shared_ptr<intensity_network_stream> stream = *arg;
-
-    if (!stream)
-	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to assembler_thread_main()");
+    pin_thread_to_cores(ini_params.assembler_thread_cores);
 
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
+    // We also print the exception so that it doesn't get "swallowed".
+
     try {
-	stream->_assembler_thread_body();
-    } catch (...) {
-	stream->_assembler_thread_exit();
+	_assembler_thread_body();
+    } catch (exception &e) {
+	cerr << e.what() << "\n";
+	_assembler_thread_exit();
 	throw;
     }
-
-    stream->_assembler_thread_exit();
-    return NULL;
+    _assembler_thread_exit();
 }
-
 
 void intensity_network_stream::_assembler_thread_body()
 {
-    // Set the assembler_thread_started flag...
     pthread_mutex_lock(&this->state_lock);
-    this->assembler_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-
-    // ... and wait for first_packet_received flag to be set
+    // wait for first_packet_received flag to be set
     for (;;) {
    	if (this->stream_end_requested) {
 	    // This case can arise if end_stream() is called early
@@ -719,26 +768,53 @@ void intensity_network_stream::_assembler_thread_body()
     // states into a single state, but this led to transient packet loss which was problematic for unit tests.)
 
     this->assemblers.resize(nassemblers);
-    for (int ix = 0; ix < nassemblers; ix++)
+    for (int ix = 0; ix < nassemblers; ix++) {
 	assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], nupfreq, nt_per_packet, fpga_counts_per_sample, this->fp_fpga_count);
+    }
 
     pthread_mutex_lock(&this->state_lock);
     this->assemblers_initialized = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
 
     // did a call to stream_to_file() come in while we were waiting
     // for the assemblers to be initialized?  If so, dispatch that
     // now.
-    if (stream_filename.length())
-        stream_to_files(stream_filename);
+    if (stream_filename.length()) {
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->stream_filename_pattern = stream_filename;
+    }
 
-    auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    // did calls to add_assembled_chunk_callback come in while we were
+    // waiting for the assembers?  If so, dispatch now.
+    if (chunk_callbacks.size()) {
+        for (auto it = assemblers.begin(); it != assemblers.end(); it++)
+            (*it)->chunk_callbacks.insert((*it)->chunk_callbacks.end(),
+                                          chunk_callbacks.begin(),
+                                          chunk_callbacks.end());
+        chunk_callbacks.clear();
+    }
+
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);
+
+    auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
+
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
+
+    struct timeval tva, tvb;
+    tva = xgettimeofday();
 
     // Main packet loop
 
-    while (unassembled_ringbuf->get_packet_list(packet_list)) {
+    while (1) {
+        tvb = xgettimeofday();
+        assembler_thread_working_usec += usec_between(tva, tvb);
+
+        if (!unassembled_ringbuf->get_packet_list(packet_list))
+            break;
+
+        tva = xgettimeofday();
+        assembler_thread_waiting_usec += usec_between(tvb, tva);
+
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list->get_packet_data(ipacket);
             int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
@@ -828,7 +904,7 @@ void intensity_network_stream::_assembler_thread_body()
     }
 }
 
-void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
+bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
 
     pthread_mutex_lock(&this->state_lock);
     if (!first_packet_received) {
@@ -850,10 +926,11 @@ void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
     const int *assembler_beam_ids = &ini_params.beam_ids[0];
     for (int i = 0; i < nassemblers; i++) {
         if (assembler_beam_ids[i] == chunk->beam_id) {
-            assemblers[i]->inject_assembled_chunk(chunk);
-            break;
+            return assemblers[i]->inject_assembled_chunk(chunk);
         }
     }
+    cout << "inject_assembled_chunk: no match for beam " << chunk->beam_id << endl;
+    return false;
 }
 
 // Called whenever the assembler thread exits (on all exit paths)
@@ -874,8 +951,8 @@ void intensity_network_stream::_assembler_thread_exit()
     // Make sure all event counts are accumulated.
     this->_add_event_counts(assembler_thread_event_subcounts);
 
-    // The rest of this routine just prints a summary.
-
+#if 0
+    // Decided to remove this summary info!
     vector<int64_t> counts = this->get_event_counts();
 
     stringstream ss;
@@ -894,6 +971,7 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
 
     cerr << ss.str().c_str();
+#endif
 }
 
 
