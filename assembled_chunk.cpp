@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <iostream>
 #include <stdarg.h> // for va_start/va_end
+#include <unistd.h>
+#include <stdio.h>
 #include <cinttypes>  // PRIu64
 #include <immintrin.h>
 #include <msgpack/fbuffer.hpp>
@@ -483,16 +485,24 @@ void assembled_chunk::write_hdf5_file(const string &filename)
 
 void assembled_chunk::write_msgpack_file(const string &filename)
 {
-    FILE* f = fopen(filename.c_str(), "w+");
+    char tempfilename[filename.size() + 10];
+    sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
+    int fd = mkstemp(tempfilename);
+    if (fd == -1) {
+        throw runtime_error("ch_frb_io: failed to create temp file for " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
+    }
+    FILE* f = fdopen(fd, "w+");
     if (!f)
-        throw runtime_error("ch_frb_io: failed to open file " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
+        throw runtime_error("ch_frb_io: failed to open temp file " + string(tempfilename) + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
     // msgpack buffer that will write to file "f"
     msgpack::fbuffer buffer(f);
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
     msgpack::pack(buffer, shthis);
     if (fclose(f))
-        throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
+        throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack temp file " + string(tempfilename) + ": " + string(strerror(errno)));
+    if (rename(tempfilename, filename.c_str()))
+        throw runtime_error("ch_frb_io: failed to rename temp file in writing assembled_chunk msgpack file: " + string(tempfilename) + ": " + string(strerror(errno)));
 }
 
 shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
