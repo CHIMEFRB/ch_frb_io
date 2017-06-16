@@ -214,16 +214,21 @@ void L1Ringbuf::dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
         // FIXME -- could call can_push() to the destination before
         // going to the effort of downsampling...
 
-        // Allocate a new binned-down chunk.
-        assembled_chunk* binned = assembled_chunk::downsample(NULL, _dropped[binlevel].get(), ch.get());
+	// FIXME!!
+	throw runtime_error("need to call new downsample() here");
+
+        //assembled_chunk* binned = assembled_chunk::downsample(NULL, _dropped[binlevel].get(), ch.get());
+
         // drop the old one we were saving
-        _dropped[binlevel].reset();
+	// _dropped[binlevel].reset();
+
         // drop the new one too
-        ch.reset();
+	// ch.reset();
         // try to push onto _rb[level+1]
-        if (!_rb[binlevel+1]->push(binned))
+
+	//if (!_rb[binlevel+1]->push(binned))
             // push failed; free
-            delete binned;
+            // delete binned;
 
     } else {
         // Keep this one until its partner arrives!

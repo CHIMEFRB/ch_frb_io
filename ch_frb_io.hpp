@@ -582,13 +582,16 @@ struct assembled_chunk : noncopyable {
     virtual void decode_subset(float *intensity, float *weights,
                                int t0, int nt, int stride) const;
 
-    // Downsamples (in time) the two given source chunks, writing into the
-    // given destination chunk.
-    // *dest* can be equal to *src1* to downsample in-place.
-    // If *dest* is NULL, a new assembled_chunk will be allocated.
-    static assembled_chunk* downsample(assembled_chunk* dest,
-                                       const assembled_chunk* src1,
-                                       const assembled_chunk* src2);
+    // Overwrites the contents of the assembled chunk, with the result
+    // of downsampling the two input chunks.  It's OK if (this == src1),
+    // but not OK if (this == src2).
+    //
+    // Virtual, since fast_assembled_chunk subclass overrides with an AVX2 kernel.
+
+    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
+
+    // Alternate downsample() interface.
+    void downsample(const std::shared_ptr<assembled_chunk> &src1, const std::shared_ptr<assembled_chunk> &src2);
 
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.

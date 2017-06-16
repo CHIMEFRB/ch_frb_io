@@ -103,9 +103,6 @@ int main(int argc, char **argv)
     chunk1->write_msgpack_file("test-chunk1.msgpack");
     chunk2->write_msgpack_file("test-chunk2.msgpack");
 
-    assembled_chunk* chunk3 = assembled_chunk::downsample(NULL, chunk1, chunk2);
-    chunk3->write_msgpack_file("test-chunk3.msgpack");
-
     float* intensity = (float*)malloc(chunk1->ndata * sizeof(float));
     float* weight    = (float*)malloc(chunk1->ndata * sizeof(float));
 
@@ -118,11 +115,6 @@ int main(int argc, char **argv)
     chunk2->decode(intensity, weight, constants::nt_per_assembled_chunk);
 
     f = fopen("chunk2-decoded.raw", "w");
-    fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
-    fclose(f);
-
-    chunk3->decode(intensity, weight, constants::nt_per_assembled_chunk);
-    f = fopen("chunk3-decoded.raw", "w");
     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
     fclose(f);
 
