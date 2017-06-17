@@ -45,7 +45,8 @@ class assembled_chunk_ringbuf;
 // -------------------------------------------------------------------------------------------------
 //
 // Compile-time constants
-// Note: many of these don't really need to be fixed at compile time, and could be runtime parameters instead.
+//
+// FIXME many of these don't really need to be fixed at compile time, and could be runtime parameters instead.
 
 
 namespace constants {
@@ -523,6 +524,11 @@ protected:
 
 struct assembled_chunk : noncopyable {
     // Stream parameters, specified at construction.
+    //
+    // A better name for nt_per_packet would be 'nt_coarse_graining': it defines the time
+    // resolution of the 'scale' and 'offset' arrays, relative to the 'data' array.  Likewise,
+    // the 'nupfreq' field defines the frequency resolution of scale/offset relative to data.
+
     const int beam_id = 0;
     const int nupfreq = 0;
     const int nt_per_packet = 0;
@@ -533,24 +539,40 @@ struct assembled_chunk : noncopyable {
     const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
 
+    // How many original samples have been binned into each sample in this chunk.  
+    // Used in the L1 telescoping ring buffer, where binning = 2, 4, 8.
+    int binning = 1;
+
     // Chunks are indexed by 'ichunk', which differs by 1 in adjacent chunks.
     //
     // Reminder: there are several units of time used in different parts of the CHIME backend!
     //   1 assembled_chunk = constants::nt_per_assembled_chunk * (1 intensity sample)
     //   1 intensity sample = assembled_chunk::fpga_counts_per_sample * (1 fpga count)
     //   1 fpga count = 2.56e-6 seconds    (approx)
+    //
+    // Conventions for downsampled chunks: if binning >= 1, then
+    //   ichunk = same as src->ichunk, where src is the first constituent non-downsampled chunk
+    //   isample = same as src->isample, where src is the first constituent non-downsampled chunk
+    //
+    // Note that consecutive chunks src1, src2 with the same binning will satisfy
+    // (src2->ichunk == src1->ichunk + binning).
 
     uint64_t ichunk = 0;
     uint64_t isample = 0;   // always equal to ichunk * constants::nt_per_assembled_chunk
 
-    // How many original samples have been binned into each sample in this chunk.  Used in the L1 telescoping ring buffer, where binning = 2, 4, 8.
-    int binning = 1;
-
-    float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
-    float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
-    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
+    float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
+    float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
+    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
     bool msgpack_bitshuffle = false;
+
+    // Temporary buffers used during downsampling.
+    float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
+    float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
+    int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
+
+    // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory chunk.
+    uint8_t *memory_chunk = nullptr;
 
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
@@ -565,11 +587,11 @@ struct assembled_chunk : noncopyable {
     //   (FPGAN)   -> %08i  FPGA-counts size
     std::string format_filename(const std::string &pattern) const;
 
-    // the first fpga-counts sample in this chunk
-    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample / binning; }
+    // the first fpga-counts sample in this chunk (note no factor of 'binning' here)
+    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
 
-    // the number of fpga-counts in this chunk
-    uint64_t fpgacounts_N() const { return (constants::nt_per_assembled_chunk * fpga_counts_per_sample); }
+    // the number of fpga-counts in this chunk (note factor of 'binning' here)
+    uint64_t fpgacounts_N() const { return (binning * constants::nt_per_assembled_chunk * fpga_counts_per_sample); }
 
     // the last fpga-counts sample in this chunk + 1
     uint64_t fpgacounts_end() const { return fpgacounts_begin() + fpgacounts_N(); }
@@ -582,9 +604,8 @@ struct assembled_chunk : noncopyable {
     virtual void decode_subset(float *intensity, float *weights,
                                int t0, int nt, int stride) const;
 
-    // Overwrites the contents of the assembled chunk, with the result
-    // of downsampling the two input chunks.  It's OK if (this == src1),
-    // but not OK if (this == src2).
+    // Overwrites the contents of the assembled chunk, with the result of downsampling and
+    // merging the two input chunks.  It's OK if (this==src1), but not OK if (this==src2).
     //
     // Virtual, since fast_assembled_chunk subclass overrides with an AVX2 kernel.
 
@@ -595,7 +616,8 @@ struct assembled_chunk : noncopyable {
 
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.
-    static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk, bool force_reference=false, bool force_fast=false);
+    static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, 
+						 uint64_t ichunk, bool force_reference=false, bool force_fast=false);
 
     static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
 
@@ -609,7 +631,9 @@ struct assembled_chunk : noncopyable {
     // msgpack file output
     void write_msgpack_file(const std::string &filename);
 
+    static ssize_t get_memory_chunk_size(int nupfreq, int nt_per_packet);
 };
+
 
 // For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
 // nupfreq % 2 == 0) we can speed up assembled_chunk::add_packet() and assembled_chunk::decode()

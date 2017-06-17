@@ -30,6 +30,20 @@
 #endif
 
 
+// ch_assert(): assert-like macro, but throws an exception instead of terminating the process.
+
+#ifndef ch_assert
+#define ch_assert(cond) ch_assert2(cond, __LINE__)
+#define ch_assert2(cond,line) \
+    do { \
+        if (_unlikely(!(cond))) { \
+	    const char *msg = "rf_pipelines: assertion '" __STRING(cond) "' failed (" __FILE__ ":" __STRING(line) ")\n"; \
+	    throw std::runtime_error(msg); \
+	} \
+    } while (0)
+#endif
+
+
 namespace ch_frb_io {
 #if 0
 }; // pacify emacs c-mode
@@ -333,6 +347,27 @@ protected:
 
 // -------------------------------------------------------------------------------------------------
 //
+// Downsampling kernels (see assembled_chunk.cpp, avx2_kernels.cpp for more info)
+
+
+extern void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_scales,
+			   const uint8_t *in_data, const float *in_offsets, const float *in_scales,
+			   float *tmp_data, int *tmp_mask, float *tmp_scales, 
+			   int nupfreq, int nt_per_chunk, int nt_per_packet);
+
+extern void ds_slow_kernel1(float *out_data, int *out_mask, const uint8_t *in_data, 
+			    const float *in_offsets, const float *in_scales, float *out_count, 
+			    float *out_mean, int nupfreq, int nt_per_chunk, int nt_per_packet);
+
+extern void ds_slow_kernel2(const float *in_data, const int *in_mask, float *w0, float *w1, 
+			    float *w2, int nupfreq, int nt_per_chunk, int nt_per_packet);
+
+extern void ds_slow_kernel3(uint8_t *out, const float *data, const int *mask, const float *enc_off, 
+			    const float *enc_scal, int nupfreq, int nt_per_chunk, int nt_per_packet);
+
+
+// -------------------------------------------------------------------------------------------------
+//
 // Miscelleanous inlines
 
 
@@ -348,6 +383,12 @@ inline int round_down_to_power_of_two(int n)
     if (n <= 0)
 	throw std::runtime_error("ch_frb_io: internal error: is_power_of_two() received argument <= 0");
     return 1 << (int)log2(n+0.5);
+}
+
+template<typename T> 
+inline bool equal3(T x, T y, T z)
+{
+    return (x == y) && (y == z);
 }
 
 inline int randint(std::mt19937 &rng, int lo, int hi)

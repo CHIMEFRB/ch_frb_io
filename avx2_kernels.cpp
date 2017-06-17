@@ -181,6 +181,8 @@ inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
 // -------------------------------------------------------------------------------------------------
 //
 // Decode kernels
+//
+// FIXME: these can be made faster for sure!
 
 
 // Input: a 256-bit SIMD register which holds 32 8-bit unsigned integers [ x0, ..., x31 ].

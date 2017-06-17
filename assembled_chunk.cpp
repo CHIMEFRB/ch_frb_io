@@ -17,16 +17,67 @@ namespace ch_frb_io {
 #endif
 
 
-assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
-    : beam_id(beam_id_), 
-      nupfreq(nupfreq_), 
-      nt_per_packet(nt_per_packet_),
-      fpga_counts_per_sample(fpga_counts_per_sample_), 
-      nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
-      nscales(constants::nfreq_coarse_tot * nt_coarse),
-      ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
-      ichunk(ichunk_),
-      isample(ichunk * constants::nt_per_assembled_chunk)
+// -------------------------------------------------------------------------------------------------
+//
+// Constructor and allocation logic.
+
+
+// A helper class describing the layout of assembled_chunk::memory_chunk.
+struct memory_chunk_layout {
+    const int nfreq_c;
+    const int nfreq_f;
+    const int nt_f;
+    const int nt_c;
+
+    // All nb_* fields are array sizes in bytes.
+    const int nb_data;
+    const int nb_scales;
+    const int nb_offsets;
+    const int nb_ds_data;
+    const int nb_ds_mask;
+    const int nb_ds_w2;
+
+    // All ib_* fields are array offsets within the memory_chunk, in bytes
+    const int ib_data;
+    const int ib_scales;
+    const int ib_offsets;
+    const int ib_ds_data;
+    const int ib_ds_mask;
+    const int ib_ds_w2;
+    const int chunk_size;
+
+    memory_chunk_layout(int nupfreq, int nt_per_packet) :
+	nfreq_c(constants::nfreq_coarse_tot),
+	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
+	nt_f(constants::nt_per_assembled_chunk),
+	nt_c(constants::nt_per_assembled_chunk / nt_per_packet),
+	nb_data(nfreq_f * nt_f),
+	nb_scales(nfreq_c * nt_c * sizeof(float)),
+	nb_offsets(nfreq_c * nt_c * sizeof(float)),
+	nb_ds_data(nupfreq * (nt_f/2) * sizeof(float)),
+	nb_ds_mask(nupfreq * (nt_f/2) * sizeof(int)),
+	nb_ds_w2((nt_c/2) * sizeof(float)),
+	ib_data(0),
+	ib_scales(ib_data + nb_data),
+	ib_offsets(ib_scales + nb_scales),
+	ib_ds_data(ib_offsets + nb_offsets),
+	ib_ds_mask(ib_ds_data + nb_ds_data),
+	ib_ds_w2(ib_ds_mask + nb_ds_mask),
+	chunk_size(ib_ds_w2 + nb_ds_w2)
+    { }
+};
+
+
+assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
+    beam_id(beam_id_), 
+    nupfreq(nupfreq_), 
+    nt_per_packet(nt_per_packet_),
+    fpga_counts_per_sample(fpga_counts_per_sample_), 
+    nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
+    nscales(constants::nfreq_coarse_tot * nt_coarse),
+    ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
+    ichunk(ichunk_),
+    isample(ichunk * constants::nt_per_assembled_chunk)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad beam_id argument");
@@ -37,17 +88,45 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("assembled_chunk constructor: bad fpga_counts_per_sample argument");
 
-    this->scales = aligned_alloc<float> (nscales);
-    this->offsets = aligned_alloc<float> (nscales);
-    this->data = aligned_alloc<uint8_t> (ndata);
+    memory_chunk_layout mc(nupfreq, nt_per_packet);
+
+    // To be replaced by a pool of reuseable chunks.
+    // Note: aligned_alloc() zeroes the buffer -- this is important!
+    this->memory_chunk = aligned_alloc<uint8_t> (mc.chunk_size);
+
+    this->data = memory_chunk + mc.ib_data;
+    this->scales = reinterpret_cast<float *> (memory_chunk + mc.ib_scales);
+    this->offsets = reinterpret_cast<float *> (memory_chunk + mc.ib_offsets);
+    this->ds_data = reinterpret_cast<float *> (memory_chunk + mc.ib_ds_data);
+    this->ds_mask = reinterpret_cast<int *> (memory_chunk + mc.ib_ds_mask);
+    this->ds_w2 = reinterpret_cast<float *> (memory_chunk + mc.ib_ds_w2);
 }
+
 
 assembled_chunk::~assembled_chunk()
 {
-    free(data);
-    free(scales);
-    free(offsets);
+    free(this->memory_chunk);
+
+    this->memory_chunk = nullptr;
+    this->data = nullptr;
+    this->scales = nullptr;
+    this->offsets = nullptr;
+    this->ds_data = nullptr;
+    this->ds_mask = nullptr;
+    this->ds_w2 = nullptr;
 }
+
+
+// Static member function
+ssize_t assembled_chunk::get_memory_chunk_size(int nupfreq, int nt_per_packet)
+{
+    memory_chunk_layout mc(nupfreq, nt_per_packet);
+    return mc.chunk_size;
+}
+
+
+// -------------------------------------------------------------------------------------------------
+
 
 static string 
 __attribute__ ((format(printf,1,2)))
@@ -237,10 +316,59 @@ void assembled_chunk::decode_subset(float *intensity, float *weights,
 }
 
 
-// virtual
+// This is the slow, reference version of assembled_chunk::downsample().
+//
+// In production, it is overridden by the fast, assembly-language-kernelized version
+// in fast_assembled_chunk::downsample().  (See avx2_kernels.cpp)
+
 void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
-    throw runtime_error("assembled_chunk::downsample(): placeholder for now");
+    int nfreq_c = constants::nfreq_coarse_tot;
+    int nt_f = constants::nt_per_assembled_chunk;
+    int nt_c = nt_f / nt_per_packet;
+
+    if (!src1 || !src2)
+	throw runtime_error("ch_frb_io: null pointer in assembled_chunk::downsample()");
+    if (this == src2)
+	throw runtime_error("ch_frb_io: assembled_chunk::downsample: 'this' and 'src2' pointers cannot be equal");
+
+    if (!equal3(this->beam_id, src1->beam_id, src2->beam_id))
+	throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched beam_id");
+    if (!equal3(this->nupfreq, src1->nupfreq, src2->nupfreq))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
+    if (!equal3(this->nt_per_packet, src1->nt_per_packet, src2->nt_per_packet))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
+
+    if (src1->binning != src2->binning)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched binning");
+    if (src2->ichunk != src1->ichunk + 1)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: source ichunks are not consecutive");
+
+    
+
+    // XXX FIXME need lots more checks
+
+    for (int ifreq_c = 0; ifreq_c < nfreq_c; ifreq_c++) {
+	int ifreq_f = ifreq_c * nupfreq;
+
+	ds_slow_kernel(this->data + ifreq_f * nt_f,
+		       this->offsets + ifreq_c * nt_c,
+		       this->scales + ifreq_c * nt_c,
+		       src1->data + ifreq_f * nt_f,
+		       src1->offsets + ifreq_c * nt_c,
+		       src1->scales + ifreq_c * nt_c,
+		       this->ds_data, this->ds_mask, this->ds_w2,
+		       nupfreq, nt_f, nt_per_packet);
+
+	ds_slow_kernel(this->data + (ifreq_f * nt_f) + (nt_f/2),
+		       this->offsets + (ifreq_c * nt_c) + (nt_c/2),
+		       this->scales + (ifreq_c * nt_c) + (nt_c/2),
+		       src2->data + ifreq_f * nt_f,
+		       src2->offsets + ifreq_c * nt_c,
+		       src2->scales + ifreq_c * nt_c,
+		       this->ds_data, this->ds_mask, this->ds_w2,
+		       nupfreq, nt_f, nt_per_packet);
+    }
 }
 
 
@@ -356,6 +484,196 @@ shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &fil
     shared_ptr<assembled_chunk> ch;
     obj.convert(ch);
     return ch;
+}
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// Downsampling kernels
+//
+// The logic in assembled_chunk::downsample() is split into three kernels ds_slow_kernel[123]().
+//
+// This splitting parallels the fast AVX2 kernels, and allows the fast kernels to be unit-tested
+// individually.  Otherwise, there's no reason to call the ds_slow_kernel*() functions directly,
+// they are just helpers for assembled_chunk::downsample().
+
+
+// ds_slow_kernel1(): downsample-and-decode kernel
+//
+// Assumes nt (=nt_per_chunk) is a multiple of (2*nt_per_packet).
+// Assumes nt_per_packet is even.
+//
+// Reads (nupfreq, nt) input data values (uint8).
+// Reads (nt/16) offset values (float32).
+// Reads (nt/16) scale values (float32).
+// Writes (nupfreq, nt/2) output data values (float32).
+// Writes (nupfreq, nt/2) output mask values (int32).
+// Writes (nt/32) count values (float32).
+// Writes (nt/32) mean values (float32).
+//
+// Reminder: packets are decoded as
+//   (intensity) = scale * (8-bit value) + offset
+
+
+template<typename T> inline T square(T x) { return x*x; }
+
+
+void ds_slow_kernel1(float *out_data, int *out_mask, const uint8_t *in_data, 
+		     const float *in_offsets, const float *in_scales, float *out_count, 
+		     float *out_mean, int nupfreq, int nt_per_chunk, int nt_per_packet)
+{
+    ch_assert(nt_per_chunk > 0);
+    ch_assert(nt_per_packet > 0);
+    ch_assert(nt_per_chunk % (2*nt_per_packet) == 0);
+    ch_assert(nt_per_packet % 2 == 0);
+
+    int np = nt_per_chunk / nt_per_packet;
+    int nq = nt_per_packet / 2;
+
+    memset(out_data, 0, nupfreq * (nt_per_chunk/2) * sizeof(float));
+    memset(out_mask, 0, nupfreq * (nt_per_chunk/2) * sizeof(int));
+    memset(out_count, 0, (np/2) * sizeof(float));
+    memset(out_mean, 0, (np/2) * sizeof(float));
+
+    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
+	for (int p = 0; p < np; p++) {
+	    float offset = in_offsets[p];
+	    float scale = in_scales[p];
+
+	    for (int q = 0; q < nq; q++) {
+		uint8_t d0 = in_data[iupfreq*nt_per_chunk + p*nt_per_packet + 2*q];
+		uint8_t d1 = in_data[iupfreq*nt_per_chunk + p*nt_per_packet + 2*q+1];
+		
+		if ((d0 == 0x00) || (d0 == 0xff) || (d1 == 0x00) || (d1 == 0xff))
+		    continue;
+
+		float x = scale * (float(d0) + float(d1)) + offset;
+
+		out_data[iupfreq*(nt_per_chunk/2) + p*nq + q] = x;
+		out_mask[iupfreq*(nt_per_chunk/2) + p*nq + q] = -1;
+		out_count[p/2] += 1.0;
+		out_mean[p/2] += x;
+	    }
+	}
+    }
+
+    for (int i = 0; i < (np/2); i++)
+	out_mean[i] /= max(out_count[i], 0.5f);
+}
+
+
+// ds_slow_kernel2(): computes variance, offsets, scales
+//
+// The 'in_data' and 'in_mask' arrays have shape (nupfreq,nt/2).  (Not shape (nupfreq,nt)!)
+//
+// The w0,w1,w2 arrays have length (nt / (2*nt_per_packet)).
+//
+//   - On input:
+//       w0 = count
+//       w1 = mean
+//
+//   - On output:
+//       w0 = offset
+//       w1 = dec_scale
+//       w2 = enc_scale
+//
+// Reminder: packets are decoded and encoded as follows
+//   (decoded intensity) = (dec_scale) * (8-bit value) + offset
+//   (encoded 8-bit value) = (enc_scale) * (intensity - offset)
+
+void ds_slow_kernel2(const float *in_data, const int *in_mask, float *w0, float *w1, float *w2, int nupfreq, int nt_per_chunk, int nt_per_packet)
+{
+    ch_assert(nt_per_chunk > 0);
+    ch_assert(nt_per_packet > 0);
+    ch_assert(nt_per_chunk % (2*nt_per_packet) == 0);
+
+    int nt2 = nt_per_chunk/2;
+    int np = nt_per_chunk / (2*nt_per_packet);
+
+    memset(w2, 0, np * sizeof(float));
+
+    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
+	for (int p = 0; p < np; p++) {
+	    float mean = w1[p];
+	    float var = 0.0;
+	    
+	    for (int i = p*nt_per_packet; i < (p+1)*nt_per_packet; i++)
+		if (in_mask[iupfreq*nt2+i])
+		    var += square(in_data[iupfreq*nt2+i] - mean);
+
+	    w2[p] += var;
+	}
+    }
+
+    for (int p = 0; p < np; p++) {
+	float mean = w1[p];
+	float var = w2[p] / max(w0[p],1.0f);
+
+	var += 1.0e-10 * square(mean);
+	
+	float rms = (var > 0.0) ? sqrt(var) : 1.0;
+	float dec_scale = 0.04 * rms;
+	float enc_scale = 1.0 / dec_scale;
+	float offset = mean - 128. * dec_scale;
+
+	w0[p] = offset;
+	w1[p] = dec_scale;
+	w2[p] = enc_scale;
+    }
+}
+
+
+// ds_slow_kernel3(): slow encode kernel.
+//
+// Note that the arrays here have (nt/2) time samples, not nt time samples! (where nt=nt_per_chunk)
+//
+// Reads (nupfreq,nt/2) data values (float32)
+// Reads (nupfreq,nt/2) mask values (int32)
+// Reads (nt/(2*nt_per_packet)) enc_offset values (float32)
+// Reads (nt/(2*nt_per_packet)) enc_scale values (float32)
+// Writes (nupfreq,nt/2) data values (uint8_t).
+
+void ds_slow_kernel3(uint8_t *out, const float *data, const int *mask, const float *enc_off, const float *enc_scal, int nupfreq, int nt_per_chunk, int nt_per_packet)
+{
+    ch_assert(nt_per_chunk > 0);
+    ch_assert(nt_per_packet > 0);
+    ch_assert(nt_per_chunk % (2*nt_per_packet) == 0);
+
+    int nt2 = nt_per_chunk / 2;
+    int np = nt2 / nt_per_packet;
+
+    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
+	for (int p = 0; p < np; p++) {
+	    float off = enc_off[p];
+	    float scal = enc_scal[p];
+
+	    for (int i = p*nt_per_packet; i < (p+1)*nt_per_packet; i++) {
+		float x = data[iupfreq*nt2 + i];
+		int m = mask[iupfreq*nt2 + i];
+
+		x = scal * (x - off);
+		x = max(x, 0.0f);
+		x = min(x, 255.0f);
+
+		if (m != -1)
+		    x = 0.0;
+
+		x = roundf(x);
+		out[iupfreq*nt_per_chunk + i] = uint8_t(x);
+	    }
+	}
+    }
+}
+
+
+void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_scales,
+		    const uint8_t *in_data, const float *in_offsets, const float *in_scales,
+		    float *tmp_data, int *tmp_mask, float *tmp_scales, 
+		    int nupfreq, int nt_per_chunk, int nt_per_packet)
+{
+    ds_slow_kernel1(tmp_data, tmp_mask, in_data, in_offsets, in_scales, out_offsets, out_scales, nupfreq, nt_per_chunk, nt_per_packet);
+    ds_slow_kernel2(tmp_data, tmp_mask, out_offsets, out_scales, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
+    ds_slow_kernel3(out_data, tmp_data, tmp_mask, out_offsets, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
 }
 
 

@@ -35,7 +35,6 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
-    // Note that 
     ringbuf = new L1Ringbuf(beam_id_, ini_params.ringbuf_n);
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
