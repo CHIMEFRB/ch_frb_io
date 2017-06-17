@@ -341,12 +341,8 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 
     if (src1->binning != src2->binning)
         throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched binning");
-    if (src2->ichunk != src1->ichunk + 1)
+    if (src2->ichunk != src1->ichunk + src2->binning)
         throw runtime_error("ch_frb_io: assembled_chunk::downsample: source ichunks are not consecutive");
-
-    
-
-    // XXX FIXME need lots more checks
 
     for (int ifreq_c = 0; ifreq_c < nfreq_c; ifreq_c++) {
 	int ifreq_f = ifreq_c * nupfreq;
@@ -369,6 +365,10 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 		       this->ds_data, this->ds_mask, this->ds_w2,
 		       nupfreq, nt_f, nt_per_packet);
     }
+
+    this->binning = src1->binning + 1;
+    this->ichunk = src1->ichunk;
+    this->isample = src1->isample;
 }
 
 
