@@ -1007,8 +1007,107 @@ void peek_at_unpack_kernel()
 }
 
 
+static void test_avx2_ds_kernel1(std::mt19937 &rng, int nupfreq, int nt_f)
+{
+    ch_assert(nt_f % 32 == 0);
+
+    int nt_per_packet = 16;
+    int nt_c = nt_f / nt_per_packet;
+
+    vector<uint8_t> in_data(nupfreq * nt_f, 0);
+
+    // Randomly simulate in_data.
+    // We assign ~10% probability to "masked" values 0x00 or 0xff
+    
+    for (int i = 0; i < nupfreq * nt_f; i++) {
+	int x = randint(rng, -32, 256+32);
+	x = max(x, 0);
+	x = min(x, 255);
+	in_data[i] = x;
+    }
+
+    // To test corner cases, assign ~10% probability to masking an entire (nupfreq,32) block.
+    for (int it_c = 0; it_c < (nt_f/32); it_c++) {
+	if (uniform_rand(rng) > 0.1)
+	    continue;
+	
+	for (int ifreq = 0; ifreq < nupfreq; ifreq++)
+	    for (int it = 32*it_c; it < 32*(it_c+1); it++)
+		in_data[ifreq*nt_f + it] = (uniform_rand(rng) < 0.5) ? 0x00 : 0xff;
+    }
+
+    vector<float> in_scales = uniform_randvec<float> (rng, nt_c, 1.0e-3, 1.0e-2);
+    vector<float> in_offsets = uniform_randvec<float> (rng, nt_c, -1.0, 1.0);
+
+    vector<int> out1_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
+    vector<float> out1_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
+    vector<float> out1_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    vector<float> out1_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+
+    vector<int> out2_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
+    vector<float> out2_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
+    vector<float> out2_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    vector<float> out2_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+
+    // Slow kernel.
+    ds_slow_kernel1(&out1_data[0], &out1_mask[0], &in_data[0], &in_offsets[0], &in_scales[0], &out1_count[0], &out1_mean[0], nupfreq, nt_f, nt_per_packet);
+    
+    // Fast kernel.
+    _ds_kernel1(&out2_data[0], &out2_mask[0], &in_data[0], &in_offsets[0], &in_scales[0], &out2_count[0], &out2_mean[0], nupfreq, nt_f);
+
+    for (int i = 0; i < nupfreq; i++) {
+	for (int j = 0; j < nt_f/2; j++) {
+	    unsigned int d0 = in_data[i*nt_f + 2*j];
+	    unsigned int d1 = in_data[i*nt_f + 2*j+1];
+	    int m_slow = out1_mask[i*(nt_f/2) + j];
+	    int m_fast = out2_mask[i*(nt_f/2) + j];
+
+	    float d_slow = out1_data[i*(nt_f/2) + j];
+	    float d_fast = out2_data[i*(nt_f/2) + j];
+
+	    if ((m_slow != m_fast) || (fabs(d_slow - d_fast) > 1.0e-3)) {
+		cerr << "test_avx2_ds_kernel1 failed: (nupfreq,nt_f)=(" << nupfreq << "," << nt_f << "),"
+		     << " (i,j)=(" << i << "," << j << "),"
+		     << " (d0,d1)=(" << hex << d0 << "," << d1 << "), " << dec
+		     << " (m_slow,m_fast)=(" << m_slow << "," << m_fast << "),"
+		     << " (d_slow,d_fast)=(" << d_slow << "," << d_fast << ")\n";
+		throw runtime_error("test_avx2_ds_kernel1() failed");
+	    }
+	}
+    }
+
+    for (int i = 0; i < (nt_c/2); i++) {
+	if ((fabs(out1_count[i] - out2_count[i]) > 1.0e-3) || (fabs(out1_mean[i] - out2_mean[i]) > 1.0e-3)) {
+	    cerr << "test_avx2_ds_kernel1 failed: (nupfreq,nt_f)=(" << nupfreq << "," << nt_f << "), i=" << i
+		 << " (count_slow,count_fast)=(" << out1_count[i] << "," << out2_count[i] << "),"
+		 << " (mean_slow,mean_fast)=(" << out1_mean[i] << "," << out2_mean[i] << ")\n";
+	    throw runtime_error("test_avx2_ds_kernel1() failed");
+	}
+    }
+}
+
+
+static void test_avx2_ds_kernel1(std::mt19937 &rng)
+{
+    cout << "test_avx2_ds_kernel1..";
+
+    for (int iouter = 0; iouter < 1000; iouter++) {
+	if (iouter % 10 == 0)
+	    cout << "." << flush;
+
+	int nupfreq = randint(rng, 1, 31);
+	int nt_f = 256 * randint(rng, 1, 9);
+	test_avx2_ds_kernel1(rng, nupfreq, nt_f);
+    }
+
+    cout << "success" << endl;
+}
+
+
 void test_avx2_kernels(std::mt19937 &rng)
 {
+    test_avx2_ds_kernel1(rng);
+
     cerr << "test_avx2_kernels()";
 
     // Required by fast decode kernel

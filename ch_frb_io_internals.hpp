@@ -387,11 +387,6 @@ inline bool equal3(T x, T y, T z)
     return (x == y) && (y == z);
 }
 
-inline int randint(std::mt19937 &rng, int lo, int hi)
-{
-    return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
-}
-
 inline double uniform_rand(std::mt19937 &rng)
 {
     return std::uniform_real_distribution<>()(rng);
@@ -402,10 +397,39 @@ inline double uniform_rand(std::mt19937 &rng, double lo, double hi)
     return lo + (hi-lo) * uniform_rand(rng);
 }
 
-template<typename T> inline void uniform_rand(std::mt19937 &rng, T *p, int n)
+template<typename T> 
+inline void uniform_rand(std::mt19937 &rng, T *p, int n)
 {
     for (int i = 0; i < n; i++)
 	p[i] = uniform_rand(rng);
+}
+
+template<typename T> 
+inline void uniform_rand(std::mt19937 &rng, T *p, int n, double lo, double hi)
+{
+    for (int i = 0; i < n; i++)
+	p[i] = uniform_rand(rng, lo, hi);
+}
+
+template<typename T>
+inline std::vector<T> uniform_randvec(std::mt19937 &rng, ssize_t n, double lo, double hi)
+{
+    std::vector<T> ret(n);
+    uniform_rand(rng, &ret[0], n, lo, hi);
+    return ret;
+}
+
+inline int randint(std::mt19937 &rng, int lo, int hi)
+{
+    return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
+}
+
+inline std::vector<int> randintvec(std::mt19937 &rng, ssize_t n, int lo, int hi)
+{
+    std::vector<int> ret(n);
+    for (ssize_t i = 0; i < n; i++)
+	ret[i] = randint(rng, lo, hi);
+    return ret;
 }
 
 inline bool file_exists(const std::string &filename)
