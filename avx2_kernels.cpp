@@ -1195,10 +1195,92 @@ static void test_avx2_ds_kernel2(std::mt19937 &rng)
 }
 
 
+static void test_avx2_ds_kernel3(std::mt19937 &rng, int nupfreq, int nt_per_chunk)
+{
+    int nt_per_packet = 16;
+    int nt_f = nt_per_chunk / 2;
+    int nt_c = nt_per_chunk / 32;
+    
+    vector<float> in_data = uniform_randvec<float> (rng, nupfreq * nt_f, -50.0, 305.0);
+    vector<float> in_offsets = uniform_randvec<float> (rng, nt_c, -20.0, 20.0);
+    vector<float> in_scales = uniform_randvec<float> (rng, nt_c, 0.8, 1.2);
+
+    vector<int> in_mask = randintvec(rng, nupfreq * nt_f, -1, 1);
+    
+    // Fast kernel.
+    vector<uint8_t> outf_data(nupfreq * nt_per_chunk, 0);
+    _ds_kernel3(&outf_data[0], &in_data[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk);
+
+    // To be robust to roundoff error, we run the slow kernel twice, perturbing in_data.
+
+    vector<float> in_data2(in_data.size());
+    for (unsigned int i = 0; i < in_data.size(); i++)
+	in_data2[i] = in_data[i] - 1.0e-2;
+
+    vector<uint8_t> outs1_data(nupfreq * nt_per_chunk, 100);
+    ds_slow_kernel3(&outs1_data[0], &in_data2[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk, nt_per_packet);
+
+    for (unsigned int i = 0; i < in_data.size(); i++)
+	in_data2[i] = in_data[i] + 1.0e-2;
+
+    vector<uint8_t> outs2_data(nupfreq * nt_per_chunk, 200);
+    ds_slow_kernel3(&outs2_data[0], &in_data2[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk, nt_per_packet);
+
+    // Compare slow and fast kernels.
+
+    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
+	for (int it = 0; it < nt_f; it++) {
+	    uint8_t f = outf_data[iupfreq*nt_per_chunk + it];
+	    uint8_t s1 = outs1_data[iupfreq*nt_per_chunk + it];
+	    uint8_t s2 = outs2_data[iupfreq*nt_per_chunk + it];
+	    int m = in_mask[iupfreq * nt_f + it];
+	    
+	    if (m == 0) {
+		if (!f && !s1 && !s2)
+		    continue;
+	    }
+	    else if (m == -1) {
+		if ((s1 <= s2) && ((s2-s1) <= 1) && (s1 <= f) && (f <= s2))
+		    continue;
+	    }
+
+	    float d = in_data[iupfreq * nt_f + it];
+	    float off = in_offsets[it/16];
+	    float scal = in_scales[it/16];
+
+	    cerr << "test_avx2_ds_kernel3 failed: (nupfreq,nt_per_chunk)=(" << nupfreq << "," << nt_per_chunk << "),"
+		 << " (iupfreq,it)=(" << iupfreq << "," << it << "),"
+		 << " (data,mask,off,scal)=(" << d << "," << m << "," << off << "," << scal << "),"
+		 << " (f,s1,s2)=(" << hex << uint32_t(f) << "," << uint32_t(s1) << "," << uint32_t(s2) << ")\n" << dec;
+
+	    throw runtime_error("test_avx2_ds_kernel3() failed");
+	}
+    }
+}
+
+
+static void test_avx2_ds_kernel3(std::mt19937 &rng)
+{
+    cout << "test_avx2_ds_kernel3..";
+
+    for (int iouter = 0; iouter < 1000; iouter++) {
+	if (iouter % 10 == 0)
+	    cout << "." << flush;
+
+	int nupfreq = randint(rng, 1, 31);
+	int nt_per_chunk = 256 * randint(rng, 1, 9);
+	test_avx2_ds_kernel3(rng, nupfreq, nt_per_chunk);
+    }
+
+    cout << "success" << endl;
+}
+
+
 void test_avx2_kernels(std::mt19937 &rng)
 {
     test_avx2_ds_kernel1(rng);
     test_avx2_ds_kernel2(rng);
+    test_avx2_ds_kernel3(rng);
 
     cerr << "test_avx2_kernels()";
 
