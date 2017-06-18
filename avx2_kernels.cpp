@@ -912,7 +912,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 
 // Virtual override.
 // There is some code duplication between this and assembled_chunk::downsample(), so be sure to make changes in sync.
-void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
+void fast_assembled_chunk::downsample(const assembled_chunk *src1, const vassembled_chunk *src2)
 {
     int nfreq_c = constants::nfreq_coarse_tot;
     int nt_f = constants::nt_per_assembled_chunk;
@@ -944,7 +944,7 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 	_ds_kernel1(ds_data, ds_mask,
 		    src1->data + ifreq_f * nt_f,
 		    src1->offsets + ifreq_c * nt_c,
-		    src1->offsets + ifreq_c * nt_c,
+		    src1->scales + ifreq_c * nt_c,
 		    out_offsets, out_scales, nupfreq, nt_f);
 
 	_ds_kernel2(ds_data, ds_mask, out_offsets, out_scales, ds_w2, nupfreq, nt_f);
@@ -958,7 +958,7 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 	_ds_kernel1(ds_data, ds_mask,
 		    src2->data + ifreq_f * nt_f,
 		    src2->offsets + ifreq_c * nt_c,
-		    src2->offsets + ifreq_c * nt_c,
+		    src2->scales + ifreq_c * nt_c,
 		    out_offsets, out_scales, nupfreq, nt_f);
 
 	_ds_kernel2(ds_data, ds_mask, out_offsets, out_scales, ds_w2, nupfreq, nt_f);
@@ -970,7 +970,6 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
     this->binning = src1->binning + 1;
     this->ichunk = src1->ichunk;
     this->isample = src1->isample;
-
 }
 
 
@@ -1276,6 +1275,17 @@ static void test_avx2_ds_kernel3(std::mt19937 &rng)
 }
 
 
+// Helper function for test_avx2_kernels(), see below for usage.
+inline bool data8_almost_equal(uint8_t x, uint8_t y)
+{
+    if ((x == 0x00) || (x == 0xff))
+	return (y == 0x00) || (y == 0x01) || (y == 0xfe) || (y == 0xff);
+    if ((y == 0x00) || (y == 0xff))
+	return (x == 0x00) || (x == 0x01) || (x == 0xfe) || (x == 0xff);
+    return (x == y) || (x == y+1) || (y == x+1);
+}
+
+
 void test_avx2_kernels(std::mt19937 &rng)
 {
     test_avx2_ds_kernel1(rng);
@@ -1299,6 +1309,11 @@ void test_avx2_kernels(std::mt19937 &rng)
 	const int nupfreq = 2 * randint(rng, 1, 9);
 	const int nfreq_coarse_per_packet = 1 << randint(rng, 0, 6);
 	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
+
+	int nfreq_c = constants::nfreq_coarse_tot;
+	int nfreq_f = constants::nfreq_coarse_tot * nupfreq;
+	int nt_f = constants::nt_per_assembled_chunk;
+	int nt_c = constants::nt_per_assembled_chunk / nt_per_packet;
 
 	// Set up intensity_packet
 
@@ -1387,16 +1402,15 @@ void test_avx2_kernels(std::mt19937 &rng)
 	chunk0->randomize(rng);
 	chunk1->fill_with_copy(chunk0);
 
-	int nfreq_fine = constants::nfreq_coarse_tot * nupfreq;
-	vector<float> intensity0 = randvec(rng, nfreq_fine * stride);
-	vector<float> intensity1 = randvec(rng, nfreq_fine * stride);
-	vector<float> weights0 = randvec(rng, nfreq_fine * stride);
-	vector<float> weights1 = randvec(rng, nfreq_fine * stride);
+	vector<float> intensity0 = randvec(rng, nfreq_f * stride);
+	vector<float> intensity1 = randvec(rng, nfreq_f * stride);
+	vector<float> weights0 = randvec(rng, nfreq_f * stride);
+	vector<float> weights1 = randvec(rng, nfreq_f * stride);
 
 	chunk0->decode(&intensity0[0], &weights0[0], stride);
 	chunk1->decode(&intensity1[0], &weights1[0], stride);
 
-	for (int ifreq = 0; ifreq < nfreq_fine; ifreq++) {
+	for (int ifreq = 0; ifreq < nfreq_f; ifreq++) {
 	    for (int it = 0; it < constants::nt_per_assembled_chunk; it++) {
 		int i = ifreq*stride + it;
 		int j = ifreq*constants::nt_per_assembled_chunk + it;
@@ -1414,6 +1428,55 @@ void test_avx2_kernels(std::mt19937 &rng)
 			 << " " << weights0[i] << " " << weights1[i] << endl;
 		    throw runtime_error("test_avx2_kernels: weights mismatch");
 		}
+	    }
+	}
+
+	// Test 3: Equivalence of assembled_chunk::downsample() and fast_assembled_chunk::downsample().
+
+	auto chunk_a = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	auto chunk_b = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
+
+	chunk0->randomize(rng);
+	chunk1->randomize(rng);
+	chunk_a->randomize(rng);
+	chunk_b->randomize(rng);
+
+	chunk0->downsample(chunk_a.get(), chunk_b.get());  // slow
+	chunk1->downsample(chunk_a.get(), chunk_b.get());  // fast
+
+	// The output offsets and scales from the slow and fast downsampling kernels
+	// should be the same, within roundoff error.
+
+	for (int ifreq_c = 0; ifreq_c < nfreq_c; ifreq_c++) {
+	    for (int it_c = 0; it_c < nt_c; it_c++) {
+		float off0 = chunk0->offsets[ifreq_c * nt_c + it_c];
+		float off1 = chunk1->offsets[ifreq_c * nt_c + it_c];
+		float sca0 = chunk0->scales[ifreq_c * nt_c + it_c];
+		float sca1 = chunk1->scales[ifreq_c * nt_c + it_c];
+
+		double eps_o = fabs(off0 - off1) / (fabs(sca0) + fabs(sca1));   // 'sca' denominator is intentional here
+		double eps_s = fabs(sca0 - sca1) / (fabs(sca0) + fabs(sca1));
+		
+		if ((eps_o < 1.0e-4) && (eps_s < 1.0e-4))
+		    continue;
+
+		cerr << "\n" << "test_avx2_kernels: downsample test failed: offsets/scales are inconsistent,"
+		     << " (eps_o,eps_s)=(" << eps_o << "," << eps_s << ")\n";
+
+		throw runtime_error("test_avx2_kernels: downsample test failed");
+	    }
+	}
+
+	// The 8-bit data from the slow and fast downsampling kernels can differ by +/- 1,
+	// due to roundoff error in the encoding kernel.
+
+	for (int ifreq = 0; ifreq < nfreq_f; ifreq++) {
+	    for (int it = 0; it < constants::nt_per_assembled_chunk; it++) {
+		uint8_t x = chunk0->data[ifreq*constants::nt_per_assembled_chunk + it];
+		uint8_t y = chunk1->data[ifreq*constants::nt_per_assembled_chunk + it];
+
+		if (!data8_almost_equal(x,y))
+		    throw runtime_error("test_avx2_kernels: downsample test failed");
 	    }
 	}
     }
