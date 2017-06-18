@@ -4,6 +4,8 @@ test-intensity-hdf5-file
 test-misc
 test-network-streams
 test-assembled-chunk
+time-kernels
+test-log
 
 *.o
 
