@@ -1104,9 +1104,101 @@ static void test_avx2_ds_kernel1(std::mt19937 &rng)
 }
 
 
+static void test_avx2_ds_kernel2(std::mt19937 &rng, int nupfreq, int nt_per_chunk)
+{
+    int nt_per_packet = 16;
+    int nt_f = nt_per_chunk / 2;
+    int nt_c = nt_per_chunk / (2*nt_per_packet);
+
+    vector<float> in_data(nupfreq * nt_f, 0.0);
+    vector<int> in_mask(nupfreq * nt_f, 0);
+
+    vector<float> w0(nt_c, 0.0);
+    vector<float> w1(nt_c, 0.0);
+    vector<float> w2(nt_c, 0.0);
+
+    // I put some thought into simulating data in a way which exposes all corner cases!
+
+    for (int it_c = 0; it_c < nt_c; it_c++) {
+	int num_unmasked = (uniform_rand(rng) < 0.2) ? 0 : randint(rng, 0, nupfreq * nt_per_packet);
+	float sim_offset = (uniform_rand(rng) < 0.4) ? 0.0 : uniform_rand(rng, -1.0, 1.0);
+	float sim_scale = (uniform_rand(rng) < 0.2) ? 0.0 : uniform_rand(rng, 0.0, 1.0);
+
+	for (int i = 0; i < num_unmasked; i++) {
+	    int ifreq = randint(rng, 0, nupfreq);
+	    int it_f = randint(rng, it_c * nt_per_packet, (it_c+1) * nt_per_packet);
+	    in_mask[ifreq*nt_f + it_f] = -1;
+	}
+
+	float num = 0.0;
+	float den = 0.0;
+
+	for (int ifreq = 0; ifreq < nupfreq; ifreq++) {
+	    for (int it_f = it_c * nt_per_packet; it_f < (it_c+1) * nt_per_packet; it_f++) {
+		// Note: sim_offset ignored when computing mean...
+		float x = uniform_rand(rng, -sim_scale, sim_scale);
+		int m = in_mask[ifreq*nt_f + it_f];
+		
+		num += m * x;
+		den += m;
+
+		// ... but included here.
+		in_data[ifreq*nt_f + it_f] = sim_offset + x;
+	    }
+	}
+	
+	w0[it_c] = den;
+	w1[it_c] = (den > 0) ? (num/den + sim_offset) : 0.0;  // Note sim_offset included here
+    }
+
+    vector<float> w0_fast = w0;
+    vector<float> w1_fast = w1;
+    vector<float> w2_fast(nt_c, 0.0);
+
+    // Slow kernel.
+    ds_slow_kernel2(&in_data[0], &in_mask[0], &w0[0], &w1[0], &w2[0], nupfreq, nt_per_chunk, nt_per_packet);
+
+    // Fast kernel.
+    _ds_kernel2(&in_data[0], &in_mask[0], &w0_fast[0], &w1_fast[0], &w2_fast[0], nupfreq, nt_per_chunk);
+
+    for (int it_c = 0; it_c < nt_c; it_c++) {
+	double eps0 = fabs(w0[it_c] - w0_fast[it_c]) / (fabs(w1[it_c]) + fabs(w1_fast[it_c]));   // note: w1 denominator is intentional here
+	double eps1 = fabs(w1[it_c] - w1_fast[it_c]) / (fabs(w1[it_c]) + fabs(w1_fast[it_c]));
+	double eps2 = fabs(w2[it_c] - w2_fast[it_c]) / (fabs(w2[it_c]) + fabs(w2_fast[it_c]));
+	
+	if ((eps0 > 1.0e-4) || (eps1 > 1.0e-4) || (eps2 > 1.0e-4)) {
+	    cout << endl;
+	    cerr << "test_kernel2 failed: (nupfreq,nt_per_chunk)=(" << nupfreq << "," << nt_per_chunk << "),"
+		 << " (eps0,eps1,eps2)=(" << eps0 << "," << eps1 << "," << eps2 << ")\n";
+
+	    // If this test fails, will need a little more array-printing code here, in order to diagnose anything.
+	    throw runtime_error("unit test failed!");
+	}
+    }
+}
+
+
+static void test_avx2_ds_kernel2(std::mt19937 &rng)
+{
+    cout << "test_avx2_ds_kernel2..";
+
+    for (int iouter = 0; iouter < 1000; iouter++) {
+	if (iouter % 10 == 0)
+	    cout << "." << flush;
+
+	int nupfreq = randint(rng, 1, 31);
+	int nt_per_chunk = 256 * randint(rng, 1, 9);
+	test_avx2_ds_kernel2(rng, nupfreq, nt_per_chunk);
+    }
+
+    cout << "success" << endl;
+}
+
+
 void test_avx2_kernels(std::mt19937 &rng)
 {
     test_avx2_ds_kernel1(rng);
+    test_avx2_ds_kernel2(rng);
 
     cerr << "test_avx2_kernels()";
 
