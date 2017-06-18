@@ -347,13 +347,9 @@ protected:
 
 // -------------------------------------------------------------------------------------------------
 //
-// Downsampling kernels (see assembled_chunk.cpp, avx2_kernels.cpp for more info)
+// Some internal building blocks for downsampling kernels.  
+// These are externally callable for use in unit tests.
 
-
-extern void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_scales,
-			   const uint8_t *in_data, const float *in_offsets, const float *in_scales,
-			   float *tmp_data, int *tmp_mask, float *tmp_scales, 
-			   int nupfreq, int nt_per_chunk, int nt_per_packet);
 
 extern void ds_slow_kernel1(float *out_data, int *out_mask, const uint8_t *in_data, 
 			    const float *in_offsets, const float *in_scales, float *out_count, 

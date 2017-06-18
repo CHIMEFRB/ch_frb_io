@@ -644,9 +644,10 @@ struct fast_assembled_chunk : public assembled_chunk
     // Constructor throws exception unless nt_per_packet == 16 and (nupfreq % 2) == 0.
     fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
 
-    // Overrides assembled_chunk::add_packet() and assembled_chunk::decode() with fast assembly language versions.
+    // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
+    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
 };
 
 

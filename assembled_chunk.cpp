@@ -316,10 +316,23 @@ void assembled_chunk::decode_subset(float *intensity, float *weights,
 }
 
 
+static void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_scales, const uint8_t *in_data, 
+			   const float *in_offsets, const float *in_scales, float *tmp_data, int *tmp_mask, 
+			   float *tmp_scales, int nupfreq, int nt_per_chunk, int nt_per_packet)
+{
+    ds_slow_kernel1(tmp_data, tmp_mask, in_data, in_offsets, in_scales, out_offsets, out_scales, nupfreq, nt_per_chunk, nt_per_packet);
+    ds_slow_kernel2(tmp_data, tmp_mask, out_offsets, out_scales, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
+    ds_slow_kernel3(out_data, tmp_data, tmp_mask, out_offsets, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
+}
+
+
 // This is the slow, reference version of assembled_chunk::downsample().
 //
 // In production, it is overridden by the fast, assembly-language-kernelized version
 // in fast_assembled_chunk::downsample().  (See avx2_kernels.cpp)
+//
+// There is some code duplication between this and assembled_chunk::downsample(), 
+// so be sure to make changes in sync.
 
 void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
@@ -663,17 +676,6 @@ void ds_slow_kernel3(uint8_t *out, const float *data, const int *mask, const flo
 	    }
 	}
     }
-}
-
-
-void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_scales,
-		    const uint8_t *in_data, const float *in_offsets, const float *in_scales,
-		    float *tmp_data, int *tmp_mask, float *tmp_scales, 
-		    int nupfreq, int nt_per_chunk, int nt_per_packet)
-{
-    ds_slow_kernel1(tmp_data, tmp_mask, in_data, in_offsets, in_scales, out_offsets, out_scales, nupfreq, nt_per_chunk, nt_per_packet);
-    ds_slow_kernel2(tmp_data, tmp_mask, out_offsets, out_scales, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
-    ds_slow_kernel3(out_data, tmp_data, tmp_mask, out_offsets, tmp_scales, nupfreq, nt_per_chunk, nt_per_packet);
 }
 
 
