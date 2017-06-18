@@ -109,6 +109,9 @@ test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
+time-kernels: time-kernels.cpp $(INCFILES) libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
 test-log: test-log.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lzmq
 

@@ -912,7 +912,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 
 // Virtual override.
 // There is some code duplication between this and assembled_chunk::downsample(), so be sure to make changes in sync.
-void fast_assembled_chunk::downsample(const assembled_chunk *src1, const vassembled_chunk *src2)
+void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
     int nfreq_c = constants::nfreq_coarse_tot;
     int nt_f = constants::nt_per_assembled_chunk;
