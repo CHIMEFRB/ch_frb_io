@@ -131,7 +131,7 @@ struct intensity_packet {
     //
     // Returns size of the encoded packet in bytes.
     //
-    // Caveat emptor: encode() doesn't do any argument checking at all, e.g. it's easy to segfault
+    // Caveat emptor: encode() doesn't do any argument checking at all, so it's easy to segfault
     // by calling it wrong!
 
     int encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
