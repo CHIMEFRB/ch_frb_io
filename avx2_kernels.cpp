@@ -172,6 +172,7 @@ inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
 	__m128i x0 = _mm256_extractf128_si256(x, 0);
 	__m128i x1 = _mm256_extractf128_si256(x, 1);
 	
+	// I checked that _mm_storeu_si128() is faster than _mm_stream_si128() here.
 	_mm_storeu_si128((__m128i *) (dst + i*s), x0);
 	_mm_storeu_si128((__m128i *) (dst + (i+1)*s), x1);
     }
