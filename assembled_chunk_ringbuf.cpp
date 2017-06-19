@@ -102,6 +102,10 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_fpga_next,
     pthread_mutex_unlock(&this->lock);
 }
 
+// It's OK to modify 'event_counts' without acquiring any locks.  This is because the assembler
+// thread passes an event_subcounts array which is updated on a per-packet basis, and accumulated
+// into the global event_counts on a per-udp_packet_list basis (with locks acquired!).
+
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.

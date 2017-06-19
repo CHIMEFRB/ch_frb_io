@@ -262,6 +262,10 @@ public:
     // is split into multiple packets (in a zero-copy way, see intensity_network_stream.cpp) which are
     // passed to different assembled_chunk_ringbufs.
     //
+    // The 'event_counts' array will be modified without acquiring any locks.  This is OK because the
+    // assembler thread passes an event_subcounts array which is updated on a per-packet basis, and
+    // accumulated into the global event_counts on a per-udp_packet_list basis (with locks acquired!).
+    //
     // This routine is nonblocking.  If it would need to block, then it drops data somewhere and
     // increments the appropriate event_count.  (Depending which flags are set in ini_params, it may
     // also print a warning or throw an exception.)
