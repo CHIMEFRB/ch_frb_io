@@ -46,6 +46,8 @@ struct memory_chunk_layout {
     const int ib_ds_w2;
     const int chunk_size;
 
+    static int align(int nbytes) { return ((nbytes+63)/64) * 64; }
+
     memory_chunk_layout(int nupfreq, int nt_per_packet) :
 	nfreq_c(constants::nfreq_coarse_tot),
 	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
@@ -58,12 +60,12 @@ struct memory_chunk_layout {
 	nb_ds_mask(nupfreq * (nt_f/2) * sizeof(int)),
 	nb_ds_w2((nt_c/2) * sizeof(float)),
 	ib_data(0),
-	ib_scales(ib_data + nb_data),
-	ib_offsets(ib_scales + nb_scales),
-	ib_ds_data(ib_offsets + nb_offsets),
-	ib_ds_mask(ib_ds_data + nb_ds_data),
-	ib_ds_w2(ib_ds_mask + nb_ds_mask),
-	chunk_size(ib_ds_w2 + nb_ds_w2)
+	ib_scales(align(ib_data + nb_data)),
+	ib_offsets(align(ib_scales + nb_scales)),
+	ib_ds_data(align(ib_offsets + nb_offsets)),
+	ib_ds_mask(align(ib_ds_data + nb_ds_data)),
+	ib_ds_w2(align(ib_ds_mask + nb_ds_mask)),
+	chunk_size(align(ib_ds_w2 + nb_ds_w2))
     { }
 };
 

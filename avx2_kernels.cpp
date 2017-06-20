@@ -197,6 +197,8 @@ template<> inline void incremental_downsample8::add<7> (__m256 x)
 //
 // Loads a float32[8] from memory, and allows caller to request a constant
 // __m256 containing any of the 8 floats (repeated 8 times).
+//
+// Note: constructor assumes 'p' is an aligned pointer!!
 
 struct incremental_upsample8 {
     __m256 x0;  // [x0 x0]
@@ -204,7 +206,7 @@ struct incremental_upsample8 {
     
     incremental_upsample8(const float *p)
     {
-	__m256 x01 = _mm256_loadu_ps(p);                      // [x0 x1]
+	__m256 x01 = _mm256_load_ps(p);                       // [x0 x1]
 	__m256 x10 = _mm256_permute2f128_ps(x01, x01, 0x01);  // [x1 x0]
 
 	x0 = _mm256_blend_ps(x01, x10, 0xf0);  // [x0 x0]
@@ -285,7 +287,7 @@ struct decoder {
     template<int N>
     inline void decode32(float *intensity, float *weights, const uint8_t *data, incremental_upsample8 &scales, incremental_upsample8 &offsets)
     {
-	__m256i x = _mm256_loadu_si256((const __m256i *) data);
+	__m256i x = _mm256_load_si256((const __m256i *) data);
 
 	//  x4  x5  x6  x7   x0  x1  x2  x3  x12 x13 x14 x15    x8  x9 x10 x11
 	// x20 x21 x22 x23  x16 x17 x18 x19  x28 x29 x30 x31   x24 x25 x26 x27
@@ -487,7 +489,7 @@ inline void _ds_kernel1a(float *out_data, int *out_mask, const uint8_t *in_data,
     __m256i all_ones = _mm256_set1_epi8(0xff);
 
     // 8-bit input data
-    __m256i d8 = _mm256_loadu_si256((const __m256i *) in_data);
+    __m256i d8 = _mm256_load_si256((const __m256i *) in_data);
 
     // 8-bit mask (actually the mask complement: 0x00 means "OK", 0xff means "invalid".
     __m256i m8a = _mm256_cmpeq_epi8(d8, _mm256_setzero_si256());
@@ -518,12 +520,12 @@ inline void _ds_kernel1a(float *out_data, int *out_mask, const uint8_t *in_data,
     x1 = _mm256_and_ps(x1, _mm256_castsi256_ps(m1));
 
     // Write out_data
-    _mm256_storeu_ps(out_data, x0);
-    _mm256_storeu_ps(out_data+8, x1);
+    _mm256_store_ps(out_data, x0);
+    _mm256_store_ps(out_data+8, x1);
 
     // Write out_mask
-    _mm256_storeu_si256((__m256i *) (out_mask), m0);
-    _mm256_storeu_si256((__m256i *) (out_mask+8), m1);
+    _mm256_store_si256((__m256i *) (out_mask), m0);
+    _mm256_store_si256((__m256i *) (out_mask+8), m1);
 
     // Write out_count.
     __m256i count = _mm256_add_epi32(m0, m1);
@@ -611,11 +613,11 @@ inline void _ds_kernel1(float *out_data, int *out_mask, const uint8_t *in_data, 
     __m256 one = _mm256_set1_ps(1.0);
 
     for (int i = 0; i < (nt/32); i += 8) {
-	__m256 num = _mm256_loadu_ps(out_mean + i);
-	__m256 den = _mm256_loadu_ps(out_count + i);
+	__m256 num = _mm256_load_ps(out_mean + i);
+	__m256 den = _mm256_load_ps(out_count + i);
 	__m256 mean = num / _mm256_max_ps(den, one);
 
-	_mm256_storeu_ps(out_mean + i, mean);
+	_mm256_store_ps(out_mean + i, mean);
     }
 }
 
@@ -628,8 +630,8 @@ inline void _ds_kernel1(float *out_data, int *out_mask, const uint8_t *in_data, 
 template<int N>
 inline void _ds_kernel2a(const float *data, const int *mask, incremental_upsample8 &in_mean, incremental_downsample8 &out_var)
 {
-    __m256 x0 = _mm256_loadu_ps(data);
-    __m256 x1 = _mm256_loadu_ps(data+8);
+    __m256 x0 = _mm256_load_ps(data);
+    __m256 x1 = _mm256_load_ps(data+8);
 
     // Subtract offset.
     __m256 offset = in_mean.get<N>();
@@ -638,8 +640,8 @@ inline void _ds_kernel2a(const float *data, const int *mask, incremental_upsampl
 
     // Apply mask
     const float *fmask = (const float *) (mask);
-    x0 = _mm256_and_ps(x0, _mm256_loadu_ps(fmask));
-    x1 = _mm256_and_ps(x1, _mm256_loadu_ps(fmask+8));
+    x0 = _mm256_and_ps(x0, _mm256_load_ps(fmask));
+    x1 = _mm256_and_ps(x1, _mm256_load_ps(fmask+8));
     
     out_var.add<N> (x0*x0 + x1*x1);
 }
@@ -708,9 +710,9 @@ inline void _ds_kernel2(const float *in_data, const int *in_mask, float *w0, flo
     __m256 eps = _mm256_set1_ps(1.0e-10);
 
     for (int i = 0; i < nt/32; i += 8) {
-	__m256 count = _mm256_loadu_ps(w0+i);
-	__m256 mean = _mm256_loadu_ps(w1+i);
-	__m256 var = _mm256_loadu_ps(w2+i) / _mm256_max_ps(count,c1);
+	__m256 count = _mm256_load_ps(w0+i);
+	__m256 mean = _mm256_load_ps(w1+i);
+	__m256 var = _mm256_load_ps(w2+i) / _mm256_max_ps(count,c1);
 
 	var += eps * mean * mean;
 
@@ -723,9 +725,9 @@ inline void _ds_kernel2(const float *in_data, const int *in_mask, float *w0, flo
 	__m256 enc_scale = c1 / dec_scale;
 	__m256 offset = mean - c128 * dec_scale;
 
-	_mm256_storeu_ps(w0+i, offset);
-	_mm256_storeu_ps(w1+i, dec_scale);
-	_mm256_storeu_ps(w2+i, enc_scale);
+	_mm256_store_ps(w0+i, offset);
+	_mm256_store_ps(w1+i, dec_scale);
+	_mm256_store_ps(w2+i, enc_scale);
     }
 }
 
@@ -740,10 +742,10 @@ inline void _ds_kernel2(const float *in_data, const int *in_mask, float *w0, flo
 template<int N>
 inline void _ds_kernel3a(uint8_t *out, const float *data, const int *mask, incremental_upsample8 &enc_off, incremental_upsample8 &enc_scal, _extract_32_8 &ex)
 {
-    __m256 x0 = _mm256_loadu_ps(data);
-    __m256 x1 = _mm256_loadu_ps(data+8);
-    __m256 x2 = _mm256_loadu_ps(data+16);
-    __m256 x3 = _mm256_loadu_ps(data+24);
+    __m256 x0 = _mm256_load_ps(data);
+    __m256 x1 = _mm256_load_ps(data+8);
+    __m256 x2 = _mm256_load_ps(data+16);
+    __m256 x3 = _mm256_load_ps(data+24);
 
     __m256 off = enc_off.get<2*N>();
     __m256 scal = enc_scal.get<2*N>();
@@ -759,14 +761,14 @@ inline void _ds_kernel3a(uint8_t *out, const float *data, const int *mask, incre
 
     const float *fmask = (const float *) mask;
 
-    x0 = _mm256_and_ps(x0, _mm256_loadu_ps(fmask));
-    x1 = _mm256_and_ps(x1, _mm256_loadu_ps(fmask+8));
-    x2 = _mm256_and_ps(x2, _mm256_loadu_ps(fmask+16));
-    x3 = _mm256_and_ps(x3, _mm256_loadu_ps(fmask+24));
+    x0 = _mm256_and_ps(x0, _mm256_load_ps(fmask));
+    x1 = _mm256_and_ps(x1, _mm256_load_ps(fmask+8));
+    x2 = _mm256_and_ps(x2, _mm256_load_ps(fmask+16));
+    x3 = _mm256_and_ps(x3, _mm256_load_ps(fmask+24));
 
     __m256i y = ex.extract(x0, x1, x2, x3);
 
-    _mm256_storeu_si256((__m256i *) out, y);
+    _mm256_store_si256((__m256i *) out, y);
 }
 
 
