@@ -154,6 +154,78 @@ inline string _vstr(__m256 x)
 
 
 // -------------------------------------------------------------------------------------------------
+
+
+// incremental_downsample8: a helper class for the downsampling kernels.
+//
+// Incrementally "absorbs" a float32[64], represented as eight __m256's, 
+// downsamples float32[8], and returns the result as an __m256.
+
+struct incremental_downsample8
+{
+    __m256 x0;
+    __m256 x1;
+    __m256 x2;
+
+    static inline __m256 f(__m256 a, __m256 b) { return _mm256_shuffle_ps(a, b, 0x88) + _mm256_shuffle_ps(a, b, 0xdd); }
+
+    // After add<7>(), the downsampled vector is 'x0'.
+    template<int N> inline void add(__m256 x);
+
+    // These only make sense to call after add<7>().
+    inline void store(float *p)  { _mm256_store_ps(p, x0); }
+    inline void update(float *p) { _mm256_store_ps(p, x0 + _mm256_load_ps(p)); }
+};
+
+
+template<> inline void incremental_downsample8::add<0> (__m256 x)  { x0 = x; }
+template<> inline void incremental_downsample8::add<1> (__m256 x)  { x1 = f(x0,x); }
+template<> inline void incremental_downsample8::add<2> (__m256 x)  { x0 = x; }
+template<> inline void incremental_downsample8::add<3> (__m256 x)  { x2 = f(x1,f(x0,x)); }
+template<> inline void incremental_downsample8::add<4> (__m256 x)  { x0 = x; }
+template<> inline void incremental_downsample8::add<5> (__m256 x)  { x1 = f(x0,x); }
+template<> inline void incremental_downsample8::add<6> (__m256 x)  { x0 = x; }
+
+template<> inline void incremental_downsample8::add<7> (__m256 x)
+{ 
+    x0 = f(x1,f(x0,x));
+    x0 = _mm256_blend_ps(x2, x0, 0xf0) + _mm256_permute2f128_ps(x2, x0, 0x21);
+}
+
+
+// incremental_upsample8: a helper class for the downsampling kernels.
+//
+// Loads a float32[8] from memory, and allows caller to request a constant
+// __m256 containing any of the 8 floats (repeated 8 times).
+
+struct incremental_upsample8 {
+    __m256 x0;  // [x0 x0]
+    __m256 x1;  // [x1 x1]
+    
+    incremental_upsample8(const float *p)
+    {
+	__m256 x01 = _mm256_loadu_ps(p);                      // [x0 x1]
+	__m256 x10 = _mm256_permute2f128_ps(x01, x01, 0x01);  // [x1 x0]
+
+	x0 = _mm256_blend_ps(x01, x10, 0xf0);  // [x0 x0]
+	x1 = _mm256_blend_ps(x01, x10, 0x0f);  // [x1 x1]
+    }
+
+    template<int N> inline __m256 get();
+};
+
+
+template<> inline __m256 incremental_upsample8::get<0>() { return _mm256_permute_ps(x0, 0x00); }  // (0000)_4
+template<> inline __m256 incremental_upsample8::get<1>() { return _mm256_permute_ps(x0, 0x55); }  // (1111)_4
+template<> inline __m256 incremental_upsample8::get<2>() { return _mm256_permute_ps(x0, 0xaa); }  // (2222)_4
+template<> inline __m256 incremental_upsample8::get<3>() { return _mm256_permute_ps(x0, 0xff); }  // (3333)_4
+template<> inline __m256 incremental_upsample8::get<4>() { return _mm256_permute_ps(x1, 0x00); }
+template<> inline __m256 incremental_upsample8::get<5>() { return _mm256_permute_ps(x1, 0x55); }
+template<> inline __m256 incremental_upsample8::get<6>() { return _mm256_permute_ps(x1, 0xaa); }
+template<> inline __m256 incremental_upsample8::get<7>() { return _mm256_permute_ps(x1, 0xff); }
+
+
+// -------------------------------------------------------------------------------------------------
 //
 // add_packet_kernel()
 //
@@ -182,8 +254,117 @@ inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
 // -------------------------------------------------------------------------------------------------
 //
 // Decode kernels
-//
-// FIXME: these can be made faster for sure!
+
+
+struct decoder {
+    const __m256 f1;
+    const __m256i i255;
+    const __m256i ctl;
+
+    decoder() :
+	f1(_mm256_set1_ps(1.0)),
+	i255(_mm256_set1_epi32(255)),
+	ctl(_mm256_set_epi8(11,3,15,7,10,2,14,6,9,1,13,5,8,0,12,4,
+			    11,3,15,7,10,2,14,6,9,1,13,5,8,0,12,4))
+    { }
+
+    // Note that mask32 uses reversed convention: 0 if valid, 0xff if invalid
+    inline void decode8(float *intensity, float *weights, __m256i data32, __m256i mask32, __m256 scales, __m256 offsets)
+    {
+	__m256 x = _mm256_cvtepi32_ps(data32);
+	_mm256_storeu_ps(intensity, scales*x + offsets);
+
+	__m256 m = _mm256_castsi256_ps(_mm256_cmpeq_epi32(mask32, _mm256_setzero_si256()));
+	_mm256_storeu_ps(weights, _mm256_and_ps(f1,m));
+    }
+
+    template<int N>
+    inline void decode32(float *intensity, float *weights, const uint8_t *data, incremental_upsample8 &scales, incremental_upsample8 &offsets)
+    {
+#if 1
+	__m256i x = _mm256_loadu_si256((const __m256i *) data);
+
+	//  x4  x5  x6  x7   x0  x1  x2  x3  x12 x13 x14 x15    x8  x9 x10 x11
+	// x20 x21 x22 x23  x16 x17 x18 x19  x28 x29 x30 x31   x24 x25 x26 x27
+	__m256i y = _mm256_shuffle_epi32(x, 0xb1);  // (2301)_4
+
+	// [ x16 ... x31 x0 ... x8 ]
+	__m256i z = _mm256_permute2f128_ps(x, x, 0x01);
+
+	// x16 x17 x18 x19  x0 x1 x2 x3  x24 x25 x26 x27    x8  x9 x10 x11
+        // x20 x21 x22 x23  x4 x5 x6 x7  x28 x29 x30 x31   x12 x13 x14 x15
+	__m256i d = _mm256_blend_epi32(y, z, 0xa5);  // (10100101)_2
+
+	// x0  x8 x16 x24   x1  x9 x17 x25   x2 x10 x18 x26   x3 x11 x19 x27
+	// x4 x12 x20 x28   x5 x13 x21 x29   x6 x11 x19 x27   x7 x15 x23 x31
+	d = _mm256_shuffle_epi8(d, ctl);
+
+	__m256i m0 = _mm256_cmpeq_epi8(d, _mm256_setzero_si256());
+	__m256i m1 = _mm256_cmpeq_epi8(d, _mm256_set1_epi8(-1));
+	__m256i m = _mm256_or_ps(m0, m1);  // 0xff if masked, 0x00 if valid
+
+	__m256 sca0 = scales.template get<2*N> ();
+	__m256 off0 = scales.get<2*N> ();
+
+	__m256i d32 = _mm256_and_si256(d,i255);
+	__m256i m32 = _mm256_and_si256(m,i255);
+
+	decode8(intensity, weights, d32, m32, sca0, off0);
+
+	d32 = _mm256_and_si256(_mm256_srli_epi32(d,8), i255);
+	m32 = _mm256_and_si256(_mm256_srli_epi32(m,8), i255);
+
+	decode8(intensity+8, weights+8, d32, m32, sca0, off0);
+
+	sca0 = scales.get<2*N+1> ();
+	off0 = scales.get<2*N+1> ();
+
+	d32 = _mm256_and_si256(_mm256_srli_epi32(d,16), i255);
+	m32 = _mm256_and_si256(_mm256_srli_epi32(m,16), i255);
+
+	decode8(intensity+16, weights+16, d32, m32, sca0, off0);
+
+	d32 = _mm256_srli_epi32(d,24);
+	m32 = _mm256_srli_epi32(m,24);
+
+	decode8(intensity+24, weights+24, d32, m32, sca0, off0);
+#else
+	__m256i x = _mm256_loadu_si256((const __m256i *) data);
+	__m256 y = _mm256_cvtepi32_ps(x);
+
+	_mm256_storeu_ps(intensity, y);
+	_mm256_storeu_ps(intensity+8, y);
+	_mm256_storeu_ps(intensity+16, y);
+	_mm256_storeu_ps(intensity+24, y);
+
+	_mm256_storeu_ps(weights, y);
+	_mm256_storeu_ps(weights+8, y);
+	_mm256_storeu_ps(weights+16, y);
+	_mm256_storeu_ps(weights+24, y);	
+#endif
+    }
+    
+    inline void decode128(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets)
+    {
+	incremental_upsample8 sca(scales);
+	incremental_upsample8 off(offsets);
+    
+	decode32<0> (intensity, weights, data, sca, off);
+	decode32<1> (intensity+32, weights+32, data+32, sca, off);
+	decode32<2> (intensity+64, weights+64, data+64, sca, off);
+	decode32<3> (intensity+96, weights+96, data+96, sca, off);
+    }
+
+    inline void decode_row(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets)
+    {
+	static_assert(constants::nt_per_assembled_chunk % 128 == 0, "_decode_kernel() assumes nt_per_assembled_chunk divisible by 128");
+
+	constexpr int n = constants::nt_per_assembled_chunk / 128;
+	
+	for (int i = 0; i < n; i++)
+	    decode128(intensity + i*128, weights + i*128, data + i*128, scales + i*8, offsets + i*8);
+    }
+};
 
 
 // Input: a 256-bit SIMD register which holds 32 8-bit unsigned integers [ x0, ..., x31 ].
@@ -421,75 +602,6 @@ struct _extract_32_8 {
 	return  _mm256_blend_epi32(t, u, 0x5a);  // [ a0 a1 b0 b1 c0 c1 d0 d1 ].  Note 0x5a = (01011010)_2
     }
 };
-
-
-// incremental_downsample8: a helper class for the downsampling kernels.
-//
-// Incrementally "absorbs" a float32[64], represented as eight __m256's, 
-// downsamples float32[8], and returns the result as an __m256.
-
-struct incremental_downsample8
-{
-    __m256 x0;
-    __m256 x1;
-    __m256 x2;
-
-    static inline __m256 f(__m256 a, __m256 b) { return _mm256_shuffle_ps(a, b, 0x88) + _mm256_shuffle_ps(a, b, 0xdd); }
-
-    // After add<7>(), the downsampled vector is 'x0'.
-    template<int N> inline void add(__m256 x);
-
-    // These only make sense to call after add<7>().
-    inline void store(float *p)  { _mm256_store_ps(p, x0); }
-    inline void update(float *p) { _mm256_store_ps(p, x0 + _mm256_load_ps(p)); }
-};
-
-
-template<> inline void incremental_downsample8::add<0> (__m256 x)  { x0 = x; }
-template<> inline void incremental_downsample8::add<1> (__m256 x)  { x1 = f(x0,x); }
-template<> inline void incremental_downsample8::add<2> (__m256 x)  { x0 = x; }
-template<> inline void incremental_downsample8::add<3> (__m256 x)  { x2 = f(x1,f(x0,x)); }
-template<> inline void incremental_downsample8::add<4> (__m256 x)  { x0 = x; }
-template<> inline void incremental_downsample8::add<5> (__m256 x)  { x1 = f(x0,x); }
-template<> inline void incremental_downsample8::add<6> (__m256 x)  { x0 = x; }
-
-template<> inline void incremental_downsample8::add<7> (__m256 x)
-{ 
-    x0 = f(x1,f(x0,x));
-    x0 = _mm256_blend_ps(x2, x0, 0xf0) + _mm256_permute2f128_ps(x2, x0, 0x21);
-}
-
-
-// incremental_upsample8: a helper class for the downsampling kernels.
-//
-// Loads a float32[8] from memory, and allows caller to request a constant
-// __m256 containing any of the 8 floats (repeated 8 times).
-
-struct incremental_upsample8 {
-    __m256 x0;  // [x0 x0]
-    __m256 x1;  // [x1 x1]
-    
-    incremental_upsample8(const float *p)
-    {
-	__m256 x01 = _mm256_loadu_ps(p);                      // [x0 x1]
-	__m256 x10 = _mm256_permute2f128_ps(x01, x01, 0x01);  // [x1 x0]
-
-	x0 = _mm256_blend_ps(x01, x10, 0xf0);  // [x0 x0]
-	x1 = _mm256_blend_ps(x01, x10, 0x0f);  // [x1 x1]
-    }
-
-    template<int N> inline __m256 get();
-};
-
-
-template<> inline __m256 incremental_upsample8::get<0>() { return _mm256_permute_ps(x0, 0x00); }  // (0000)_4
-template<> inline __m256 incremental_upsample8::get<1>() { return _mm256_permute_ps(x0, 0x55); }  // (1111)_4
-template<> inline __m256 incremental_upsample8::get<2>() { return _mm256_permute_ps(x0, 0xaa); }  // (2222)_4
-template<> inline __m256 incremental_upsample8::get<3>() { return _mm256_permute_ps(x0, 0xff); }  // (3333)_4
-template<> inline __m256 incremental_upsample8::get<4>() { return _mm256_permute_ps(x1, 0x00); }
-template<> inline __m256 incremental_upsample8::get<5>() { return _mm256_permute_ps(x1, 0x55); }
-template<> inline __m256 incremental_upsample8::get<6>() { return _mm256_permute_ps(x1, 0xaa); }
-template<> inline __m256 incremental_upsample8::get<7>() { return _mm256_permute_ps(x1, 0xff); }
 
 
 // Helper function called by _kernel1a().
@@ -888,6 +1000,7 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 }
 
 
+#if 0
 // virtual override
 void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
@@ -909,7 +1022,31 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 	}
     }    
 }
+#else
+// virtual override
+void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
+{
+    if (!intensity || !weights)
+	throw runtime_error("ch_frb_io: null pointer passed to fast_assembled_chunk::decode()");
+    if (stride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad stride passed to fast_assembled_chunk::decode()");
 
+    decoder d;
+
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
+	const float *scales_f = this->scales + if_coarse * nt_coarse;
+	const float *offsets_f = this->offsets + if_coarse * nt_coarse;
+	
+	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
+	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
+	    float *int_f = intensity + if_fine * stride;
+	    float *wt_f = weights + if_fine * stride;
+
+	    d.decode_row(int_f, wt_f, src_f, scales_f, offsets_f);
+	}
+    }    
+}
+#endif
 
 // Virtual override.
 // There is some code duplication between this and assembled_chunk::downsample(), so be sure to make changes in sync.
