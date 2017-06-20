@@ -25,7 +25,7 @@ static double time_decode(std::mt19937 &rng)
     vector<float> intensity(nchunks * nfreq_f * stride, 0.0);
     vector<float> weights(nchunks * nfreq_f * stride, 0.0);
 
-    vector<shared_ptr<assembled_chunk>> chunks(nchunks);
+    vector<shared_ptr<Tchunk>> chunks(nchunks);
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
 	chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
@@ -49,7 +49,8 @@ static double time_decode(std::mt19937 &rng)
 }
 
 
-static void time_assemble(std::mt19937 &rng)
+template<typename Tchunk>
+static double time_assemble(std::mt19937 &rng)
 {
     // Note: 'nchunks' is a multiplier, intended to prevent the whole instance from fitting in L3 cache.
     const int beam_id = 0;
@@ -108,14 +109,14 @@ static void time_assemble(std::mt19937 &rng)
 	}
     }
 
-    vector<shared_ptr<assembled_chunk>> chunks(nchunks);
+    vector<shared_ptr<Tchunk>> chunks(nchunks);
 
     //
     // Use fast_assembled_chunks
     //
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	chunks[ichunk] = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, 0);
+	chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, 0);
 
     struct timeval tv0 = xgettimeofday();
 
@@ -129,30 +130,12 @@ static void time_assemble(std::mt19937 &rng)
     double cpu_time = 8.0e-6 * usec_between(tv0, tv1);    // note factor 8 here
     double real_time = double(niter) * double(nchunks) * double(nt_f) * double(fpga_counts_per_sample) * constants::dt_fpga;
 
-    cout << "assemble: loadfrac / (8 beams) = " << (cpu_time / real_time) << endl;
-
-    //
-    // Use (slow) assembled_chunks
-    //
-
-    for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	chunks[ichunk] = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, 0);
-
-    tv0 = xgettimeofday();
-
-    for (int iter = 0; iter < niter; iter++)
-	for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	    for (int ipacket = 0; ipacket < npackets_per_chunk; ipacket++)
-		chunks[ichunk]->add_packet(packets[ichunk*npackets_per_chunk + ipacket]);
-
-    tv1 = xgettimeofday();
-    
-    cpu_time = 8.0e-6 * usec_between(tv0, tv1);    // note factor 8 here
-    cout << "slow assemble: loadfrac / (8 beams) = " << (cpu_time / real_time) << endl;
+    return cpu_time / real_time;
 }
 
 
-static void time_downsample(std::mt19937 &rng)
+template<typename Tchunk>
+static double time_downsample(std::mt19937 &rng)
 {
     const int nt_f = constants::nt_per_assembled_chunk;
 
@@ -164,51 +147,29 @@ static void time_downsample(std::mt19937 &rng)
     const int nchunks = 2;
     const int niter = 5;
 
-    vector<shared_ptr<assembled_chunk>> dst_chunks(nchunks);
-    vector<shared_ptr<assembled_chunk>> src_chunks(2 * nchunks);
+    vector<shared_ptr<Tchunk>> dst_chunks(nchunks);
+    vector<shared_ptr<Tchunk>> src_chunks(2 * nchunks);
 
     for (int ichunk = 0; ichunk < 2*nchunks; ichunk++) { 
 	src_chunks[ichunk] = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
 	src_chunks[ichunk]->randomize(rng);
     }
-
-    //
-    // Use fast_assembled_chunks
-    //
     
     for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	dst_chunks[ichunk] = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	dst_chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
 
     struct timeval tv0 = xgettimeofday();
 
     for (int iter = 0; iter < niter; iter++)
 	for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	    dst_chunks[ichunk]->downsample(src_chunks[2*ichunk], src_chunks[2*ichunk+1]);
+	    dst_chunks[ichunk]->downsample(src_chunks[2*ichunk].get(), src_chunks[2*ichunk+1].get());
 
     struct timeval tv1 = xgettimeofday();
 
     double cpu_time = 15.0 * 1.0e-6 * usec_between(tv0, tv1);   // note factor 15 here!
     double real_time = double(niter) * double(nchunks) * double(nt_f) * double(fpga_counts_per_sample) * constants::dt_fpga;
 
-    cout << "downsample: loadfrac / (8 beams) = " << (cpu_time / real_time) << endl;
-
-    // 
-    // Use (slow) assembled_chunks
-    //
-    
-    for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	dst_chunks[ichunk] = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-
-    tv0 = xgettimeofday();
-
-    for (int iter = 0; iter < niter; iter++)
-	for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	    dst_chunks[ichunk]->downsample(src_chunks[2*ichunk], src_chunks[2*ichunk+1]);
-
-    tv1 = xgettimeofday();
-
-    cpu_time = 15.0 * 1.0e-6 * usec_between(tv0, tv1);   // note factor 15 here!
-    cout << "slow downsample: loadfrac / (8 beams) = " << (cpu_time / real_time) << endl;
+    return cpu_time / real_time;
 }
 
 
@@ -217,11 +178,14 @@ int main(int argc, char **argv)
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    cout << "slow decode: loadfrac/beam = " << time_decode<assembled_chunk> (rng) << "\n";
-    cout << "fast decode: loadfrac/beam = " << time_decode<fast_assembled_chunk> (rng) << "\n";
+    cout << "slow decode: loadfrac/beam = " << time_decode<assembled_chunk> (rng) << endl;
+    cout << "fast decode: loadfrac/beam = " << time_decode<fast_assembled_chunk> (rng) << endl;
 
-    time_assemble(rng);
-    time_downsample(rng);
+    cout << "slow assemble: loadfrac / (8 beams) = " << time_assemble<assembled_chunk> (rng) << endl;
+    cout << "fast assemble: loadfrac / (8 beams) = " << time_assemble<fast_assembled_chunk> (rng) << endl;
+
+    cout << "slow downsample: loadfrac / (8 beams) = " << time_downsample<assembled_chunk> (rng) << endl;
+    cout << "fast downsample: loadfrac / (8 beams) = " << time_downsample<fast_assembled_chunk> (rng) << endl;
 
     return 0;
 }
