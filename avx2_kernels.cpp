@@ -308,8 +308,8 @@ struct decoder {
 	__m256i m1 = _mm256_cmpeq_epi8(d, _mm256_set1_epi8(-1));
 	__m256i m = _mm256_or_ps(m0, m1);  // 0xff if masked, 0x00 if valid
 
-	__m256 sca0 = scales.template get<2*N> ();
-	__m256 off0 = scales.get<2*N> ();
+	__m256 sca0 = scales.get<2*N> ();
+	__m256 off0 = offsets.get<2*N> ();
 
 	__m256i d32 = _mm256_and_si256(d,i255);
 	__m256i m32 = _mm256_and_si256(m,i255);
@@ -322,7 +322,7 @@ struct decoder {
 	decode8(intensity+8, weights+8, d32, m32, sca0, off0);
 
 	sca0 = scales.get<2*N+1> ();
-	off0 = scales.get<2*N+1> ();
+	off0 = offsets.get<2*N+1> ();
 
 	d32 = _mm256_and_si256(_mm256_srli_epi32(d,16), i255);
 	m32 = _mm256_and_si256(_mm256_srli_epi32(m,16), i255);
@@ -1370,18 +1370,21 @@ void test_avx2_kernels(std::mt19937 &rng)
 		int i = ifreq*stride + it;
 		int j = ifreq*constants::nt_per_assembled_chunk + it;
 
-		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5) {
-		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
-			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
-			 << " " << intensity0[i] << " " << intensity1[i] << endl;
-		    throw runtime_error("test_avx2_kernels: intensity mismatch");
-		}
-
 		if (weights0[i] != weights1[i]) {
 		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
 			 << " " << weights0[i] << " " << weights1[i] << endl;
 		    throw runtime_error("test_avx2_kernels: weights mismatch");
+		}
+
+		if (weights0[i] == 0.0)
+		    continue;
+
+		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5) {
+		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
+			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
+			 << " " << intensity0[i] << " " << intensity1[i] << endl;
+		    throw runtime_error("test_avx2_kernels: intensity mismatch");
 		}
 	    }
 	}
