@@ -311,7 +311,7 @@ public:
 	// and whose entries are all equal to 'assembled_ringbuf_capacity'.
 
         std::vector<int> ringbuf_n;
-	int assembled_ringbuf_capacity = 16;
+	int assembled_ringbuf_capacity = 8;
 	int assembled_ringbuf_nlevels = 4;
 
 	int max_packet_size = 9000;
