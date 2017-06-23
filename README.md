@@ -58,9 +58,13 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
      ```
 
-  2. The lz4 compression library.  In CentOS this is a one-liner: `sudo yum install lz4-devel`.
+  2. The lz4 compression library.
 
-     In osx, this is also a one-liner: `brew install lz4`.
+       - osx one-liner: `brew install lz4`
+
+       - centos one-liner: `sudo yum install lz4-devel`
+
+       - ubuntu one-liner: `sudo apt-get install liblz4-dev`
 
   3. The msgpack library.
 
@@ -83,7 +87,31 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
          and then extract it and add the "msgpack-2.1.0/include" into the
          include path.
 
-  4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
+  4. zeromq and cppzmq.
+
+       - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
+
+       - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
+
+       - ubuntu: don't use the apt-get packages, they are too old!.  You'll need to build both zeromq and cppzmq from scratch, see below.
+
+       - osx: zeromq can be installed with `brew install zeromq`, but you'll need to build cppzmq from scratch, see below.
+   
+       - Building zmq from scratch: download from zeromq.org, and then do:
+         ```
+         ./configure --prefix=/usr/local
+         make
+         sudo make install
+         ```
+
+       - Building cppzmq from scratch: since it's a header-only library with two source files, I just ignored the build system and did:
+         ```
+         git clone https://github.com/zeromq/cppzmq.git
+         cd cppzmq
+         sudo cp zmq.hpp zmq_addon.hpp /usr/local/include
+         ```
+
+  5. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
      data is generally bitshuffle-compresed).
 
