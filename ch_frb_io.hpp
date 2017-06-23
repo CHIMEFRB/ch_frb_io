@@ -63,7 +63,7 @@ namespace constants {
     // For an explanation of this parameter, see class intensity_network_ostream below 
     static constexpr double default_wt_cutoff = 0.3;
 
-    static constexpr int default_udp_port = 10252;
+    static constexpr int default_udp_port = 6677;
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size

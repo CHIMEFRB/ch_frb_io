@@ -58,23 +58,60 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
      ```
 
-  2. The lz4 compression library.  In CentOS this is a one-liner: `sudo yum install lz4-devel`.
+  2. The lz4 compression library.
 
-     In osx, this is also a one-liner: `brew install lz4`.
+       - osx one-liner: `brew install lz4`
 
-  3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
-     
-     In osx, this is also a one-liner: `brew install msgpack`.
+       - centos one-liner: `sudo yum install lz4-devel`
 
-     Note that you need a fairly new version (v?.??) -- the version in
-     Ubuntu Trusty (14.04), v0.5.4, for example, is too old and fails
-     because it is missing "msgpack/fbuffer.hpp".  Fortunately, you
-     can download the source package from, eg,
-     https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
-     and then extract it and add the "msgpack-2.1.0/include" into the
-     include path -- no need to build it.
+       - ubuntu one-liner: `sudo apt-get install liblz4-dev`
 
-  4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
+  3. The msgpack library.
+
+       - osx one-liner: `brew install msgpack`
+
+       - centos one-liner: `sudo yum install msgpack-devel.x86_64`
+
+       - ubuntu: don't install the apt-get version, it is too old!  (e.g. it is missing /usr/include/msgpack/fbuffer.hpp)
+
+       - Building from scratch.  This is easy because we only use the msgpack headers, not the compiled library.
+       
+       	 Kendrick's procedure:
+         ```
+         git clone https://github.com/msgpack/msgpack-c
+         sudo cp -r msgpack-c/include/* /usr/local/include
+         ```
+
+         Dustin's procedure: download the source package from, eg,
+         https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
+         and then extract it and add the "msgpack-2.1.0/include" into the
+         include path.
+
+  4. zeromq and cppzmq.
+
+       - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
+
+       - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
+
+       - ubuntu: don't use the apt-get packages, they are too old!.  You'll need to build both zeromq and cppzmq from scratch, see below.
+
+       - osx: zeromq can be installed with `brew install zeromq`, but you'll need to build cppzmq from scratch, see below.
+   
+       - Building zmq from scratch: download from zeromq.org, and then do:
+         ```
+         ./configure --prefix=/usr/local
+         make
+         sudo make install
+         ```
+
+       - Building cppzmq from scratch: since it's a header-only library with two source files, I just ignored the build system and did:
+         ```
+         git clone https://github.com/zeromq/cppzmq.git
+         cd cppzmq
+         sudo cp zmq.hpp zmq_addon.hpp /usr/local/include
+         ```
+
+  5. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
      data is generally bitshuffle-compresed).
 
