@@ -62,17 +62,25 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
      In osx, this is also a one-liner: `brew install lz4`.
 
-  3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
-     
-     In osx, this is also a one-liner: `brew install msgpack`.
+  3. The msgpack library.
 
-     Note that you need a fairly new version (v?.??) -- the version in
-     Ubuntu Trusty (14.04), v0.5.4, for example, is too old and fails
-     because it is missing "msgpack/fbuffer.hpp".  Fortunately, you
-     can download the source package from, eg,
-     https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
-     and then extract it and add the "msgpack-2.1.0/include" into the
-     include path -- no need to build it.
+       - osx one-liner: `brew install msgpack`
+
+       - centos one-liner: `sudo yum install msgpack-devel.x86_64`
+
+       - ubuntu: don't install the apt-get version, it is too old!  (e.g. it is missing /usr/include/msgpack/fbuffer.hpp)
+
+       - Building from scratch.  This is easy because we only use the msgpack headers, not the compiled library.
+       
+       	 Kendrick's procedure:
+	 ```
+	 git clone https://github.com/msgpack/msgpack-c
+	 sudo cp -r msgpack-c/include/* /usr/local/include
+	 ```
+	 Dustin's procedure: download the source package from, eg,
+         https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
+         and then extract it and add the "msgpack-2.1.0/include" into the
+         include path.
 
   4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
