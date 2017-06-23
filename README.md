@@ -73,11 +73,12 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
        - Building from scratch.  This is easy because we only use the msgpack headers, not the compiled library.
        
        	 Kendrick's procedure:
-	 ```
-	 git clone https://github.com/msgpack/msgpack-c
-	 sudo cp -r msgpack-c/include/* /usr/local/include
-	 ```
-	 Dustin's procedure: download the source package from, eg,
+         ```
+         git clone https://github.com/msgpack/msgpack-c
+         sudo cp -r msgpack-c/include/* /usr/local/include
+         ```
+
+         Dustin's procedure: download the source package from, eg,
          https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
          and then extract it and add the "msgpack-2.1.0/include" into the
          include path.
