@@ -953,11 +953,20 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 
 
 // helper function used by test_avx2_kernels()
-static vector<float> randvec(std::mt19937 &rng, ssize_t n)
+template<typename T>
+inline unique_ptr<T[]> uniform_randvec(std::mt19937 &rng, ssize_t n, double lo, double hi)
 {
-    vector<float> ret(n);
-    uniform_rand(rng, &ret[0], n);
-    return ret;
+    T *ret = aligned_alloc<T> (n);
+    uniform_rand(rng, ret, n, lo, hi);
+    return unique_ptr<T[]> (ret);
+}
+
+inline unique_ptr<int[]> randintvec(std::mt19937 &rng, ssize_t n, int lo, int hi)
+{
+    int *ret = aligned_alloc<int> (n);
+    for (ssize_t i = 0; i < n; i++)
+	ret[i] = randint(rng, lo, hi);
+    return unique_ptr<int[]> (ret);
 }
 
 
@@ -968,7 +977,7 @@ static void test_avx2_ds_kernel1(std::mt19937 &rng, int nupfreq, int nt_f)
     int nt_per_packet = 16;
     int nt_c = nt_f / nt_per_packet;
 
-    vector<uint8_t> in_data(nupfreq * nt_f, 0);
+    unique_ptr<uint8_t[]> in_data = aligned_unique_ptr<uint8_t> (nupfreq * nt_f);
 
     // Randomly simulate in_data.
     // We assign ~10% probability to "masked" values 0x00 or 0xff
@@ -990,18 +999,18 @@ static void test_avx2_ds_kernel1(std::mt19937 &rng, int nupfreq, int nt_f)
 		in_data[ifreq*nt_f + it] = (uniform_rand(rng) < 0.5) ? 0x00 : 0xff;
     }
 
-    vector<float> in_scales = uniform_randvec<float> (rng, nt_c, 1.0e-3, 1.0e-2);
-    vector<float> in_offsets = uniform_randvec<float> (rng, nt_c, -1.0, 1.0);
+    unique_ptr<float[]> in_scales = uniform_randvec<float> (rng, nt_c, 1.0e-3, 1.0e-2);
+    unique_ptr<float[]> in_offsets = uniform_randvec<float> (rng, nt_c, -1.0, 1.0);
 
-    vector<int> out1_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
-    vector<float> out1_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
-    vector<float> out1_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
-    vector<float> out1_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    unique_ptr<int[]> out1_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
+    unique_ptr<float[]> out1_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
+    unique_ptr<float[]> out1_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    unique_ptr<float[]> out1_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
 
-    vector<int> out2_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
-    vector<float> out2_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
-    vector<float> out2_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
-    vector<float> out2_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    unique_ptr<int[]> out2_mask = randintvec(rng, nupfreq * (nt_f/2), -10, 10);
+    unique_ptr<float[]> out2_data = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -1.0, 1.0);
+    unique_ptr<float[]> out2_count = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
+    unique_ptr<float[]> out2_mean = uniform_randvec<float> (rng, nupfreq * (nt_f/2), -100.0, 100.0);
 
     // Slow kernel.
     ds_slow_kernel1(&out1_data[0], &out1_mask[0], &in_data[0], &in_offsets[0], &in_scales[0], &out1_count[0], &out1_mean[0], nupfreq, nt_f, nt_per_packet);
@@ -1064,12 +1073,12 @@ static void test_avx2_ds_kernel2(std::mt19937 &rng, int nupfreq, int nt_per_chun
     int nt_f = nt_per_chunk / 2;
     int nt_c = nt_per_chunk / (2*nt_per_packet);
 
-    vector<float> in_data(nupfreq * nt_f, 0.0);
-    vector<int> in_mask(nupfreq * nt_f, 0);
+    unique_ptr<float[]> in_data = aligned_unique_ptr<float> (nupfreq * nt_f);
+    unique_ptr<int[]> in_mask = aligned_unique_ptr<int> (nupfreq * nt_f);
 
-    vector<float> w0(nt_c, 0.0);
-    vector<float> w1(nt_c, 0.0);
-    vector<float> w2(nt_c, 0.0);
+    unique_ptr<float[]> w0 = aligned_unique_ptr<float> (nt_c);
+    unique_ptr<float[]> w1 = aligned_unique_ptr<float> (nt_c);
+    unique_ptr<float[]> w2 = aligned_unique_ptr<float> (nt_c);
 
     // I put some thought into simulating data in a way which exposes all corner cases!
 
@@ -1105,9 +1114,12 @@ static void test_avx2_ds_kernel2(std::mt19937 &rng, int nupfreq, int nt_per_chun
 	w1[it_c] = (den > 0) ? (num/den + sim_offset) : 0.0;  // Note sim_offset included here
     }
 
-    vector<float> w0_fast = w0;
-    vector<float> w1_fast = w1;
-    vector<float> w2_fast(nt_c, 0.0);
+    unique_ptr<float[]> w0_fast = aligned_unique_ptr<float> (nt_c);
+    unique_ptr<float[]> w1_fast = aligned_unique_ptr<float> (nt_c);
+    unique_ptr<float[]> w2_fast = aligned_unique_ptr<float> (nt_c);
+
+    memcpy(&w0_fast[0], &w0[0], nt_c * sizeof(float));
+    memcpy(&w1_fast[0], &w1[0], nt_c * sizeof(float));
 
     // Slow kernel.
     ds_slow_kernel2(&in_data[0], &in_mask[0], &w0[0], &w1[0], &w2[0], nupfreq, nt_per_chunk, nt_per_packet);
@@ -1155,29 +1167,29 @@ static void test_avx2_ds_kernel3(std::mt19937 &rng, int nupfreq, int nt_per_chun
     int nt_f = nt_per_chunk / 2;
     int nt_c = nt_per_chunk / 32;
     
-    vector<float> in_data = uniform_randvec<float> (rng, nupfreq * nt_f, -50.0, 305.0);
-    vector<float> in_offsets = uniform_randvec<float> (rng, nt_c, -20.0, 20.0);
-    vector<float> in_scales = uniform_randvec<float> (rng, nt_c, 0.8, 1.2);
+    unique_ptr<float[]> in_data = uniform_randvec<float> (rng, nupfreq * nt_f, -50.0, 305.0);
+    unique_ptr<float[]> in_offsets = uniform_randvec<float> (rng, nt_c, -20.0, 20.0);
+    unique_ptr<float[]> in_scales = uniform_randvec<float> (rng, nt_c, 0.8, 1.2);
 
-    vector<int> in_mask = randintvec(rng, nupfreq * nt_f, -1, 1);
+    unique_ptr<int[]> in_mask = randintvec(rng, nupfreq * nt_f, -1, 1);
     
     // Fast kernel.
-    vector<uint8_t> outf_data(nupfreq * nt_per_chunk, 0);
+    unique_ptr<uint8_t[]> outf_data = aligned_unique_ptr<uint8_t> (nupfreq * nt_per_chunk);
     _ds_kernel3(&outf_data[0], &in_data[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk);
 
     // To be robust to roundoff error, we run the slow kernel twice, perturbing in_data.
 
-    vector<float> in_data2(in_data.size());
-    for (unsigned int i = 0; i < in_data.size(); i++)
+    unique_ptr<float[]> in_data2 = aligned_unique_ptr<float> (nupfreq * nt_f);
+    for (int i = 0; i < nupfreq * nt_f; i++)
 	in_data2[i] = in_data[i] - 1.0e-2;
 
-    vector<uint8_t> outs1_data(nupfreq * nt_per_chunk, 100);
+    unique_ptr<uint8_t[]> outs1_data = aligned_unique_ptr<uint8_t> (nupfreq * nt_per_chunk);
     ds_slow_kernel3(&outs1_data[0], &in_data2[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk, nt_per_packet);
 
-    for (unsigned int i = 0; i < in_data.size(); i++)
+    for (int i = 0; i < nupfreq * nt_f; i++)
 	in_data2[i] = in_data[i] + 1.0e-2;
 
-    vector<uint8_t> outs2_data(nupfreq * nt_per_chunk, 200);
+    unique_ptr<uint8_t[]> outs2_data = aligned_unique_ptr<uint8_t> (nupfreq * nt_per_chunk);
     ds_slow_kernel3(&outs2_data[0], &in_data2[0], &in_mask[0], &in_offsets[0], &in_scales[0], nupfreq, nt_per_chunk, nt_per_packet);
 
     // Compare slow and fast kernels.
@@ -1357,10 +1369,10 @@ void test_avx2_kernels(std::mt19937 &rng)
 	chunk0->randomize(rng);
 	chunk1->fill_with_copy(chunk0);
 
-	vector<float> intensity0 = randvec(rng, nfreq_f * stride);
-	vector<float> intensity1 = randvec(rng, nfreq_f * stride);
-	vector<float> weights0 = randvec(rng, nfreq_f * stride);
-	vector<float> weights1 = randvec(rng, nfreq_f * stride);
+	unique_ptr<float[]> intensity0 = uniform_randvec<float> (rng, nfreq_f * stride, 0.0, 1.0);
+	unique_ptr<float[]> intensity1 = uniform_randvec<float> (rng, nfreq_f * stride, 0.0, 1.0);
+	unique_ptr<float[]> weights0 = uniform_randvec<float>(rng, nfreq_f * stride, 0.0, 1.0);
+	unique_ptr<float[]> weights1 = uniform_randvec<float>(rng, nfreq_f * stride, 0.0, 1.0);
 
 	chunk0->decode(&intensity0[0], &weights0[0], stride);
 	chunk1->decode(&intensity1[0], &weights1[0], stride);

@@ -415,25 +415,9 @@ inline void uniform_rand(std::mt19937 &rng, T *p, int n, double lo, double hi)
 	p[i] = uniform_rand(rng, lo, hi);
 }
 
-template<typename T>
-inline std::vector<T> uniform_randvec(std::mt19937 &rng, ssize_t n, double lo, double hi)
-{
-    std::vector<T> ret(n);
-    uniform_rand(rng, &ret[0], n, lo, hi);
-    return ret;
-}
-
 inline int randint(std::mt19937 &rng, int lo, int hi)
 {
     return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
-}
-
-inline std::vector<int> randintvec(std::mt19937 &rng, ssize_t n, int lo, int hi)
-{
-    std::vector<int> ret(n);
-    for (ssize_t i = 0; i < n; i++)
-	ret[i] = randint(rng, lo, hi);
-    return ret;
 }
 
 inline bool file_exists(const std::string &filename)
@@ -487,6 +471,12 @@ inline T *aligned_alloc(size_t nelts)
 
     memset(p, 0, nelts * sizeof(T));
     return reinterpret_cast<T *> (p);
+}
+
+template<typename T>
+inline std::unique_ptr<T[]> aligned_unique_ptr(size_t nelts)
+{
+    return std::unique_ptr<T[]> (aligned_alloc<T> (nelts));
 }
 
 template<typename T, typename... Args>
