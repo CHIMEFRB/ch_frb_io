@@ -1,8 +1,6 @@
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
-#include "l1-ringbuf.hpp"
-
 using namespace std;
 
 namespace ch_frb_io {
@@ -29,13 +27,18 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: bad fpga_counts_per_sample value passed to assembled_chunk_ringbuf constructor");
     if (fpga_count0 % fpga_counts_per_sample != 0)
 	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: fpga_count0 was not a multiple of fpga_counts_per_sample");
+    if (ini_params.assembled_ringbuf_capacity <= 0)
+	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: assembled_ringbuf_capacity must be > 0");
+
+    for (int n: ini_params.telescoping_ringbuf_capacity) {
+	if (n < 2)
+	    throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: all telescoping_ringbuf_capacities must be >= 2");
+    }
 
 #ifndef __AVX2__
     if (ini_params.mandate_fast_kernels)
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
-
-    ringbuf = new L1Ringbuf(beam_id_, ini_params.ringbuf_n);
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
     uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
@@ -45,6 +48,24 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
+
+    this->num_downsampling_levels = max(ini_params.telescoping_ringbuf_capacity.size(), 1UL);
+    this->ringbuf_pos.resize(num_downsampling_levels, 0);
+    this->ringbuf_size.resize(num_downsampling_levels, 0);
+    this->ringbuf_capacity.resize(num_downsampling_levels, 0);
+    this->ringbuf.resize(num_downsampling_levels);
+
+    // Note that ringbuf_capacity[0] is the sum of 'ini_params.assembled_ringbuf_capacity'
+    // and 'ini_params.telescoping_ringbuf_capacity[0]'.
+
+    this->ringbuf_capacity[0] = ini_params.assembled_ringbuf_capacity;
+    for (unsigned int i = 0; i < ini_params.telescoping_ringbuf_capacity.size(); i++)
+	this->ringbuf_capacity[i] += ini_params.telescoping_ringbuf_capacity[i];
+
+    this->downstream_pos = 0;
+    this->downstream_bufsize = ini_params.assembled_ringbuf_capacity;
+    
+    this->_check_invariants();
 }
 
 
@@ -52,59 +73,132 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 {
     pthread_cond_destroy(&this->cond_assembled_chunks_added);
     pthread_mutex_destroy(&this->lock);
-    delete ringbuf;
 }
 
-void assembled_chunk_ringbuf::print_state() {
-    cout << "Beam " << beam_id << endl;
-    ringbuf->print();
-}
 
-vector<pair<shared_ptr<assembled_chunk>, uint64_t> >
-assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
-                                              uint64_t max_fpga_counts)
+void assembled_chunk_ringbuf::print_state() 
 {
-    vector<pair<shared_ptr<assembled_chunk>, uint64_t> > chunks;
     pthread_mutex_lock(&this->lock);
-    ringbuf->retrieve(min_fpga_counts, max_fpga_counts, chunks);
+
+    cout << "Beam " << beam_id << "\n";
+
+    cout << "  downstream: [";
+    for (int ipos = downstream_pos; ipos < ringbuf_pos[0] + ringbuf_size[0]; ipos++)
+	cout << " " << this->ringbuf_entry(0,ipos)->ichunk;
+    cout << " ]\n";
+    
+    for (int ids = 0; ids < num_downsampling_levels; ids++) {
+	int i0 = ringbuf_pos[ids];
+	int i1 = (ids > 0) ? (ringbuf_pos[ids] + ringbuf_size[ids]) : downstream_pos;
+	
+	cout << "  binning " << ids << ": [";
+	for (int ipos = i0; ipos < i1; ipos++)
+	    cout << " " << this->ringbuf_entry(ids,ipos)->ichunk;
+	cout << "]\n";
+    }
+
     pthread_mutex_unlock(&this->lock);
-    return chunks;
 }
 
-void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_fpga_next,
-                                               uint64_t* ringbuf_n_ready,
-                                               uint64_t* ringbuf_capacity,
-                                               uint64_t* ringbuf_nelements,
-                                               uint64_t* ringbuf_fpga_min,
-                                               uint64_t* ringbuf_fpga_max) {
+
+vector<pair<shared_ptr<assembled_chunk>, uint64_t>>
+assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts, uint64_t max_fpga_counts)
+{
+    // Preallocate vector, before acquiring lock.
+    vector<pair<shared_ptr<assembled_chunk>, uint64_t>> ret;
+    ret.reserve(sum(ringbuf_capacity));
+
+    pthread_mutex_lock(&this->lock);
+
+    // Scan telescoping ring buffer, in a time-ordered way.
+    for (int ids = num_downsampling_levels-1; ids >= 0; ids--) {
+	for (int ipos = ringbuf_pos[ids]; ipos < ringbuf_pos[ids] + ringbuf_size[ids]; ipos++) {
+	    auto chunk = this->ringbuf_entry(ids, ipos);
+
+	    if (min_fpga_counts && (chunk->fpgacounts_end() < min_fpga_counts))
+		continue;   // no overlap
+	    if (max_fpga_counts && (chunk->fpgacounts_begin() > max_fpga_counts))
+		continue;   // no overlap
+
+	    uint64_t where = 1 << (ids+1);   // Note: works since l1_ringbuf_level::L1RB_LEVELn == 2^n.
+	    if ((ids == 0) && (ipos >= downstream_pos))
+		where = l1_ringbuf_level::L1RB_DOWNSTREAM;
+
+	    ret.push_back({ chunk, where });
+	}
+    }
+
+    pthread_mutex_unlock(&this->lock);
+    return ret;
+}
+
+
+// Returns stats about the ring buffer, for the get_statistics RPC.
+void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
+                                               uint64_t *ringbuf_n_ready,
+                                               uint64_t *ringbuf_total_capacity,
+                                               uint64_t *ringbuf_nelements,
+                                               uint64_t *ringbuf_fpga_min,
+                                               uint64_t *ringbuf_fpga_max) 
+{
     pthread_mutex_lock(&this->lock);
 
     if (ringbuf_fpga_next) {
-        shared_ptr<assembled_chunk> nxt = ringbuf->peek();
-        if (!nxt)
-            *ringbuf_fpga_next = 0;
-        else
-            *ringbuf_fpga_next = nxt->fpgacounts_begin();
+	*ringbuf_fpga_next = 0;
+
+	if (downstream_pos < ringbuf_pos[0] + ringbuf_size[0]) {
+	    // Use initial FPGA count of first chunk which has been assembled,
+	    // but not yet processed by "downstream" thread.
+	    *ringbuf_fpga_next = this->ringbuf_entry(0, downstream_pos)->fpgacounts_begin();
+	}
+	else if (ringbuf_size[0] > 0) {
+	    // All chunks have been processed by "downstream" thread.
+	    // Use final FPGA count of last chunk in buffer.
+	    *ringbuf_fpga_next = this->ringbuf_entry(0, ringbuf_pos[0] + ringbuf_size[0] - 1)->fpgacounts_end();
+	}
     }
 
-    if (ringbuf_n_ready)
-        *ringbuf_n_ready = ringbuf->n_ready();
+    if (ringbuf_n_ready) {
+	// Number of chunks which have been assembled, but not yet processed by "downstream" thread.
+        *ringbuf_n_ready = ringbuf_pos[0] + ringbuf_size[0] - downstream_pos;
+    }
 
-    if (ringbuf_capacity)
-        *ringbuf_capacity = ringbuf->total_capacity();
+    if (ringbuf_total_capacity)
+        *ringbuf_total_capacity = sum(ringbuf_capacity);
 
     if (ringbuf_nelements)
-        *ringbuf_nelements = ringbuf->total_size();
+        *ringbuf_nelements = sum(ringbuf_size);
 
-    if (ringbuf_fpga_min || ringbuf_fpga_max)
-        ringbuf->fpga_counts_range(ringbuf_fpga_min, ringbuf_fpga_max);
+    if (ringbuf_fpga_min) {
+	*ringbuf_fpga_min = 0;
+	for (int ids = num_downsampling_levels-1; ids >= 0; ids--) {
+	    if (ringbuf_size[ids] > 0) {
+		int ipos = ringbuf_pos[ids];
+		*ringbuf_fpga_min = this->ringbuf_entry(ids,ipos)->fpgacounts_begin();
+		break;
+	    }
+	}
+    }
+
+    if (ringbuf_fpga_max) {
+	*ringbuf_fpga_max = 0;
+	for (int ids = 0; ids < num_downsampling_levels; ids++) {
+	    if (ringbuf_size[ids] > 0) {
+		int ipos = ringbuf_pos[ids] + ringbuf_size[ids] - 1;
+		*ringbuf_fpga_max = this->ringbuf_entry(ids,ipos)->fpgacounts_end();
+		break;
+	    }
+	}
+    }
 
     pthread_mutex_unlock(&this->lock);
 }
 
-// It's OK to modify 'event_counts' without acquiring any locks.  This is because the assembler
-// thread passes an event_subcounts array which is updated on a per-packet basis, and accumulated
-// into the global event_counts on a per-udp_packet_list basis (with locks acquired!).
+
+// In assembled_chunk_ringbuf::put_unassembled_packet(), it's OK to modify 'event_counts' 
+// without acquiring any locks.  This is because the assembler thread passes an event_subcounts 
+// array which is updated on a per-packet basis, and accumulated into the global event_counts 
+// on a per-udp_packet_list basis (with locks acquired!).
 
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
@@ -127,9 +221,11 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// in the far future effectively kills the L1 node.
 	//
 	this->_put_assembled_chunk(active_chunk0, event_counts);
-        // after _put_assembled_chunk(), active_chunk0 has been reset.
+
+        // After _put_assembled_chunk(), active_chunk0 has been reset to a null pointer.
         active_chunk0.swap(active_chunk1);
-        // note that we've just swapped active_chunk1 down to active_chunk0, so active_chunk1's ichunk is active0 + 1
+
+        // Note that we've just swapped active_chunk1 down to active_chunk0, so active_chunk1's ichunk is (active0 + 1).
 	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 1);
     }
 
@@ -148,61 +244,227 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     }
 }
 
+
+// Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
+// Resets 'chunk' to a null pointer.
+// Warning: only safe to call from assembler thread.
 bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
 
+    // Step 1: prepare all data needed to modify the ring buffer.  In this step, we do all of our
+    // buffer allocation and downsampling, without the lock held.  In step 2, we will acquire the
+    // lock and modify the ring buffer (without expensive operations like allocation/downsampling).
+    //
+    // It is very important to note that we can read (but not modify) the ring buffer without 
+    // acquiring the lock!  This is because _put_assembled_chunk() is called from the assembler
+    // thread, and only the assembler thread modifies the ring buffer ("single-producer").  
+
+    int nds = this->num_downsampling_levels;
+
+    // List of chunks to be pushed and popped at each level of the ring buffer (in step 2!)
+    vector<shared_ptr<assembled_chunk>> pushlist(nds);
+    vector<shared_ptr<assembled_chunk>> poplist(2*nds);
+    
+    // Converts unique_ptr -> shared_ptr, and resets 'chunk' to a null pointer.
+    pushlist[0] = shared_ptr<assembled_chunk> (chunk.release());
+
+    // Without lock held...
+    for (int ids = 0; ids < nds; ids++) {
+	// At top of loop, we want to add the chunk pushlist[ids] at level 'ids' of
+	// the telescoping ring buffer.  Is there space available...?
+
+	if (ringbuf_size[ids] < ringbuf_capacity[ids])
+	    break;  // ... Yes, no problem.
+
+	// ... No space available!  Need to pop chunks.
+	// If we're at the bottom level of the buffer, just pop a single chunk...
+
+	if (ids == nds-1) {
+	    poplist[2*ids] = this->ringbuf_entry(ids, ringbuf_pos[ids]);
+	    break;
+	}
+
+	// ... Otherwise, pop two chunks, downsample, and push the downsampled chunk
+	// to the next level of the telescoping ring buffer.
+
+	poplist[2*ids] = this->ringbuf_entry(ids, ringbuf_pos[ids]);
+	poplist[2*ids+1] = this->ringbuf_entry(ids, ringbuf_pos[ids]+1);	
+
+	pushlist[ids+1] = _make_assembled_chunk(poplist[2*ids]->ichunk);
+
+	// Note: this test is currently superfluous, since _make_assembled_chunk() throws
+	// an exception (rather than returning NULL) if the allocation fails.  It's 
+	// just a placeholder to remind myself that the return value of this function
+	// is supposed to indicate success/failure, and that more thought needs to
+	// be put into assembled_chunk memory management.
+
+	if (!pushlist[ids+1])
+	    return false;
+
+	pushlist[ids+1]->downsample(poplist[2*ids], poplist[2*ids+1]);
+    }
+
+    // We process the stream_filename and chunk_callbacks here (without the lock held!)
+
+    if (stream_filename_pattern.length()) {
+        string fn = pushlist[0]->format_filename(stream_filename_pattern);
+        // turn on compression, but revert the state of pushlist[0]->msgpack_bitshuffle after writing.
+        bool bitpack = pushlist[0]->msgpack_bitshuffle;
+        pushlist[0]->msgpack_bitshuffle = true;
+        pushlist[0]->write_msgpack_file(fn);
+        pushlist[0]->msgpack_bitshuffle = bitpack;
+    }
+
+    for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {
+	(*it)(pushlist[0]);
+    }
+
+    // Step 2: acquire lock and modify the ring buffer.  We have already computed the chunks to
+    // be added/removed at each level (pushlist/poplist), so we don't malloc/free/downsample with
+    // the lock held.
+
     pthread_mutex_lock(&this->lock);
 
     if (this->doneflag) {
 	pthread_mutex_unlock(&this->lock);
-        chunk.reset();
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
     }
 
-    if (stream_filename_pattern.length()) {
-        string fn = chunk->format_filename(stream_filename_pattern);
-        // turn on compression, but revert the state of chunk->msgpack_bitshuffle after writing.
-        bool bitpack = chunk->msgpack_bitshuffle;
-        chunk->msgpack_bitshuffle = true;
-        chunk->write_msgpack_file(fn);
-        chunk->msgpack_bitshuffle = bitpack;
+    for (int ids = 0; ids < nds; ids++) {
+	// Number of chunks to be removed from level 'ids' of the telescoping ring buffer.
+	int npop = 0;
+	if (poplist[2*ids]) npop++;
+	if (poplist[2*ids+1]) npop++;
+	
+	// Remove chunks from ring buffer, by resetting shared_ptrs
+	// Note that we are still holding references to these chunks in poplist[].
+	// This ensures that assembled_chunk destructors are called without the lock held (at the end of this function).
+
+	for (int p = 0; p < npop; p++)
+	    this->ringbuf_entry(ids, ringbuf_pos[ids]+p) = shared_ptr<assembled_chunk> ();
+
+	ringbuf_pos[ids] += npop;
+
+	// Add chunk to level 'ids' of the telescoping ring buffer.
+
+	if (pushlist[ids]) {
+	    this->ringbuf_entry(ids, ringbuf_pos[ids] + ringbuf_size[ids]) = pushlist[ids];
+	    ringbuf_size[ids]++;
+	}
     }
 
-    // Convert unique_ptr into bare pointer, and reset unique_ptr.
-    assembled_chunk* ch = chunk.release();
-    // Try to add to ringbuf...
-    shared_ptr<assembled_chunk> sch = ringbuf->push(ch);
+    // Last step while holding lock: handle case where downstream thread is running
+    // slow, and chunks were dropped.
 
-    if (sch) {
-	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
-	pthread_mutex_unlock(&this->lock);
+    int num_assembled_chunks_dropped = 0;
+    int max_allowed_downstream_pos = ringbuf_pos[0] + ringbuf_size[0] - downstream_bufsize;
 
-        // Call any callbacks for chunks being added.
-        for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {
-            (*it)(sch);
-        }
-
-        if (event_counts)
-            event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
-	return true;
+    if (downstream_pos < max_allowed_downstream_pos) {
+	num_assembled_chunks_dropped = max_allowed_downstream_pos - downstream_pos;
+	downstream_pos = max_allowed_downstream_pos;
     }
 
-    // If we get here, the ring buffer was full.
+    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
-    if (event_counts)
-        event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
-    delete ch;
 
-    if (ini_params.emit_warning_on_buffer_drop)
+    // FIXME!!  Make sure this line is commented out in production
+    this->_check_invariants();
+
+    if (event_counts) {
+	event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
+	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped] += num_assembled_chunks_dropped;
+    }
+
+    if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
-    if (ini_params.throw_exception_on_buffer_drop)
+    if (ini_params.throw_exception_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
-    return false;
+
+    // Note: when this function returns, stray references in poplist[*][*] are dropped, and assembled_chunk destructors get called.
+    return true;
 }
 
-bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
+
+void assembled_chunk_ringbuf::_check_invariants()
+{
+    // It's OK to access the ringbuf_* fields read-only without acquiring the lock,
+    // since _check_invariants() is only called from the assembler thread.
+    //
+    // Some checks in this function are redundant with checks elsewhere, but that's OK!
+
+    ch_assert(num_downsampling_levels > 0);
+    ch_assert(ringbuf_pos.size() == (unsigned) num_downsampling_levels);
+    ch_assert(ringbuf_size.size() == (unsigned) num_downsampling_levels);
+    ch_assert(ringbuf_capacity.size() == (unsigned) num_downsampling_levels);
+    ch_assert(ringbuf.size() == (unsigned) num_downsampling_levels);
+
+    for (int ids = 0; ids < num_downsampling_levels; ids++) {
+	ch_assert(ringbuf_pos[ids] >= 0);
+	ch_assert(ringbuf_size[ids] >= 0);
+	ch_assert(ringbuf_capacity[ids] >= 2);
+	ch_assert(ringbuf_size[ids] <= ringbuf_capacity[ids]);
+	ch_assert(ringbuf[ids].size() == (unsigned) ringbuf_capacity[ids]);
+
+	for (int ipos = ringbuf_pos[ids]; ipos < ringbuf_pos[ids] + ringbuf_capacity[ids]; ipos++) {
+	    shared_ptr<assembled_chunk> chunk = this->ringbuf_entry(ids, ipos);
+
+	    // These entries of the ring buffer should be empty.
+	    if (ipos >= ringbuf_pos[ids] + ringbuf_size[ids]) {
+		ch_assert(!chunk);
+		continue;
+	    }
+	    
+	    // Nonempty entries...
+	    ch_assert(chunk);
+	    ch_assert(chunk->beam_id == this->beam_id);
+	    ch_assert(chunk->nupfreq == this->nupfreq);
+	    ch_assert(chunk->nt_per_packet == this->nt_per_packet);
+	    ch_assert(chunk->fpga_counts_per_sample == this->fpga_counts_per_sample);
+	    ch_assert(chunk->binning == (1 << ids));
+	    ch_assert(chunk->isample == chunk->ichunk * constants::nt_per_assembled_chunk);
+
+	    // Now check logical contiguousness of the telescoping ring buffer, by
+	    // checking that 'chunk' is contiguous with the next chunk in the buffer.
+
+	    shared_ptr<assembled_chunk> next;
+
+	    if (ipos < ringbuf_pos[ids] + ringbuf_size[ids] - 1) {
+		// Next chunk is in same level of telescoping ring buffer.
+		next = this->ringbuf_entry(ids, ipos+1);
+	    }
+	    else if (ids > 0) {
+		// Next chunk is in a different level of the telescoping ring buffer.
+		ch_assert(ringbuf_size[ids-1] > 0);
+		next = this->ringbuf_entry(ids, ringbuf_pos[ids-1]);
+	    }
+	    else
+		continue;   // Last chunk in buffer, there is no 'next'
+
+	    ch_assert(next);
+	    ch_assert(next->ichunk == chunk->ichunk + chunk->binning);
+	}
+    }
+
+    // We do need to acquire the lock to access 'downstream_pos', since it's modified
+    // by the downstream thread.
+
+    pthread_mutex_lock(&lock);
+    int dpos = this->downstream_pos;
+    pthread_mutex_unlock(&lock);
+
+    ch_assert(downstream_bufsize > 0);
+    ch_assert(downstream_bufsize <= ringbuf_capacity[0]);
+
+    ch_assert(dpos >= ringbuf_pos[0]);
+    ch_assert(dpos <= ringbuf_pos[0] + ringbuf_size[0]);
+    ch_assert(dpos >= ringbuf_pos[0] + ringbuf_size[0] - downstream_bufsize);
+}
+
+
+bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) 
+{
     uint64_t ich = chunk->ichunk;
     unique_ptr<assembled_chunk> uch(chunk);
     bool worked = _put_assembled_chunk(uch, NULL);
@@ -214,24 +476,29 @@ bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
     return worked;
 }
 
+
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)
 {
-    pthread_mutex_lock(&this->lock);
     shared_ptr<assembled_chunk> chunk;
+    pthread_mutex_lock(&this->lock);
 
     for (;;) {
-        chunk = ringbuf->pop();
-        if (chunk)
-            break;
+	if (downstream_pos < ringbuf_pos[0] + ringbuf_size[0]) {
+	    chunk = this->ringbuf_entry(0, downstream_pos);
+	    downstream_pos++;
+	    break;
+	}
+
         if (!wait)
             break;
+
 	if (this->doneflag)
-	    // Ring buffer is empty and end_stream() has been called.
-            // (chunk contains null pointer)
-            break;
+	    break;   // Ring buffer is empty and end_stream() has been called
+
 	// Wait for chunks to be added to the ring buffer.
 	pthread_cond_wait(&this->cond_assembled_chunks_added, &this->lock);
     }
+
     pthread_mutex_unlock(&this->lock);
     return chunk;
 }

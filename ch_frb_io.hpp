@@ -294,25 +294,19 @@ public:
 	int socket_timeout_usec = 10000;                // 0.01 sec
 	int stream_cancellation_latency_usec = 10000;   // 0.01 sec
 
-	// Ring buffer between network thread and assembler thread.
+	// The 'unassembled_ringbuf' is between the network thread and assembler thread.
 	int unassembled_ringbuf_capacity = 16;
 	int max_unassembled_packets_per_list = 16384;
 	int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
 	int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
-
-	// Ring buffers between assembler thread and processing threads.
-	//
-	// The ring buffers are parameterized by 'ringbuf_n', a vector whose
-	// length is the number of downsampling levels, and whose elements are
-	// the number of assembled_chunks at each level.
-	//
-	// As a shortcut, if ringbuf_n is an empty vector, then it will be
-	// initialized to a vector whose length is 'assembled_ringbuf_nlevels'
-	// and whose entries are all equal to 'assembled_ringbuf_capacity'.
-
-        std::vector<int> ringbuf_n;
+	
+	// The 'assembled_ringbuf' is between the assembler thread and processing threads.
 	int assembled_ringbuf_capacity = 8;
-	int assembled_ringbuf_nlevels = 4;
+
+	// The 'telescoping_ringbuf' stores assembled_chunks for retrieval by RPC.
+	// Its capacity is a vector, whose length is the number of downsampling levels,
+	// and whose elements are the number of assembled_chunks at each level.
+        std::vector<int> telescoping_ringbuf_capacity;
 
 	int max_packet_size = 9000;
     };
@@ -408,7 +402,7 @@ protected:
     // require a lock).  There is a corner case where the vector is still length-zero after the flag gets set.
     // This happens if the stream was asynchronously cancelled before receiving the first packet.
 
-    std::vector<std::unique_ptr<assembled_chunk_ringbuf> > assemblers;
+    std::vector<std::unique_ptr<assembled_chunk_ringbuf>> assemblers;
     
     // These fields are initialized from the first packet received ("fp_" stands for "first packet").
     // They are initialized by the assembler thread, which then advances the state model to "first_packet_received".
@@ -813,6 +807,20 @@ protected:
 // -------------------------------------------------------------------------------------------------
 //
 // Miscellaneous
+    
+
+// Used in RPC's which return chunks, to indicate where the chunk was found.
+// Note: implementation of assembled_chunk_ringbuf::get_ringbuf_snapshot() assumes
+// that L1RB_LEVELn == 2^n, so be careful when modifying this!
+enum l1_ringbuf_level {
+    L1RB_DOWNSTREAM = 1,
+    L1RB_LEVEL1 = 2,
+    L1RB_LEVEL2 = 4,
+    L1RB_LEVEL3 = 8,
+    L1RB_LEVEL4 = 0x10,
+    // queued for writing in the L1 RPC system
+    L1RB_WRITEQUEUE = 0x100,
+};
 
 
 extern void pin_thread_to_cores(const std::vector<int> &core_list);

@@ -74,12 +74,13 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
-    // As explained in ch_frb_io.hpp, if ini_params.ringbuf_n is an empty vector, then
-    // it should default to a vector whose length is ini_params.assembled_ringbuf_nlevels
-    // and whose entries are all equal to ini_params.assembled_ringbuf_capacity.
+    if (ini_params.assembled_ringbuf_capacity <= 0)
+	throw runtime_error("ch_frb_io: intensity_network_stream::initializer::assembled_ringbuf_capacity must be > 0");
 
-    if (ini_params.ringbuf_n.size() == 0)
-	ini_params.ringbuf_n = vector<int> (ini_params.assembled_ringbuf_nlevels, ini_params.assembled_ringbuf_capacity);
+    for (int n: ini_params.telescoping_ringbuf_capacity) {
+	if (n < 2)
+	    throw runtime_error("ch_frb_io: all elements of intensity_network_stream::initializer::telescoping_ringbuf_capacity must be >= 2");
+    }
 
     // All initializations except the socket (which is initialized in _open_socket()),
     // and the assemblers (which are initalized when the first packet is received).

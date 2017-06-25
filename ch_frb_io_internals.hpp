@@ -192,10 +192,6 @@ struct udp_packet_list {
 // fixed pool of udp_packet_lists is recycled throughout the lifetime of the ringbuf, rather than
 // having buffers which are continually freed and allocated.  This is to avoid the page-faulting
 // cost of Linux malloc.
-//
-// In contrast, the current implementation of assembled_chunk_ringbuf does lead to continually
-// freed/allocated buffers.  It may improve performance to switch to an implementation which 
-// is more similar to udp_packet_ringbuf!  (This loose end is noted in the README.)
 
 struct udp_packet_ringbuf : noncopyable {
     // Specified at construction, used when new udp_packet_list objects are allocated
@@ -244,9 +240,6 @@ struct udp_packet_ringbuf : noncopyable {
 // It also manages the "active" assembled_chunks, which are being filled with data as new packets arrive.
 // There is one assembled_chunk_ringbuf for each beam.
 
-// Forward declaration...
-class L1Ringbuf;
-
 class assembled_chunk_ringbuf : noncopyable {
 public:
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int nupfreq,
@@ -269,6 +262,8 @@ public:
     // This routine is nonblocking.  If it would need to block, then it drops data somewhere and
     // increments the appropriate event_count.  (Depending which flags are set in ini_params, it may
     // also print a warning or throw an exception.)
+    //
+    // Warning: only safe to call from assembler thread!
 
     void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
     
@@ -288,9 +283,10 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
 
-    std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+    // The return value is a vector of (chunk, where) pairs, where 'where' is of type enum l1_ringbuf_level (defined in ch_frb_io.hpp)
+    std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t>> get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    // Returns stats about the ring buffer.
+    // Returns stats about the ring buffer, for the get_statistics RPC.
     //  *ringbuf_fpga_next* is the FPGA-counts of the next chunk that will be delivered to get_assembled_chunk().
     //  *ringbuf_n_ready* is the number of chunks available to be consumed by get_assembled_chunk().
     //  *ringbuf_capacity* is the maximum number of chunks that can be held in the ring buffer.
@@ -318,10 +314,15 @@ protected:
     const int nt_per_packet;
     const uint64_t fpga_counts_per_sample;
 
-    // Helper function: adds assembled chunk to the ring buffer
-    // Post-condition: chunk has been reset().
+    // Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
+    // Resets 'chunk' to a null pointer.
+    // Warning: only safe to call from assembler thread.
     bool _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
+    // For debugging.
+    // Warning: only safe to call from assembler thread.
+    void _check_invariants();
+    
     // Helper function: allocates new assembled chunk
     std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
 
@@ -341,9 +342,24 @@ protected:
 
     // Processing thread waits here if the ring buffer is empty.
     pthread_cond_t cond_assembled_chunks_added;
+    
+    // Telescoping ring buffer.
+    // All ringbuf* vectors have length num_downsampling_levels.
+    // ringbuf[i] is a vector of length ringbuf_capacity[i]
 
-    // Where we store chunks (so they can be retrieved by RPC)
-    L1Ringbuf* ringbuf;
+    int num_downsampling_levels;
+    std::vector<int> ringbuf_pos;
+    std::vector<int> ringbuf_size;
+    std::vector<int> ringbuf_capacity;
+    std::vector<std::vector<std::shared_ptr<assembled_chunk>>> ringbuf;
+
+    int downstream_pos;      // Position of "downstream" thread in ringbuf[0]
+    int downstream_bufsize;  // Buffering capacity (in assembled_chunks) between assembler and downstream.
+
+    inline std::shared_ptr<assembled_chunk> &ringbuf_entry(int ids, int ipos)
+    {
+	return ringbuf[ids][ipos % ringbuf_capacity[ids]];
+    }
 
     bool doneflag = false;
 };
@@ -447,6 +463,14 @@ inline bool file_exists(const std::string &filename)
         return false;
 
     throw std::runtime_error(filename + ": " + strerror(errno));
+}
+
+template<typename T> inline T sum(const std::vector<T> &v)
+{
+    T ret = T(0);
+    for (unsigned int i = 0; i < v.size(); i++)
+	ret += v[i];
+    return ret;
 }
 
 template<typename T> inline T prod(const std::vector<T> &v)

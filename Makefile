@@ -33,7 +33,6 @@ LIBS = -lhdf5 -llz4 -lzmq
 
 OFILES = assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
-	l1-ringbuf.o \
 	avx2_kernels.o \
 	hdf5.o \
 	intensity_hdf5_file.o \
@@ -52,8 +51,8 @@ OFILES = assembled_chunk.o \
 
 CPP += -Ibitshuffle
 
-INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp ringbuf-impl.hpp \
-	l1-ringbuf.hpp \
+INCFILES=ch_frb_io.hpp \
+        ch_frb_io_internals.hpp \
 	assembled_chunk_msgpack.hpp \
 	bitshuffle/bitshuffle.h bitshuffle/bitshuffle_core.h \
 	bitshuffle/bitshuffle_internals.h bitshuffle/iochain.h \
