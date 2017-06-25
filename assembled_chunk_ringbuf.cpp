@@ -62,6 +62,9 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     for (unsigned int i = 0; i < ini_params.telescoping_ringbuf_capacity.size(); i++)
 	this->ringbuf_capacity[i] += ini_params.telescoping_ringbuf_capacity[i];
 
+    for (int ids = 0; ids < num_downsampling_levels; ids++)
+	this->ringbuf[ids].resize(ringbuf_capacity[ids]);
+
     this->downstream_pos = 0;
     this->downstream_bufsize = ini_params.assembled_ringbuf_capacity;
     
