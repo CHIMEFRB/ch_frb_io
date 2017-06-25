@@ -381,7 +381,7 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 		       nupfreq, nt_f, nt_per_packet);
     }
 
-    this->binning = src1->binning + 1;
+    this->binning = 2 * src1->binning;
     this->ichunk = src1->ichunk;
     this->isample = src1->isample;
 }

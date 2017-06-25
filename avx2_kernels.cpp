@@ -941,7 +941,7 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 		    ds_data, ds_mask, out_offsets, ds_w2, nupfreq, nt_f);
     }
 
-    this->binning = src1->binning + 1;
+    this->binning = 2 * src1->binning;
     this->ichunk = src1->ichunk;
     this->isample = src1->isample;
 }
