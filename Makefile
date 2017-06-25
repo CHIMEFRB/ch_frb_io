@@ -66,7 +66,8 @@ TEST_BINARIES = test-intensity-hdf5-file \
 	test-assembled-chunk \
 	test-misc \
 	test-network-streams \
-	test-log
+	test-log \
+	time-kernels
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 
