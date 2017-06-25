@@ -444,7 +444,7 @@ void assembled_chunk_ringbuf::_check_invariants()
 	    else if (ids > 0) {
 		// Next chunk is in a different level of the telescoping ring buffer.
 		ch_assert(ringbuf_size[ids-1] > 0);
-		next = this->ringbuf_entry(ids, ringbuf_pos[ids-1]);
+		next = this->ringbuf_entry(ids-1, ringbuf_pos[ids-1]);
 	    }
 	    else
 		continue;   // Last chunk in buffer, there is no 'next'
