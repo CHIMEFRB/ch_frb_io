@@ -349,6 +349,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	    this->ringbuf_entry(ids, ringbuf_pos[ids]+p) = shared_ptr<assembled_chunk> ();
 
 	ringbuf_pos[ids] += npop;
+	ringbuf_size[ids] -= npop;
 
 	// Add chunk to level 'ids' of the telescoping ring buffer.
 
