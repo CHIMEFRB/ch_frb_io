@@ -369,7 +369,10 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
 
-    // FIXME!!  Make sure this line is commented out in production
+    // This call to _check_invariants() is a good test during debugging, but
+    // shouldn't be enabled in production.
+    //
+    // FIXME!!  Make sure this line gets commented out eventually.
     this->_check_invariants();
 
     if (event_counts) {
