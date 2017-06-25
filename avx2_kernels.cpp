@@ -294,7 +294,7 @@ struct decoder {
 	__m256i y = _mm256_shuffle_epi32(x, 0xb1);  // (2301)_4
 
 	// [ x16 ... x31 x0 ... x8 ]
-	__m256i z = _mm256_permute2f128_ps(x, x, 0x01);
+	__m256i z = _mm256_permute2f128_si256(x, x, 0x01);
 
 	// x16 x17 x18 x19  x0 x1 x2 x3  x24 x25 x26 x27    x8  x9 x10 x11
         // x20 x21 x22 x23  x4 x5 x6 x7  x28 x29 x30 x31   x12 x13 x14 x15
@@ -306,7 +306,7 @@ struct decoder {
 
 	__m256i m0 = _mm256_cmpeq_epi8(d, _mm256_setzero_si256());
 	__m256i m1 = _mm256_cmpeq_epi8(d, _mm256_set1_epi8(-1));
-	__m256i m = _mm256_or_ps(m0, m1);  // 0xff if masked, 0x00 if valid
+	__m256i m = _mm256_or_si256(m0, m1);  // 0xff if masked, 0x00 if valid
 
 	__m256 sca0 = scales.get<2*N> ();
 	__m256 off0 = offsets.get<2*N> ();
