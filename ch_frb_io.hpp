@@ -290,6 +290,7 @@ public:
 	// intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
 	// the packet read loop, since it requires acquiring a lock.)
 
+	int max_packet_size = 9000;
 	int socket_bufsize = constants::default_socket_bufsize;
 	int socket_timeout_usec = 10000;                // 0.01 sec
 	int stream_cancellation_latency_usec = 10000;   // 0.01 sec
@@ -307,8 +308,6 @@ public:
 	// Its capacity is a vector, whose length is the number of downsampling levels,
 	// and whose elements are the number of assembled_chunks at each level.
         std::vector<int> telescoping_ringbuf_capacity;
-
-	int max_packet_size = 9000;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
@@ -394,7 +393,7 @@ public:
 
 protected:
     // Constant after construction, so not protected by lock
-    initializer ini_params;
+    const initializer ini_params;
     const int nassemblers = 0;
 
     // This is initialized by the assembler thread before it sets 'first_packet_received' flag.

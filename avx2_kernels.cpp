@@ -1279,7 +1279,6 @@ void test_avx2_kernels(std::mt19937 &rng)
 
 	int nfreq_c = constants::nfreq_coarse_tot;
 	int nfreq_f = constants::nfreq_coarse_tot * nupfreq;
-	int nt_f = constants::nt_per_assembled_chunk;
 	int nt_c = constants::nt_per_assembled_chunk / nt_per_packet;
 
 	// Set up intensity_packet
