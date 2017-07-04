@@ -1,3 +1,5 @@
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <cstdio>
 #include <iostream>
 #include <stdarg.h> // for va_start/va_end
@@ -488,9 +490,8 @@ void assembled_chunk::write_msgpack_file(const string &filename)
     char tempfilename[filename.size() + 10];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
     int fd = mkstemp(tempfilename);
-    if (fd == -1) {
+    if (fd == -1)
         throw runtime_error("ch_frb_io: failed to create temp file for " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
-    }
     FILE* f = fdopen(fd, "w+");
     if (!f)
         throw runtime_error("ch_frb_io: failed to open temp file " + string(tempfilename) + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
@@ -501,6 +502,15 @@ void assembled_chunk::write_msgpack_file(const string &filename)
     msgpack::pack(buffer, shthis);
     if (fclose(f))
         throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack temp file " + string(tempfilename) + ": " + string(strerror(errno)));
+
+    // Set permissions -- mkstemp creates the file with mode 0600
+    // the umask() call sets the mask to the given value and returns the previous
+    // value -- thus the double-umask() call to leave it unchanged.
+    mode_t mask = umask(0);
+    umask(mask);
+    if (chmod(tempfilename, 0666 & ~mask))
+      throw runtime_error("ch_frb_io: failed to chmod temp file in writing assembled_chunk msgpack file: " + string(tempfilename) + ": " + string(strerror(errno)));
+
     if (rename(tempfilename, filename.c_str()))
         throw runtime_error("ch_frb_io: failed to rename temp file in writing assembled_chunk msgpack file: " + string(tempfilename) + ": " + string(strerror(errno)));
 }
@@ -508,9 +518,9 @@ void assembled_chunk::write_msgpack_file(const string &filename)
 shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
 {
     struct stat st;
-    if (stat(filename.c_str(), &st)) {
+    if (stat(filename.c_str(), &st))
         throw runtime_error("ch_frb_io: failed to stat file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
-    }
+
     size_t len = st.st_size;
     FILE* f = fopen(filename.c_str(), "r");
     if (!f)
