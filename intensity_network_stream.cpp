@@ -524,6 +524,9 @@ void intensity_network_stream::_network_thread_body()
 
     // Start listening on socket 
 
+    string listening_msg = "ch_frb_io: listening for packets (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
+    string receiving_msg = "ch_frb_io: receiving packets! (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
+
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
@@ -537,7 +540,7 @@ void intensity_network_stream::_network_thread_body()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets, ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + "\n");
+    cerr << listening_msg;
 
     // Main packet loop
 
@@ -649,6 +652,8 @@ void intensity_network_stream::_network_thread_body()
 	    this->first_packet_received = true;
 	    pthread_cond_broadcast(&this->cond_state_changed);
 	    pthread_mutex_unlock(&this->state_lock);
+
+	    cerr << receiving_msg;
 	}
 
 	// The incoming_packet_list is timestamped with the arrival time of its first packet.
