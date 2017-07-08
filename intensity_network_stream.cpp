@@ -1,10 +1,12 @@
-#include <functional>
+#include <fcntl.h>
 #include <sys/ioctl.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+
+#include <functional>
 #include <iostream>
+
 #include "ch_frb_io_internals.hpp"
 #include "chlog.hpp"
 
@@ -124,6 +126,16 @@ void intensity_network_stream::_open_socket()
     this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
+
+    // In the CHIME L1 server, it was convenient to set the close-on-exec flag
+    // on the socket file descriptor, to avoid corner cases such as a "zombie"
+    // L1b process preventing the (ipaddr, port) pair being reused.
+
+    int flags = fcntl(sockfd, F_GETFD);
+    flags |= FD_CLOEXEC;
+
+    if (fcntl(sockfd, F_SETFD, flags) < 0)
+	throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on socket file descriptor") + strerror(errno));
 
     // bufsize
     int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize));
