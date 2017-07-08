@@ -538,7 +538,7 @@ void intensity_network_stream::_network_thread_body()
 
     err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
-	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
+	throw runtime_error(string("ch_frb_io: bind() failed (" + ini_params.ipaddr + ":" + to_string(ini_params.udp_port) + "): " + strerror(errno)));
 
     cerr << listening_msg;
 
