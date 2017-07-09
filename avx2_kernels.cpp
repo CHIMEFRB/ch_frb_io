@@ -39,17 +39,17 @@ namespace ch_frb_io {
 fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
     assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
 {
-    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called on a non-AVX2 machine");
+    throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
 }
 
 void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 {
-    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::add_packet() called on a non-AVX2 machine");
+    throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
 }
 
 void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
-    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::decode() called on a non-AVX2 machine");
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::add_packet() called on a non-AVX2 machine");
 }
 
 void test_avx2_kernels(std::mt19937 &rng)
@@ -325,9 +325,9 @@ fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_pe
     assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
 {
     if (nt_per_packet_ != 16)
-	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with nt_per_packet != 16");
+	throw runtime_error("ch_frb_io: fast kernels are only implemented for nt_per_packet=16, you need to either ensure that this is satisfied, or use slow kernels");
     if (nupfreq % 2 != 0)
-	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with odd value of nupfreq");
+	throw runtime_error("ch_frb_io: fast kernels are only implemented for nfreq divisible by 2048, you need to either ensure that this is satisfied, or use slow kernels");
 }
 
 
