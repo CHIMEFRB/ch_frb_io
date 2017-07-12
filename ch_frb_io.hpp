@@ -255,6 +255,8 @@ struct intensity_hdf5_ofile {
 //   - in assembler thread, unassembled_ringbuf.get_packet_list() returns false.  
 //       - the assembler thread loops over all beams ('assemblers') and calls assembled_chunk_ringbuf::end_stream()
 //       - this sets assembled_chunk_ringbuf::doneflag
+//
+//   - in dedispersion thread, assembled_chunk_ringbuf::end_stream() returns an empty pointer.
 
 
 class intensity_network_stream : noncopyable {

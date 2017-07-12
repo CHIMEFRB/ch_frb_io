@@ -313,7 +313,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     _wait_for_assemblers_initialized();
 
     // This can happen if end_stream() was called before the assemblers were initialized.
-    if ((assemblers.size() == 0) || stream_end_requested)
+    if (assemblers.size() == 0)
 	return shared_ptr<assembled_chunk> ();
 
     return assemblers[assembler_index]->get_assembled_chunk(wait);
