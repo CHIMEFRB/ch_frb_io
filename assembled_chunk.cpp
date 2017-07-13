@@ -24,8 +24,8 @@ namespace ch_frb_io {
 // Constructor and allocation logic.
 
 
-// A helper class describing the layout of assembled_chunk::memory_chunk.
-struct memory_chunk_layout {
+// A helper class describing the layout of assembled_chunk::memory_slab.
+struct memory_slab_layout {
     const int nfreq_c;
     const int nfreq_f;
     const int nt_f;
@@ -39,7 +39,7 @@ struct memory_chunk_layout {
     const int nb_ds_mask;
     const int nb_ds_w2;
 
-    // All ib_* fields are array offsets within the memory_chunk, in bytes
+    // All ib_* fields are array offsets within the memory_slab, in bytes
     const int ib_data;
     const int ib_scales;
     const int ib_offsets;
@@ -50,7 +50,7 @@ struct memory_chunk_layout {
 
     static int align(int nbytes) { return ((nbytes+63)/64) * 64; }
 
-    memory_chunk_layout(int nupfreq, int nt_per_packet) :
+    memory_slab_layout(int nupfreq, int nt_per_packet) :
 	nfreq_c(constants::nfreq_coarse_tot),
 	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
 	nt_f(constants::nt_per_assembled_chunk),
@@ -92,26 +92,26 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("assembled_chunk constructor: bad fpga_counts_per_sample argument");
 
-    memory_chunk_layout mc(nupfreq, nt_per_packet);
+    memory_slab_layout mc(nupfreq, nt_per_packet);
 
     // To be replaced by a pool of reuseable chunks.
     // Note: aligned_alloc() zeroes the buffer -- this is important!
-    this->memory_chunk = aligned_alloc<uint8_t> (mc.chunk_size);
+    this->memory_slab = aligned_alloc<uint8_t> (mc.chunk_size);
 
-    this->data = memory_chunk + mc.ib_data;
-    this->scales = reinterpret_cast<float *> (memory_chunk + mc.ib_scales);
-    this->offsets = reinterpret_cast<float *> (memory_chunk + mc.ib_offsets);
-    this->ds_data = reinterpret_cast<float *> (memory_chunk + mc.ib_ds_data);
-    this->ds_mask = reinterpret_cast<int *> (memory_chunk + mc.ib_ds_mask);
-    this->ds_w2 = reinterpret_cast<float *> (memory_chunk + mc.ib_ds_w2);
+    this->data = memory_slab + mc.ib_data;
+    this->scales = reinterpret_cast<float *> (memory_slab + mc.ib_scales);
+    this->offsets = reinterpret_cast<float *> (memory_slab + mc.ib_offsets);
+    this->ds_data = reinterpret_cast<float *> (memory_slab + mc.ib_ds_data);
+    this->ds_mask = reinterpret_cast<int *> (memory_slab + mc.ib_ds_mask);
+    this->ds_w2 = reinterpret_cast<float *> (memory_slab + mc.ib_ds_w2);
 }
 
 
 assembled_chunk::~assembled_chunk()
 {
-    free(this->memory_chunk);
+    free(this->memory_slab);
 
-    this->memory_chunk = nullptr;
+    this->memory_slab = nullptr;
     this->data = nullptr;
     this->scales = nullptr;
     this->offsets = nullptr;
@@ -122,9 +122,9 @@ assembled_chunk::~assembled_chunk()
 
 
 // Static member function
-ssize_t assembled_chunk::get_memory_chunk_size(int nupfreq, int nt_per_packet)
+ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet)
 {
-    memory_chunk_layout mc(nupfreq, nt_per_packet);
+    memory_slab_layout mc(nupfreq, nt_per_packet);
     return mc.chunk_size;
 }
 

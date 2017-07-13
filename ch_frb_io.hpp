@@ -577,8 +577,8 @@ struct assembled_chunk : noncopyable {
     float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
     int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
 
-    // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory chunk.
-    uint8_t *memory_chunk = nullptr;
+    // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
+    uint8_t *memory_slab = nullptr;
 
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
@@ -637,7 +637,7 @@ struct assembled_chunk : noncopyable {
     // msgpack file output
     void write_msgpack_file(const std::string &filename);
 
-    static ssize_t get_memory_chunk_size(int nupfreq, int nt_per_packet);
+    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet);
 };
 
 
@@ -654,6 +654,45 @@ struct fast_assembled_chunk : public assembled_chunk
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
+};
+
+
+ 
+// -------------------------------------------------------------------------------------------------
+//
+// memory_slab_pool
+
+
+class memory_slab_pool {
+public:
+    memory_slab_pool(ssize_t nbytes_per_slab, ssize_t nslabs, const std::vector<int> &allocation_cores, bool noisy=true);
+    ~memory_slab_pool();
+
+    // Returns a new slab from the pool.
+    //
+    // If the pool is empty, then either a null pointer is returned (wait=false),
+    // or get_slab() blocks until a slab is available (wait=true).
+    //
+    // If zero=true, then the new slab is zeroed.
+
+    std::unique_ptr<uint8_t[]> get_slab(bool zero=true, bool wait=false);
+    
+    // Puts a slab back in the pool.
+    // Note: 'p' will be set to a null pointer after put_slab() returns.
+    void put_slab(std::unique_ptr<uint8_t[]> &p);
+
+    const ssize_t nbytes_per_slab;
+    const ssize_t nslabs;
+
+protected:
+    std::mutex lock;
+    std::condition_variable cv;
+
+    ssize_t curr_size = 0;
+    std::vector<std::unique_ptr<uint8_t[]>> slabs;
+
+    // Called by constructor, in separate thread.
+    void allocate(const std::vector<int> &allocation_cores);
 };
 
 

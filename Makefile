@@ -41,6 +41,7 @@ OFILES = assembled_chunk.o \
 	intensity_network_ostream.o \
 	intensity_packet.o \
 	lexical_cast.o \
+	memory_slab_pool.o \
 	misc.o \
 	udp_packet_list.o \
 	udp_packet_ringbuf.o \
