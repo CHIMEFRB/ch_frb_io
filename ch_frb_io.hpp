@@ -244,6 +244,19 @@ struct intensity_hdf5_ofile {
 // When the intensity_network_stream object is constructed, threads are automatically spawned to read and process
 // packets.  The stream presents the incoming data to the "outside world" as a per-beam sequence 
 // of regular arrays which are obtained by calling get_assembled_chunk().
+//
+// Reminder: normal shutdown sequence works as follows.
+//  
+//   - in network thread, end-of-stream packet is received (in intensity_network_stream::_network_thread_body())
+//       - network thread calls intensity_network_stream::_network_thread_exit().
+//       - stream state is advanced to 'stream_end_requested', this means that stream has exited but not all threads have joined.
+//       - unassembled_ringbuf.end_stream() is called, which will tell the assembler thread that there are no more packets.
+//
+//   - in assembler thread, unassembled_ringbuf.get_packet_list() returns false.  
+//       - the assembler thread loops over all beams ('assemblers') and calls assembled_chunk_ringbuf::end_stream()
+//       - this sets assembled_chunk_ringbuf::doneflag
+//
+//   - in dedispersion thread, assembled_chunk_ringbuf::end_stream() returns an empty pointer.
 
 
 class intensity_network_stream : noncopyable {

@@ -1,10 +1,12 @@
-#include <functional>
+#include <fcntl.h>
 #include <sys/ioctl.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+
+#include <functional>
 #include <iostream>
+
 #include "ch_frb_io_internals.hpp"
 #include "chlog.hpp"
 
@@ -126,6 +128,16 @@ void intensity_network_stream::_open_socket()
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
+    // In the CHIME L1 server, it was convenient to set the close-on-exec flag
+    // on the socket file descriptor, to avoid corner cases such as a "zombie"
+    // L1b process preventing the (ipaddr, port) pair being reused.
+
+    int flags = fcntl(sockfd, F_GETFD);
+    flags |= FD_CLOEXEC;
+
+    if (fcntl(sockfd, F_SETFD, flags) < 0)
+	throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on socket file descriptor") + strerror(errno));
+
     // bufsize
     int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize));
     if (err < 0)
@@ -158,7 +170,7 @@ void intensity_network_stream::start_stream()
 
     if (stream_end_requested || join_called) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called completed or cancelled stream");
+	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on completed or cancelled stream");
     }
 
     // If stream has already been started, this is not treated as an error.
@@ -301,7 +313,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     _wait_for_assemblers_initialized();
 
     // This can happen if end_stream() was called before the assemblers were initialized.
-    if ((assemblers.size() == 0) || stream_end_requested)
+    if (assemblers.size() == 0)
 	return shared_ptr<assembled_chunk> ();
 
     return assemblers[assembler_index]->get_assembled_chunk(wait);
@@ -525,6 +537,9 @@ void intensity_network_stream::_network_thread_body()
 
     // Start listening on socket 
 
+    string listening_msg = "ch_frb_io: listening for packets (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
+    string receiving_msg = "ch_frb_io: receiving packets! (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
+
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
@@ -536,9 +551,9 @@ void intensity_network_stream::_network_thread_body()
 
     err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
-	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
+	throw runtime_error(string("ch_frb_io: bind() failed (" + ini_params.ipaddr + ":" + to_string(ini_params.udp_port) + "): " + strerror(errno)));
 
-    cerr << ("ch_frb_io: listening for packets, ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + "\n");
+    cerr << listening_msg;
 
     // Main packet loop
 
@@ -650,6 +665,8 @@ void intensity_network_stream::_network_thread_body()
 	    this->first_packet_received = true;
 	    pthread_cond_broadcast(&this->cond_state_changed);
 	    pthread_mutex_unlock(&this->state_lock);
+
+	    cerr << receiving_msg;
 	}
 
 	// The incoming_packet_list is timestamped with the arrival time of its first packet.

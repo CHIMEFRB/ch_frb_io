@@ -97,7 +97,7 @@ void assembled_chunk_ringbuf::print_state()
 	cout << "  binning " << ids << ": [";
 	for (int ipos = i0; ipos < i1; ipos++)
 	    cout << " " << this->ringbuf_entry(ids,ipos)->ichunk;
-	cout << "]\n";
+	cout << " ]\n";
     }
 
     pthread_mutex_unlock(&this->lock);
@@ -378,6 +378,9 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     //
     // FIXME!!  Make sure this line gets commented out eventually.
     this->_check_invariants();
+
+    // For even more debugging, uncomment this line!
+    // this->print_state();
 
     if (event_counts) {
 	event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
