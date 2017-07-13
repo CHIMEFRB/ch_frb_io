@@ -37,7 +37,7 @@
 #define ch_assert2(cond,line) \
     do { \
         if (_unlikely(!(cond))) { \
-	    const char *msg = "rf_pipelines: assertion '" __STRING(cond) "' failed (" __FILE__ ":" __STRING(line) ")\n"; \
+	    const char *msg = "ch_frb_io: assertion '" __STRING(cond) "' failed (" __FILE__ ":" __STRING(line) ")\n"; \
 	    throw std::runtime_error(msg); \
 	} \
     } while (0)
