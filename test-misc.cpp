@@ -71,13 +71,19 @@ static void test_encode_decode(std::mt19937 &rng)
 
 	auto ostream = intensity_network_ostream::make(ini_params);
 	auto packet_list = make_unique<udp_packet_list> (ostream->npackets_per_chunk, ostream->nbytes_per_chunk);
-	vector<shared_ptr<assembled_chunk> > assembled_chunks(nbeams);
+	vector<shared_ptr<assembled_chunk>> assembled_chunks(nbeams);
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-	    if (use_fast_kernels)
-		assembled_chunks[ibeam] = make_shared<fast_assembled_chunk> (ibeam, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-	    else
-		assembled_chunks[ibeam] = make_shared<assembled_chunk> (ibeam, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	    assembled_chunk::initializer ini_params;
+	    ini_params.beam_id = ibeam;
+	    ini_params.nupfreq = nupfreq;
+	    ini_params.nt_per_packet = nt_per_packet;
+	    ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	    ini_params.ichunk = ichunk;
+	    ini_params.force_reference = !use_fast_kernels;
+	    ini_params.force_fast = use_fast_kernels;
+
+	    assembled_chunks[ibeam] = assembled_chunk::make(ini_params);
 	}
 
 	ostream->_encode_chunk(&src_intensity[0], &src_weights[0], src_stride, ichunk * nt_per_chunk * fpga_counts_per_sample, packet_list);

@@ -68,12 +68,12 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     if ((ini_params.udp_port <= 0) || (ini_params.udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(ini_params.udp_port));
 
-    if (ini_params.mandate_fast_kernels && ini_params.mandate_reference_kernels)
-	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
+    if (ini_params.force_fast_kernels && ini_params.force_reference_kernels)
+	throw runtime_error("ch_frb_io: both flags force_fast_kernels, force_reference_kernels were set");
 
 #ifndef __AVX2__
-    if (ini_params.mandate_fast_kernels)
-	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
+    if (ini_params.force_fast_kernels)
+	throw runtime_error("ch_frb_io: the 'force_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
     if (ini_params.assembled_ringbuf_capacity <= 0)

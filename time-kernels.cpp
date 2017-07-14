@@ -29,7 +29,14 @@ static double time_decode(std::mt19937 &rng)
     vector<shared_ptr<Tchunk>> chunks(nchunks);
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
-	chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params.ichunk = ichunk;
+
+	chunks[ichunk] = make_shared<Tchunk> (ini_params);
 	chunks[ichunk]->randomize(rng);   // I don't think this matters
     }
     
@@ -112,12 +119,15 @@ static double time_assemble(std::mt19937 &rng)
 
     vector<shared_ptr<Tchunk>> chunks(nchunks);
 
-    //
-    // Use fast_assembled_chunks
-    //
+    for (int ichunk = 0; ichunk < nchunks; ichunk++) {
+	assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 
-    for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, 0);
+	chunks[ichunk] = make_shared<Tchunk> (ini_params);
+    }
 
     struct timeval tv0 = xgettimeofday();
 
@@ -152,12 +162,28 @@ static double time_downsample(std::mt19937 &rng)
     vector<shared_ptr<Tchunk>> src_chunks(2 * nchunks);
 
     for (int ichunk = 0; ichunk < 2*nchunks; ichunk++) { 
-	src_chunks[ichunk] = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params.ichunk = ichunk;
+
+	src_chunks[ichunk] = make_shared<Tchunk> (ini_params);
 	src_chunks[ichunk]->randomize(rng);
     }
     
-    for (int ichunk = 0; ichunk < nchunks; ichunk++)
-	dst_chunks[ichunk] = make_shared<Tchunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+    for (int ichunk = 0; ichunk < nchunks; ichunk++) {
+	assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params.ichunk = 2 * ichunk;
+	ini_params.binning = 2;
+
+	dst_chunks[ichunk] = make_shared<Tchunk> (ini_params);
+    }
 
     struct timeval tv0 = xgettimeofday();
 

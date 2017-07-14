@@ -24,6 +24,23 @@ namespace ch_frb_io {
 // Constructor and allocation logic.
 
 
+// This helper function's purpose in life is to compute
+//   nt_coarse = constants::nt_per_assembled_chunk / nt_per_packet
+// in a way which throws a C++ exception (rather than a hardware exception)
+// if nt_per_packet == 0.
+
+static int _nt_c(int nt_per_packet)
+{
+    int nt_f = constants::nt_per_assembled_chunk;
+
+    if (nt_per_packet <= 0)
+	throw runtime_error("ch_frb_io: assembled_chunk constructor expects nt_per_packet > 0");
+    if (nt_f % nt_per_packet != 0)
+	throw runtime_error("ch_frb_io: assembled_chunk constructor expects nt_per_packet to be a divisor of " + to_string(nt_f));
+    return nt_f / nt_per_packet;
+}
+
+
 // A helper class describing the layout of assembled_chunk::memory_slab.
 struct memory_slab_layout {
     const int nfreq_c;
@@ -54,7 +71,7 @@ struct memory_slab_layout {
 	nfreq_c(constants::nfreq_coarse_tot),
 	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
 	nt_f(constants::nt_per_assembled_chunk),
-	nt_c(constants::nt_per_assembled_chunk / nt_per_packet),
+	nt_c(_nt_c(nt_per_packet)),
 	nb_data(nfreq_f * nt_f),
 	nb_scales(nfreq_c * nt_c * sizeof(float)),
 	nb_offsets(nfreq_c * nt_c * sizeof(float)),
@@ -72,58 +89,77 @@ struct memory_slab_layout {
 };
 
 
-assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
-    beam_id(beam_id_), 
-    nupfreq(nupfreq_), 
-    nt_per_packet(nt_per_packet_),
-    fpga_counts_per_sample(fpga_counts_per_sample_), 
-    nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
+assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params) :
+    beam_id(ini_params.beam_id), 
+    nupfreq(ini_params.nupfreq), 
+    nt_per_packet(ini_params.nt_per_packet),
+    fpga_counts_per_sample(ini_params.fpga_counts_per_sample), 
+    binning(ini_params.binning),
+    ichunk(ini_params.ichunk),
+    nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
-    ichunk(ichunk_),
-    isample(ichunk * constants::nt_per_assembled_chunk)
+    isample(ichunk * constants::nt_per_assembled_chunk),
+    fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
+    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
-	throw runtime_error("assembled_chunk constructor: bad beam_id argument");
+	throw runtime_error("assembled_chunk constructor: bad 'beam_id' argument");
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("assembled_chunk constructor: bad nupfreq argument");
+	throw runtime_error("assembled_chunk constructor: bad 'nupfreq' argument");
     if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
-	throw runtime_error("assembled_chunk constructor: bad nt_per_packet argument");
+	throw runtime_error("assembled_chunk constructor: bad 'nt_per_packet' argument");
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("assembled_chunk constructor: bad fpga_counts_per_sample argument");
+	throw runtime_error("assembled_chunk constructor: bad 'fpga_counts_per_sample' argument");
+    if ((binning <= 0) || !is_power_of_two(binning) || (binning > 8))
+	throw runtime_error("assembled_chunk constructor: bad 'binning' argument");
+
+    uint64_t ichunk_max = UINT64_MAX / uint64_t(constants::nt_per_assembled_chunk * fpga_counts_per_sample);
+    if (ichunk > ichunk_max)
+	throw runtime_error("assembled_chunk constructor: bad 'ichunk' argument");
 
     memory_slab_layout mc(nupfreq, nt_per_packet);
 
     // To be replaced by a pool of reuseable chunks.
     // Note: aligned_alloc() zeroes the buffer -- this is important!
-    this->memory_slab = aligned_alloc<uint8_t> (mc.chunk_size);
+    uint8_t *p = aligned_alloc<uint8_t> (mc.chunk_size);
+    this->memory_slab = unique_ptr<uint8_t[]> (p);
 
-    this->data = memory_slab + mc.ib_data;
-    this->scales = reinterpret_cast<float *> (memory_slab + mc.ib_scales);
-    this->offsets = reinterpret_cast<float *> (memory_slab + mc.ib_offsets);
-    this->ds_data = reinterpret_cast<float *> (memory_slab + mc.ib_ds_data);
-    this->ds_mask = reinterpret_cast<int *> (memory_slab + mc.ib_ds_mask);
-    this->ds_w2 = reinterpret_cast<float *> (memory_slab + mc.ib_ds_w2);
+    this->data = p + mc.ib_data;
+    this->scales = reinterpret_cast<float *> (p + mc.ib_scales);
+    this->offsets = reinterpret_cast<float *> (p + mc.ib_offsets);
+    this->ds_data = reinterpret_cast<float *> (p + mc.ib_ds_data);
+    this->ds_mask = reinterpret_cast<int *> (p + mc.ib_ds_mask);
+    this->ds_w2 = reinterpret_cast<float *> (p + mc.ib_ds_w2);
 }
 
 
 assembled_chunk::~assembled_chunk()
 {
-    free(this->memory_slab);
-
-    this->memory_slab = nullptr;
-    this->data = nullptr;
-    this->scales = nullptr;
-    this->offsets = nullptr;
-    this->ds_data = nullptr;
-    this->ds_mask = nullptr;
-    this->ds_w2 = nullptr;
+    // Shouldn't be necessary, but helps guard against accidental pointer reuse after free().
+    this->_reset_pointers();
 }
 
 
+void assembled_chunk::_reset_pointers()
+{
+    this->scales = nullptr;
+    this->offsets = nullptr;
+    this->data = nullptr;
+    this->ds_w2 = nullptr;
+    this->ds_data = nullptr;
+    this->ds_mask = nullptr;
+}
+
+    
 // Static member function
 ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet)
 {
+    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
+	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nupfreq' argument");
+    if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
+	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nt_per_packet' argument");
+
     memory_slab_layout mc(nupfreq, nt_per_packet);
     return mc.chunk_size;
 }
@@ -178,8 +214,8 @@ string assembled_chunk::format_filename(const string &pattern) const {
     s = replaceAll(s, "(CHUNK)",   stringprintf("%08"  PRIu64, ichunk));
     s = replaceAll(s, "(NCHUNK)",  stringprintf("%02i",        binning));
     s = replaceAll(s, "(BINNING)", stringprintf("%02i",        binning));
-    s = replaceAll(s, "(FPGA0)",   stringprintf("%012" PRIu64, fpgacounts_begin()));
-    s = replaceAll(s, "(FPGAN)",   stringprintf("%08"  PRIu64, fpgacounts_N()));
+    s = replaceAll(s, "(FPGA0)",   stringprintf("%012" PRIu64, fpga_begin));
+    s = replaceAll(s, "(FPGAN)",   stringprintf("%08"  PRIu64, fpga_end - fpga_begin));
     return s;
 }
 
@@ -330,37 +366,43 @@ static void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_sca
 }
 
 
+// Checks validity of call to assembled_chunk::downsample().
+void assembled_chunk::_check_downsample(const assembled_chunk *src1, const assembled_chunk *src2)
+{
+    if (!src1 || !src2)
+	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::downsample()");
+
+    if (src1->binning != src2->binning)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched binning");
+    if (src2->ichunk != src1->ichunk + src2->binning)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): source ichunks are not consecutive");
+
+    if (this->binning != 2 * src1->binning)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): wrong value of this->binning");
+    if (this->ichunk != src1->ichunk)
+	throw runtime_error("ch_frb_io: assembled_chunk::downsample(): wrong value of this->ichunk");
+
+    if (!equal3(this->beam_id, src1->beam_id, src2->beam_id))
+	throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched beam_id");
+    if (!equal3(this->nupfreq, src1->nupfreq, src2->nupfreq))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched nupfreq");
+    if (!equal3(this->nt_per_packet, src1->nt_per_packet, src2->nt_per_packet))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched nt_per_packet");
+}
+
 // This is the slow, reference version of assembled_chunk::downsample().
 //
 // In production, it is overridden by the fast, assembly-language-kernelized version
 // in fast_assembled_chunk::downsample().  (See avx2_kernels.cpp)
-//
-// There is some code duplication between this and assembled_chunk::downsample(), 
-// so be sure to make changes in sync.
 
 void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
+    this->_check_downsample(src1, src2);
+
     int nfreq_c = constants::nfreq_coarse_tot;
     int nt_f = constants::nt_per_assembled_chunk;
     int nt_c = nt_f / nt_per_packet;
-
-    if (!src1 || !src2)
-	throw runtime_error("ch_frb_io: null pointer in assembled_chunk::downsample()");
-    if (this == src2)
-	throw runtime_error("ch_frb_io: assembled_chunk::downsample: 'this' and 'src2' pointers cannot be equal");
-
-    if (!equal3(this->beam_id, src1->beam_id, src2->beam_id))
-	throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched beam_id");
-    if (!equal3(this->nupfreq, src1->nupfreq, src2->nupfreq))
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
-    if (!equal3(this->nt_per_packet, src1->nt_per_packet, src2->nt_per_packet))
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
-
-    if (src1->binning != src2->binning)
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched binning");
-    if (src2->ichunk != src1->ichunk + src2->binning)
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: source ichunks are not consecutive");
-
+ 
     for (int ifreq_c = 0; ifreq_c < nfreq_c; ifreq_c++) {
 	int ifreq_f = ifreq_c * nupfreq;
 
@@ -382,36 +424,27 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 		       this->ds_data, this->ds_mask, this->ds_w2,
 		       nupfreq, nt_f, nt_per_packet);
     }
-
-    this->binning = 2 * src1->binning;
-    this->ichunk = src1->ichunk;
-    this->isample = src1->isample;
 }
 
 
-// Alternate downsample() interface.
-void assembled_chunk::downsample(const std::shared_ptr<assembled_chunk> &src1, const std::shared_ptr<assembled_chunk> &src2)
+unique_ptr<assembled_chunk> assembled_chunk::make(const assembled_chunk::initializer &ini_params)
 {
-    this->downsample(src1.get(), src2.get());
-}
+    bool fast_kernel_exists = (ini_params.nt_per_packet == 16) && (ini_params.nupfreq % 2 == 0);
 
-
-unique_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_, bool force_reference, bool force_fast)
-{
-    // FIXME -- if C++14 is available, use make_unique()
-    if (force_reference && force_fast)
-        throw runtime_error("ch_frb_io: assembled_chunk::make(): both force_reference and force_fast were set!");
+    if (ini_params.force_reference && ini_params.force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): both force_reference and force_fast flags were set");
+    if (ini_params.force_fast && !fast_kernel_exists)
+	throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast flag was set, but conditions for a fast kernel (nt_per_packet=16 and nupfreq even) were not met");
 
 #ifdef __AVX2__
-    if (force_fast ||
-        ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0) && !force_reference))
-	return unique_ptr<fast_assembled_chunk>(new fast_assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+    if (fast_kernel_exists && !ini_params.force_reference)
+	return make_unique<fast_assembled_chunk> (ini_params);
 #else
-    if (force_fast)
-        throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast set on a machine without AVX2!");
+    if (ini_params.force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast flag set on a machine without AVX2");
 #endif
 
-    return unique_ptr<assembled_chunk>(new assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+    return make_unique<assembled_chunk> (ini_params);
 }
 
 

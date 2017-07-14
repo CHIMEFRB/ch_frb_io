@@ -395,8 +395,8 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
     ch_frb_io::intensity_network_stream::initializer initializer;
     initializer.beam_ids = tp->recv_beam_ids;
-    initializer.mandate_reference_kernels = !tp->use_fast_kernels;
-    initializer.mandate_fast_kernels = tp->use_fast_kernels;
+    initializer.force_reference_kernels = !tp->use_fast_kernels;
+    initializer.force_fast_kernels = tp->use_fast_kernels;
     initializer.throw_exception_on_buffer_drop = true;
     initializer.throw_exception_on_assembler_miss = true;
 

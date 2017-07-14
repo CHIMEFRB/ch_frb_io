@@ -36,15 +36,15 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     }
 
 #ifndef __AVX2__
-    if (ini_params.mandate_fast_kernels)
-	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
+    if (ini_params.force_fast_kernels)
+	throw runtime_error("ch_frb_io: the 'force_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
     uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
-    this->active_chunk0 = this->_make_assembled_chunk(ichunk);
-    this->active_chunk1 = this->_make_assembled_chunk(ichunk+1);
+    this->active_chunk0 = this->_make_assembled_chunk(ichunk, 1);
+    this->active_chunk1 = this->_make_assembled_chunk(ichunk+1, 1);
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
@@ -118,9 +118,9 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts, uint64_t
 	for (int ipos = ringbuf_pos[ids]; ipos < ringbuf_pos[ids] + ringbuf_size[ids]; ipos++) {
 	    auto chunk = this->ringbuf_entry(ids, ipos);
 
-	    if (min_fpga_counts && (chunk->fpgacounts_end() < min_fpga_counts))
+	    if (min_fpga_counts && (chunk->fpga_end <= min_fpga_counts))
 		continue;   // no overlap
-	    if (max_fpga_counts && (chunk->fpgacounts_begin() > max_fpga_counts))
+	    if (max_fpga_counts && (chunk->fpga_begin > max_fpga_counts))
 		continue;   // no overlap
 
 	    uint64_t where = 1 << (ids+1);   // Note: works since l1_ringbuf_level::L1RB_LEVELn == 2^n.
@@ -152,12 +152,12 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 	if (downstream_pos < ringbuf_pos[0] + ringbuf_size[0]) {
 	    // Use initial FPGA count of first chunk which has been assembled,
 	    // but not yet processed by "downstream" thread.
-	    *ringbuf_fpga_next = this->ringbuf_entry(0, downstream_pos)->fpgacounts_begin();
+	    *ringbuf_fpga_next = this->ringbuf_entry(0, downstream_pos)->fpga_begin;
 	}
 	else if (ringbuf_size[0] > 0) {
 	    // All chunks have been processed by "downstream" thread.
 	    // Use final FPGA count of last chunk in buffer.
-	    *ringbuf_fpga_next = this->ringbuf_entry(0, ringbuf_pos[0] + ringbuf_size[0] - 1)->fpgacounts_end();
+	    *ringbuf_fpga_next = this->ringbuf_entry(0, ringbuf_pos[0] + ringbuf_size[0] - 1)->fpga_end;
 	}
     }
 
@@ -177,7 +177,7 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 	for (int ids = num_downsampling_levels-1; ids >= 0; ids--) {
 	    if (ringbuf_size[ids] > 0) {
 		int ipos = ringbuf_pos[ids];
-		*ringbuf_fpga_min = this->ringbuf_entry(ids,ipos)->fpgacounts_begin();
+		*ringbuf_fpga_min = this->ringbuf_entry(ids,ipos)->fpga_begin;
 		break;
 	    }
 	}
@@ -188,7 +188,7 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 	for (int ids = 0; ids < num_downsampling_levels; ids++) {
 	    if (ringbuf_size[ids] > 0) {
 		int ipos = ringbuf_pos[ids] + ringbuf_size[ids] - 1;
-		*ringbuf_fpga_max = this->ringbuf_entry(ids,ipos)->fpgacounts_end();
+		*ringbuf_fpga_max = this->ringbuf_entry(ids,ipos)->fpga_end;
 		break;
 	    }
 	}
@@ -229,7 +229,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
         active_chunk0.swap(active_chunk1);
 
         // Note that we've just swapped active_chunk1 down to active_chunk0, so active_chunk1's ichunk is (active0 + 1).
-	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 1);
+	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 1, 1);
     }
 
     if (packet_ichunk == active_chunk0->ichunk) {
@@ -295,7 +295,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	poplist[2*ids] = this->ringbuf_entry(ids, ringbuf_pos[ids]);
 	poplist[2*ids+1] = this->ringbuf_entry(ids, ringbuf_pos[ids]+1);	
 
-	pushlist[ids+1] = _make_assembled_chunk(poplist[2*ids]->ichunk);
+	pushlist[ids+1] = _make_assembled_chunk(poplist[2*ids]->ichunk, 1 << (ids+1));
 
 	// Note: this test is currently superfluous, since _make_assembled_chunk() throws
 	// an exception (rather than returning NULL) if the allocation fails.  It's 
@@ -306,7 +306,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	if (!pushlist[ids+1])
 	    return false;
 
-	pushlist[ids+1]->downsample(poplist[2*ids], poplist[2*ids+1]);
+	pushlist[ids+1]->downsample(poplist[2*ids].get(), poplist[2*ids+1].get());
     }
 
     // We process the stream_filename and chunk_callbacks here (without the lock held!)
@@ -481,8 +481,8 @@ bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk)
     // Danger: monkey with the active_chunk0, active_chunk1 variables,
     // which are not lock-protected and only supposed to be accessed
     // by the assembler thread.
-    active_chunk0 = this->_make_assembled_chunk(ich + 1);
-    active_chunk1 = this->_make_assembled_chunk(ich + 2);
+    active_chunk0 = this->_make_assembled_chunk(ich + 1, 1);
+    active_chunk1 = this->_make_assembled_chunk(ich + 2, 1);
     return worked;
 }
 
@@ -540,15 +540,20 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 }
 
 
-std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
+std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk, int binning)
 {
-    bool force_ref  = false;
-    bool force_fast = false;
-    if (ini_params.mandate_fast_kernels)
-        force_fast = true;
-    else if (ini_params.mandate_reference_kernels)
-        force_ref = true;
-    return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk, force_ref, force_fast);
+    struct assembled_chunk::initializer chunk_params;
+
+    chunk_params.beam_id = this->beam_id;
+    chunk_params.nupfreq = this->nupfreq;
+    chunk_params.nt_per_packet = this->nt_per_packet;
+    chunk_params.fpga_counts_per_sample = this->fpga_counts_per_sample;
+    chunk_params.force_reference = this->ini_params.force_reference_kernels;
+    chunk_params.force_fast = this->ini_params.force_fast_kernels;
+    chunk_params.binning = binning;
+    chunk_params.ichunk = ichunk;
+
+    return assembled_chunk::make(chunk_params);
 }
 
 

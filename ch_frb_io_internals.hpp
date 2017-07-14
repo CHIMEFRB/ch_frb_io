@@ -324,7 +324,7 @@ protected:
     void _check_invariants();
     
     // Helper function: allocates new assembled chunk
-    std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
+    std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk, int binning);
 
     // The "active" chunks are in the process of being filled with data as packets arrive.
     // Currently we take the active window to be two assembled_chunks long, but this could be generalized.

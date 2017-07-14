@@ -36,8 +36,8 @@ namespace ch_frb_io {
 
 // If compiling on a machine without the AVX2 instruction set, we include some placeholder routines
 
-fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
-    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
+fast_assembled_chunk::fast_assembled_chunk(const assembled_chunk::initializer &ini_params) :
+    assembled_chunk(ini_params)
 {
     throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
 }
@@ -824,10 +824,10 @@ inline void _ds_kernel3(uint8_t *out, const float *data, const int *mask, const 
 // class fast_assembled_chunk
 
 
-fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
-    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
+fast_assembled_chunk::fast_assembled_chunk(const assembled_chunk::initializer &ini_params) :
+    assembled_chunk(ini_params)
 {
-    if (nt_per_packet_ != 16)
+    if (nt_per_packet != 16)
 	throw runtime_error("ch_frb_io: fast kernels are only implemented for nt_per_packet=16, you need to either ensure that this is satisfied, or use slow kernels");
     if (nupfreq % 2 != 0)
 	throw runtime_error("ch_frb_io: fast kernels are only implemented for nfreq divisible by 2048, you need to either ensure that this is satisfied, or use slow kernels");
@@ -883,29 +883,13 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 
 
 // Virtual override.
-// There is some code duplication between this and assembled_chunk::downsample(), so be sure to make changes in sync.
 void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
+    this->_check_downsample(src1, src2);
+
     int nfreq_c = constants::nfreq_coarse_tot;
     int nt_f = constants::nt_per_assembled_chunk;
     int nt_c = nt_f / nt_per_packet;
-
-    if (!src1 || !src2)
-	throw runtime_error("ch_frb_io: null pointer in assembled_chunk::downsample()");
-    if (this == src2)
-	throw runtime_error("ch_frb_io: assembled_chunk::downsample: 'this' and 'src2' pointers cannot be equal");
-
-    if (!equal3(this->beam_id, src1->beam_id, src2->beam_id))
-	throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched beam_id");
-    if (!equal3(this->nupfreq, src1->nupfreq, src2->nupfreq))
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
-    if (!equal3(this->nt_per_packet, src1->nt_per_packet, src2->nt_per_packet))
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
-
-    if (src1->binning != src2->binning)
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched binning");
-    if (src2->ichunk != src1->ichunk + src2->binning)
-        throw runtime_error("ch_frb_io: assembled_chunk::downsample: source ichunks are not consecutive");
 
     for (int ifreq_c = 0; ifreq_c < nfreq_c; ifreq_c++) {
 	int ifreq_f = ifreq_c * nupfreq;
@@ -938,10 +922,6 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 	_ds_kernel3(this->data + (ifreq_f * nt_f) + (nt_f/2),
 		    ds_data, ds_mask, out_offsets, ds_w2, nupfreq, nt_f);
     }
-
-    this->binning = 2 * src1->binning;
-    this->ichunk = src1->ichunk;
-    this->isample = src1->isample;
 }
 
 
@@ -1321,9 +1301,17 @@ void test_avx2_kernels(std::mt19937 &rng)
 	}
 
 	// Test 1: Equivalence of assembled_chunk::add_packet() and fast_assembled_chunk::add_packet()
+
+	assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params.ichunk = ichunk;
+	ini_params.binning = 2;   // since chunk0, chunk1 will be used as downsample() outputs later.
 	
-	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-	auto chunk1 = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	auto chunk0 = make_shared<assembled_chunk> (ini_params);
+	auto chunk1 = make_shared<fast_assembled_chunk> (ini_params);
 
 	for (int ipacket = 0; ipacket < npackets; ipacket++) {
 	    // Simulate random packet
@@ -1400,8 +1388,19 @@ void test_avx2_kernels(std::mt19937 &rng)
 
 	// Test 3: Equivalence of assembled_chunk::downsample() and fast_assembled_chunk::downsample().
 
-	auto chunk_a = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-	auto chunk_b = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
+	assembled_chunk::initializer ini_params_a;
+	ini_params_a.beam_id = beam_id;
+	ini_params_a.nupfreq = nupfreq;
+	ini_params_a.nt_per_packet = nt_per_packet;
+	ini_params_a.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params_a.ichunk = ichunk;
+
+	assembled_chunk::initializer ini_params_b;
+	ini_params_b = ini_params_a;
+	ini_params_b.ichunk = ichunk + 1;
+
+	auto chunk_a = make_shared<assembled_chunk> (ini_params_a);
+	auto chunk_b = make_shared<assembled_chunk> (ini_params_b);
 
 	chunk0->randomize(rng);
 	chunk1->randomize(rng);

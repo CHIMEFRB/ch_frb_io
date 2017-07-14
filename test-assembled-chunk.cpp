@@ -30,7 +30,14 @@ int main(int argc, char **argv)
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    unique_ptr<assembled_chunk> chunk = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+    assembled_chunk::initializer ini_params;
+    ini_params.beam_id = beam_id;
+    ini_params.nupfreq = nupfreq;
+    ini_params.nt_per_packet = nt_per_packet;
+    ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+    ini_params.ichunk = ichunk;
+
+    unique_ptr<assembled_chunk> chunk = assembled_chunk::make(ini_params);
     chunk->randomize(rng);
 
     /*
@@ -62,8 +69,11 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 2" << endl;
     }
 
+    assembled_chunk::initializer ini_params2;
+    ini_params2 = ini_params;
+    ini_params2.ichunk = ichunk + 1;
 
-    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
+    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(ini_params2);
 
     assembled_chunk* chunk2 = uchunk2.get();
     assembled_chunk* chunk1 = chunk.get();

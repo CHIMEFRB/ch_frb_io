@@ -59,15 +59,26 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint64_t isample = fpga0 / (uint64_t)fpga_counts_per_sample;
         uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
-        ch = ch_frb_io::assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-        ch->isample = isample;
-        ch->binning = binning;
+	ch_frb_io::assembled_chunk::initializer ini_params;
+	ini_params.beam_id = beam_id;
+	ini_params.nupfreq = nupfreq;
+	ini_params.nt_per_packet = nt_per_packet;
+	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
+	ini_params.binning = binning;
+	ini_params.ichunk = ichunk;
 
-        if (ch->nt_coarse != (int)nt_coarse)
+        ch = ch_frb_io::assembled_chunk::make(ini_params);
+
+        if (ch->nt_coarse != nt_coarse)
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nt_coarse mismatch");
-
-        if (fpgaN != (uint64_t)(ch->binning * ch_frb_io::constants::nt_per_assembled_chunk * fpga_counts_per_sample))
-            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack fpgaN mismatch");
+	if (ch->nscales != nscales)
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nscales mismatch");
+	if (ch->ndata != ndata)
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nscales mismatch");
+        if (ch->fpga_begin != fpga0)
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack fpga_begin mismatch");
+        if (ch->fpga_end != fpga0 + fpgaN)
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack fpga_end mismatch");
 
         if (arr[iarr + 0].type != msgpack::type::BIN) throw msgpack::type_error();
         if (arr[iarr + 1].type != msgpack::type::BIN) throw msgpack::type_error();
@@ -154,8 +165,8 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         o.pack(ch->nt_coarse);
         o.pack(ch->nscales);
         o.pack(ch->ndata);
-        o.pack(ch->fpgacounts_begin());
-        o.pack(ch->fpgacounts_N());
+        o.pack(ch->fpga_begin);
+        o.pack(ch->fpga_end - ch->fpga_begin);
         o.pack(ch->binning);
         // PACK FLOATS AS BINARY
         int nscalebytes = ch->nscales * sizeof(float);

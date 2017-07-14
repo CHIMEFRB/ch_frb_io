@@ -33,7 +33,7 @@ struct noncopyable
 };
 
 // Defined later in this file
-struct assembled_chunk;
+class assembled_chunk;
 
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
@@ -282,8 +282,8 @@ public:
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
 
-	bool mandate_reference_kernels = false;
-	bool mandate_fast_kernels = false;
+	bool force_reference_kernels = false;
+	bool force_fast_kernels = false;
 	bool emit_warning_on_buffer_drop = true;
 	bool throw_exception_on_beam_id_mismatch = true;
 	bool throw_exception_on_first_packet_mismatch = true;
@@ -526,62 +526,87 @@ protected:
 // The data in the assembled_chunk is represented as 8-bit integers, with a coarser array of additive
 // and mutiplicative offsets, but can be "decoded" to a simple floating-point array by calling
 // assembled_chunk::decode().
+//
+// The 'offsets' and 'scales' arrays below are coarse-grained in both frequency and time, relative 
+// to the 'data' array.  The level of frequency coarse-graining is the constructor argument 'nupfreq',
+// and the level of time coarse-graining is the constructor-argument 'nt_per_packet'.  For no particular
+// reason, the number of coarse-grained frequency channels is a compile-time constant (constants::nfreq_coarse)
+// whereas the number of fine-grained time samples is also a compile-time constant (constants::nt_per_assembled_chunk).
+//
+// Summarizing:
+//
+//   fine-grained shape = (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
+//   coarse-grained shape = (constants::nfreq_coarse, constants::nt_per_assembled_chunk / nt_per_packet)
+//
+// A note on timestamps: there are several units of time used in different parts of the CHIME pipeline.
+//
+//   1 fpga count = 2.56e-6 seconds    (approx)
+//   1 intensity sample = fpga_counts_per_sample * (1 fpga count)
+//   1 assembled_chunk = constants::nt_per_assembled_chunk * (1 intensity sample)
+//
+// The 'isample' and 'ichunk' fields of the 'struct assembled_chunk' are simply defined by
+//   isample = (initial fpga count) / fpga_counts_per_sample
+//   ichunk = (initial fpga count) / (fpga_counts_per_sample * constants::nt_per_assembled_chunk)
+//
+// The 'binning' field of the 'struct assembled_chunk' is 1, 2, 4, 8, ... depending on what level
+// of downsampling has been applied (i.e. the location of the assembled_chunk in the telescoping
+// ring buffer).  Note that consecutive chunks src1, src2 with the same binning will satisfy
+// (src2->ichunk == src1->ichunk + binning).
 
 
-struct assembled_chunk : noncopyable {
-    // Stream parameters, specified at construction.
-    //
-    // A better name for nt_per_packet would be 'nt_coarse_graining': it defines the time
-    // resolution of the 'scale' and 'offset' arrays, relative to the 'data' array.  Likewise,
-    // the 'nupfreq' field defines the frequency resolution of scale/offset relative to data.
+class assembled_chunk : noncopyable {
+public:
+    struct initializer {
+	int beam_id = 0;
+	int nupfreq = 0;
+	int nt_per_packet = 0;
+	int fpga_counts_per_sample = 0;
+	int binning = 1;
+	uint64_t ichunk = 0;
+	bool force_reference = false;
+	bool force_fast = false;
+    };
 
+    // Parameters specified at construction.
     const int beam_id = 0;
     const int nupfreq = 0;
     const int nt_per_packet = 0;
-    int fpga_counts_per_sample = 0;
-
-    // More parameters which are constant after construction.
-    const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
-    const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
-    const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
-
-    // How many original samples have been binned into each sample in this chunk.  
-    // Used in the L1 telescoping ring buffer, where binning = 2, 4, 8.
-    int binning = 1;
-
-    // Chunks are indexed by 'ichunk', which differs by 1 in adjacent chunks.
-    //
-    // Reminder: there are several units of time used in different parts of the CHIME backend!
-    //   1 assembled_chunk = constants::nt_per_assembled_chunk * (1 intensity sample)
-    //   1 intensity sample = assembled_chunk::fpga_counts_per_sample * (1 fpga count)
-    //   1 fpga count = 2.56e-6 seconds    (approx)
-    //
-    // Conventions for downsampled chunks: if binning >= 1, then
-    //   ichunk = same as src->ichunk, where src is the first constituent non-downsampled chunk
-    //   isample = same as src->isample, where src is the first constituent non-downsampled chunk
-    //
-    // Note that consecutive chunks src1, src2 with the same binning will satisfy
-    // (src2->ichunk == src1->ichunk + binning).
-
-    uint64_t ichunk = 0;
-    uint64_t isample = 0;   // always equal to ichunk * constants::nt_per_assembled_chunk
-
-    float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
-    float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
-    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
+    const int fpga_counts_per_sample = 0;    // no binning factor applied here
+    const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
+    const uint64_t ichunk = 0;
+    
+    // Derived parameters.
+    const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
+    const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
+    const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
+    const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
+    const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
 
     bool msgpack_bitshuffle = false;
 
-    // Temporary buffers used during downsampling.
-    float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
-    float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
-    int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
-
-    // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
-    uint8_t *memory_slab = nullptr;
-
-    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
+    // Note: you probably don't want to call the assembled_chunk constructor directly!
+    // Instead use the static factory function assembed_chunk::make().
+    assembled_chunk(const initializer &ini_params);
     virtual ~assembled_chunk();
+
+    // The following virtual member functions have default implementations,
+    // which are overridden by the subclass 'fast_assembled_chunk' to be faster
+    // on a CPU with the AVX2 instruction set, if certain conditions are met
+    // (currently nt_per_packet==16 and nupfreq even).
+
+    virtual void add_packet(const intensity_packet &p);
+    virtual void decode(float *intensity, float *weights, int stride) const;
+    virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int stride) const;
+    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
+
+    // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.
+    static std::unique_ptr<assembled_chunk> make(const initializer &ini_params);
+    static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
+
+    // Note: the hdf5 file format has been phased out now..
+    void write_hdf5_file(const std::string &filename);
+    void write_msgpack_file(const std::string &filename);
 
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
@@ -593,62 +618,43 @@ struct assembled_chunk : noncopyable {
     //   (FPGAN)   -> %08i  FPGA-counts size
     std::string format_filename(const std::string &pattern) const;
 
-    // the first fpga-counts sample in this chunk (note no factor of 'binning' here)
-    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
-
-    // the number of fpga-counts in this chunk (note factor of 'binning' here)
-    uint64_t fpgacounts_N() const { return (binning * constants::nt_per_assembled_chunk * fpga_counts_per_sample); }
-
-    // the last fpga-counts sample in this chunk + 1
-    uint64_t fpgacounts_end() const { return fpgacounts_begin() + fpgacounts_N(); }
-
-    // These are virtual so that subclasses can be written with optimized implementations 
-    // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
-    virtual void add_packet(const intensity_packet &p);
-    virtual void decode(float *intensity, float *weights, int stride) const;
-
-    virtual void decode_subset(float *intensity, float *weights,
-                               int t0, int nt, int stride) const;
-
-    // Overwrites the contents of the assembled chunk, with the result of downsampling and
-    // merging the two input chunks.  It's OK if (this==src1), but not OK if (this==src2).
-    //
-    // Virtual, since fast_assembled_chunk subclass overrides with an AVX2 kernel.
-
-    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
-
-    // Alternate downsample() interface.
-    void downsample(const std::shared_ptr<assembled_chunk> &src1, const std::shared_ptr<assembled_chunk> &src2);
-
-    // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
-    // subclass (see below), based on the packet parameters.
-    static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, 
-						 uint64_t ichunk, bool force_reference=false, bool force_fast=false);
-
-    static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
-
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);
 
-    // HDF5 file output
-    void write_hdf5_file(const std::string &filename);
-
-    // msgpack file output
-    void write_msgpack_file(const std::string &filename);
-
     static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet);
+
+    // I wanted to make the following fields protected, but msgpack doesn't like it...
+
+    // Primary buffers.
+    float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
+    float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
+    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
+
+    // Temporary buffers used during downsampling.
+    float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
+    float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
+    int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
+
+protected:
+    // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
+    std::unique_ptr<uint8_t[]> memory_slab;
+
+    void _check_downsample(const assembled_chunk *src1, const assembled_chunk *src2);
+    void _reset_pointers();
 };
 
 
-// For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
-// nupfreq % 2 == 0) we can speed up assembled_chunk::add_packet() and assembled_chunk::decode()
-// using assembly language kernels.
+// If the CPU has the AVX2 instruction set, and for some choices of packet parameters (the precise 
+// criterion is nt_per_packet == 16 and nupfreq % 2 == 0), we can speed up the assembled_chunk
+// member functions using assembly language kernels.
 
-struct fast_assembled_chunk : public assembled_chunk
+class fast_assembled_chunk : public assembled_chunk
 {
-    // Constructor throws exception unless nt_per_packet == 16 and (nupfreq % 2) == 0.
-    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
+public:
+    // Note: you probably don't want to call the assembled_chunk constructor directly!
+    // Instead use the static factory function assembed_chunk::make().
+    fast_assembled_chunk(const assembled_chunk::initializer &ini_params);
 
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
