@@ -42,6 +42,8 @@ fast_assembled_chunk::fast_assembled_chunk(const assembled_chunk::initializer &i
     throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
 }
 
+fast_assembled_chunk::~fast_assembled_chunk() { }
+
 void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 {
     throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
@@ -50,6 +52,11 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
     throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::add_packet() called on a non-AVX2 machine");
+}
+
+void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
+{
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::downsample() called on a non-AVX2 machine");
 }
 
 void test_avx2_kernels(std::mt19937 &rng)
@@ -836,6 +843,12 @@ fast_assembled_chunk::fast_assembled_chunk(const assembled_chunk::initializer &i
 }
 
 
+fast_assembled_chunk::~fast_assembled_chunk()
+{
+    this->_deallocate();
+}
+
+
 // virtual override
 void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 {
@@ -1388,19 +1401,12 @@ void test_avx2_kernels(std::mt19937 &rng)
 
 	// Test 3: Equivalence of assembled_chunk::downsample() and fast_assembled_chunk::downsample().
 
-	assembled_chunk::initializer ini_params_a;
-	ini_params_a.beam_id = beam_id;
-	ini_params_a.nupfreq = nupfreq;
-	ini_params_a.nt_per_packet = nt_per_packet;
-	ini_params_a.fpga_counts_per_sample = fpga_counts_per_sample;
-	ini_params_a.ichunk = ichunk;
+	ini_params.binning = 1;
+	ini_params.ichunk = ichunk;
+	auto chunk_a = make_shared<assembled_chunk> (ini_params);
 
-	assembled_chunk::initializer ini_params_b;
-	ini_params_b = ini_params_a;
-	ini_params_b.ichunk = ichunk + 1;
-
-	auto chunk_a = make_shared<assembled_chunk> (ini_params_a);
-	auto chunk_b = make_shared<assembled_chunk> (ini_params_b);
+	ini_params.ichunk = ichunk + 1;
+	auto chunk_b = make_shared<assembled_chunk> (ini_params);
 
 	chunk0->randomize(rng);
 	chunk1->randomize(rng);

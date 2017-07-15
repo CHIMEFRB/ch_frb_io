@@ -69,11 +69,8 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 2" << endl;
     }
 
-    assembled_chunk::initializer ini_params2;
-    ini_params2 = ini_params;
-    ini_params2.ichunk = ichunk + 1;
-
-    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(ini_params2);
+    ini_params.ichunk = ichunk + 1;
+    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(ini_params);
 
     assembled_chunk* chunk2 = uchunk2.get();
     assembled_chunk* chunk1 = chunk.get();

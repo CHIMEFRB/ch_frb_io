@@ -36,6 +36,7 @@ struct noncopyable
 
 // Defined later in this file
 class assembled_chunk;
+class memory_slab_pool;
 
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
@@ -567,6 +568,11 @@ public:
 	uint64_t ichunk = 0;
 	bool force_reference = false;
 	bool force_fast = false;
+
+	// If a memory slab has been preallocated from a pool, these pointers should be set.
+	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
+	std::shared_ptr<memory_slab_pool> pool;
+	mutable std::unique_ptr<uint8_t[]> slab;
     };
 
     // Parameters specified at construction.
@@ -640,10 +646,14 @@ public:
 
 protected:
     // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
+    std::shared_ptr<memory_slab_pool> memory_pool;
     std::unique_ptr<uint8_t[]> memory_slab;
 
     void _check_downsample(const assembled_chunk *src1, const assembled_chunk *src2);
-    void _reset_pointers();
+
+    // Note: destructors must call _deallocate()!  
+    // Otherwise the memory_slab can't be returned to the pool.
+    void _deallocate();
 };
 
 
@@ -657,6 +667,7 @@ public:
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
     fast_assembled_chunk(const assembled_chunk::initializer &ini_params);
+    virtual ~fast_assembled_chunk();
 
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;

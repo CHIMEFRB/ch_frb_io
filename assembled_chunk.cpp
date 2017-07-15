@@ -63,7 +63,7 @@ struct memory_slab_layout {
     const int ib_ds_data;
     const int ib_ds_mask;
     const int ib_ds_w2;
-    const int chunk_size;
+    const int slab_size;
 
     static int align(int nbytes) { return ((nbytes+63)/64) * 64; }
 
@@ -84,7 +84,7 @@ struct memory_slab_layout {
 	ib_ds_data(align(ib_offsets + nb_offsets)),
 	ib_ds_mask(align(ib_ds_data + nb_ds_data)),
 	ib_ds_w2(align(ib_ds_mask + nb_ds_mask)),
-	chunk_size(align(ib_ds_w2 + nb_ds_w2))
+	slab_size(align(ib_ds_w2 + nb_ds_w2))
     { }
 };
 
@@ -120,29 +120,52 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 
     memory_slab_layout mc(nupfreq, nt_per_packet);
 
-    // To be replaced by a pool of reuseable chunks.
-    // Note: aligned_alloc() zeroes the buffer -- this is important!
-    uint8_t *p = aligned_alloc<uint8_t> (mc.chunk_size);
-    this->memory_slab = unique_ptr<uint8_t[]> (p);
+    if (ini_params.pool) {
+	if (!ini_params.slab)
+	    throw runtime_error("assembled_chunk constructor: 'pool' is a nonempty pointer, but 'slab' is empty");
 
-    this->data = p + mc.ib_data;
-    this->scales = reinterpret_cast<float *> (p + mc.ib_scales);
-    this->offsets = reinterpret_cast<float *> (p + mc.ib_offsets);
-    this->ds_data = reinterpret_cast<float *> (p + mc.ib_ds_data);
-    this->ds_mask = reinterpret_cast<int *> (p + mc.ib_ds_mask);
-    this->ds_w2 = reinterpret_cast<float *> (p + mc.ib_ds_w2);
+	if (ini_params.pool->nbytes_per_slab < mc.slab_size) {
+	    throw runtime_error("assembled_chunk constructor: memory_slab_pool::nbytes_per_slab (=" 
+				+ to_string(ini_params.pool->nbytes_per_slab) 
+				+ ") is less than required slab size (="
+				+ to_string(mc.slab_size) + ")");
+	}
+
+	this->memory_pool = ini_params.pool;
+	this->memory_slab.swap(ini_params.slab);
+    }
+    else {
+	if (ini_params.slab)
+	    throw runtime_error("assembled_chunk constructor: 'pool' is an empty pointer, but 'slab' is nonempty");
+
+	uint8_t *p = aligned_alloc<uint8_t> (mc.slab_size);
+	this->memory_slab = unique_ptr<uint8_t[]> (p);
+    }
+
+    this->data = memory_slab.get() + mc.ib_data;
+    this->scales = reinterpret_cast<float *> (memory_slab.get() + mc.ib_scales);
+    this->offsets = reinterpret_cast<float *> (memory_slab.get() + mc.ib_offsets);
+    this->ds_data = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_data);
+    this->ds_mask = reinterpret_cast<int *> (memory_slab.get() + mc.ib_ds_mask);
+    this->ds_w2 = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_w2);
 }
 
 
 assembled_chunk::~assembled_chunk()
 {
-    // Shouldn't be necessary, but helps guard against accidental pointer reuse after free().
-    this->_reset_pointers();
+    this->_deallocate();
 }
 
 
-void assembled_chunk::_reset_pointers()
+// Helper function for destructors.
+void assembled_chunk::_deallocate()
 {
+    if (memory_pool) {
+	memory_pool->put_slab(memory_slab);
+	memory_pool = shared_ptr<memory_slab_pool> ();
+    }
+    
+    // Shouldn't be necessary, but guards against accidental pointer reuse after free().
     this->scales = nullptr;
     this->offsets = nullptr;
     this->data = nullptr;
@@ -161,7 +184,7 @@ ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet)
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nt_per_packet' argument");
 
     memory_slab_layout mc(nupfreq, nt_per_packet);
-    return mc.chunk_size;
+    return mc.slab_size;
 }
 
 
