@@ -22,8 +22,12 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     if (gb > 64.0)
 	throw runtime_error("ch_frb_io: memory_slab_pool constructor: attempt to allocate > 64 GB, this is assumed unintentional");
 
-    if (noisy)
-	cout << "ch_frb_io: allocating " << gb << " GB memory pool" << endl;
+    if (noisy) {
+	cout << "ch_frb_io: allocating " << gb << " GB memory pool";
+	if (allocation_cores.size() > 0)
+	    cout << ", cores=" << vstr(allocation_cores);
+	cout << endl;
+    }
 
     std::thread t(std::bind(&memory_slab_pool::allocate, this, allocation_cores));
     t.join();
