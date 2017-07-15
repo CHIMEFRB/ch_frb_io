@@ -73,7 +73,7 @@ void memory_slab_pool::put_slab(unique_ptr<uint8_t[]> &p)
 
     unique_lock<std::mutex> ulock(this->lock);
 
-    if (curr_size >= nslabs)
+    if (curr_size >= (int)slabs.size())
 	throw runtime_error("ch_frb_io: internal error: buffer is full in memory_slab_pool::put_slab()");
     if (slabs[curr_size])
 	throw runtime_error("ch_frb_io: internal error: unexpected null pointer 'slabs[curr_size]' in memory_slab_pool::put_slab()");
@@ -90,6 +90,7 @@ void memory_slab_pool::allocate(const vector<int> &allocation_cores)
     pin_thread_to_cores(allocation_cores);
 
     this->slabs.resize(nslabs);
+    this->curr_size = nslabs;
 
     for (ssize_t i = 0; i < nslabs; i++) {
 	uint8_t *p = aligned_alloc<uint8_t> (nbytes_per_slab);
