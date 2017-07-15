@@ -540,7 +540,7 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 }
 
 
-std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk, int binning)
+std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk, int binning, bool zero)
 {
     struct assembled_chunk::initializer chunk_params;
 
@@ -552,6 +552,14 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     chunk_params.force_fast = this->ini_params.force_fast_kernels;
     chunk_params.binning = binning;
     chunk_params.ichunk = ichunk;
+
+    if (ini_params.memory_pool) {
+	chunk_params.pool = ini_params.memory_pool;
+	chunk_params.slab = ini_params.memory_pool->get_slab(zero);
+
+	if (!chunk_params.slab)
+	    throw runtime_error("ch_frb_io: assembled chunk allocation failed!  FIXME: currently treated as an error, should add code to recover gracefully");
+    }
 
     return assembled_chunk::make(chunk_params);
 }

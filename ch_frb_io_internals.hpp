@@ -323,8 +323,10 @@ protected:
     // Warning: only safe to call from assembler thread.
     void _check_invariants();
     
-    // Helper function: allocates new assembled chunk
-    std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk, int binning);
+    // Helper function: allocates new assembled chunk (from a memory_slab_pool, if one has been
+    // specified in ini_params::memory_pool).  For now, an exception is thrown if the allocation
+    // fails.  (FIXME: add code to recover gracefully.)
+    std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk, int binning, bool zero=true);
 
     // The "active" chunks are in the process of being filled with data as packets arrive.
     // Currently we take the active window to be two assembled_chunks long, but this could be generalized.

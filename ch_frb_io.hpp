@@ -280,6 +280,7 @@ public:
 
     struct initializer {
 	std::vector<int> beam_ids;
+	std::shared_ptr<memory_slab_pool> memory_pool;
 
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
