@@ -686,7 +686,6 @@ public:
 class memory_slab_pool {
 public:
     memory_slab_pool(ssize_t nbytes_per_slab, ssize_t nslabs, const std::vector<int> &allocation_cores, bool noisy=true);
-    ~memory_slab_pool();
 
     // Returns a new slab from the pool.
     //
