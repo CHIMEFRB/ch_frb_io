@@ -9,9 +9,10 @@ namespace ch_frb_io {
 
 
 
-memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, const vector<int> &allocation_cores, bool noisy) :
+memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, const vector<int> &allocation_cores, int verbosity_) :
     nbytes_per_slab(nbytes_per_slab_),
-    nslabs(nslabs_)
+    nslabs(nslabs_),
+    verbosity(verbosity_)
 {
     double gb = 1.0e-9 * double(nbytes_per_slab) * double(nslabs);
 
@@ -22,7 +23,7 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     if (gb > 64.0)
 	throw runtime_error("ch_frb_io: memory_slab_pool constructor: attempt to allocate > 64 GB, this is assumed unintentional");
 
-    if (noisy) {
+    if (verbosity >= 1) {
 	cout << "ch_frb_io: allocating " << gb << " GB memory pool";
 	if (allocation_cores.size() > 0)
 	    cout << ", cores=" << vstr(allocation_cores);
@@ -32,31 +33,38 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     std::thread t(std::bind(&memory_slab_pool::allocate, this, allocation_cores));
     t.join();
 
-    if (noisy)
+    if (verbosity >= 1)
 	cout << "ch_frb_io:" << gb << " GB memory pool allocated" << endl;
 }
 
 
 unique_ptr<uint8_t[]> memory_slab_pool::get_slab(bool zero, bool wait)
 {
+    int loc_size = 0;
     unique_ptr<uint8_t[]> ret;
     unique_lock<std::mutex> ulock(this->lock);
 
     for (;;) {
 	if (curr_size > 0) {
 	    ret.swap(slabs[curr_size-1]);
-	    curr_size--;
+	    loc_size = --curr_size;
 	    break;
 	}
 
-	if (!wait)
+	if (!wait) {
+	    ulock.unlock();
+	    if (verbosity >= 2)
+		cout << "ch_frb_io::memory_slab_pool::get_slab() FAILED" << endl;
 	    return ret;
+	}
 
 	this->cv.wait(ulock);
     }
 
     ulock.unlock();
 
+    if (verbosity >= 2)
+       cout << "ch_frb_io::memory_slab_pool::get_slab(): " << loc_size << "/" << nslabs << endl;
     if (!ret)
 	throw runtime_error("ch_frb_io: internal error: unexpected null pointer 'ret' in memory_slab_pool::get_slab()");
     if (zero)
@@ -79,8 +87,13 @@ void memory_slab_pool::put_slab(unique_ptr<uint8_t[]> &p)
 	throw runtime_error("ch_frb_io: internal error: unexpected null pointer 'slabs[curr_size]' in memory_slab_pool::put_slab()");
     
     slabs[curr_size].swap(p);
-    curr_size++;
+    int loc_size = ++curr_size;
+
     cv.notify_all();
+    ulock.unlock();
+
+    if (verbosity >= 2)
+	cout << "ch_frb_io::memory_slab_pool::put_slab(): " << loc_size << "/" << nslabs << endl;
 }
 
 

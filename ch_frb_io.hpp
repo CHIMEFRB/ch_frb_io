@@ -685,7 +685,11 @@ public:
 
 class memory_slab_pool {
 public:
-    memory_slab_pool(ssize_t nbytes_per_slab, ssize_t nslabs, const std::vector<int> &allocation_cores, bool noisy=true);
+    // The 'verbosity' parameter has the following meaning:
+    //   0 = ninja-quiet
+    //   1 = a little output during initialization
+    //   2 = debug trace of all allocations/deallocations
+    memory_slab_pool(ssize_t nbytes_per_slab, ssize_t nslabs, const std::vector<int> &allocation_cores, int verbosity=1);
 
     // Returns a new slab from the pool.
     //
@@ -702,6 +706,7 @@ public:
 
     const ssize_t nbytes_per_slab;
     const ssize_t nslabs;
+    const int verbosity;
 
 protected:
     std::mutex lock;
