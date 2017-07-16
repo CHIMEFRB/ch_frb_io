@@ -242,8 +242,7 @@ struct udp_packet_ringbuf : noncopyable {
 
 class assembled_chunk_ringbuf : noncopyable {
 public:
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int nupfreq,
-			    int nt_per_packet, uint64_t fpga_counts_per_sample, uint64_t fpga_count0);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id);
 
     ~assembled_chunk_ringbuf();
 
@@ -308,13 +307,12 @@ public:
 
 protected:
     const intensity_network_stream::initializer ini_params;
-
     const int beam_id;
-    const int nupfreq;
-    const int nt_per_packet;
-    const uint64_t fpga_counts_per_sample;
 
-    // Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
+    // Set to 'true' in the first call to put_unassembled_packet().
+    bool first_packet_received = false;
+
+    // Helper function called in assembler thread, to add a new assembled_chunk to the ring buffer.
     // Resets 'chunk' to a null pointer.
     // Warning: only safe to call from assembler thread.
     bool _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);

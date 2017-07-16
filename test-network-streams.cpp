@@ -568,7 +568,7 @@ int main(int argc, char **argv)
 	assert(counts[ev_type::packet_bad] == 0);
 	assert(counts[ev_type::packet_dropped] == 0);
 	assert(counts[ev_type::beam_id_mismatch] == 0);
-	assert(counts[ev_type::first_packet_mismatch] == 0);
+	assert(counts[ev_type::stream_mismatch] == 0);
 	assert(counts[ev_type::assembler_miss] == 0);
 	assert(counts[ev_type::assembled_chunk_dropped] == 0);
 

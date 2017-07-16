@@ -9,24 +9,12 @@ namespace ch_frb_io {
 #endif
 
 
-assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int nupfreq_,
-						 int nt_per_packet_, uint64_t fpga_counts_per_sample_, uint64_t fpga_count0) :
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_) :
     ini_params(ini_params_),
-    beam_id(beam_id_),
-    nupfreq(nupfreq_),
-    nt_per_packet(nt_per_packet_),
-    fpga_counts_per_sample(fpga_counts_per_sample_)
+    beam_id(beam_id_)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
-    if ((nupfreq < 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("ch_frb_io: bad nupfreq value passed to assembled_chunk_ringbuf constructor");
-    if ((nt_per_packet <= 0) || (constants::nt_per_assembled_chunk % nt_per_packet != 0))
-	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::nt_per_packet must be a divisor of constants::nt_per_assembled_chunk");
-    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("ch_frb_io: bad fpga_counts_per_sample value passed to assembled_chunk_ringbuf constructor");
-    if (fpga_count0 % fpga_counts_per_sample != 0)
-	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: fpga_count0 was not a multiple of fpga_counts_per_sample");
     if (ini_params.assembled_ringbuf_capacity <= 0)
 	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: assembled_ringbuf_capacity must be > 0");
 
@@ -39,12 +27,6 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     if (ini_params.force_fast_kernels)
 	throw runtime_error("ch_frb_io: the 'force_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
-
-    uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
-    uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
-
-    this->active_chunk0 = this->_make_assembled_chunk(ichunk, 1);
-    this->active_chunk1 = this->_make_assembled_chunk(ichunk+1, 1);
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
@@ -205,12 +187,18 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
+    uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
+    uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
+
+    if (!first_packet_received) {
+	this->active_chunk0 = this->_make_assembled_chunk(packet_ichunk, 1);
+	this->active_chunk1 = this->_make_assembled_chunk(packet_ichunk+1, 1);
+	this->first_packet_received = true;
+    }
+
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
     if (_unlikely(!active_chunk0 || !active_chunk1))
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
-
-    uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
-    uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
     if (packet_ichunk >= active_chunk0->ichunk + 2) {
 	//
@@ -429,9 +417,9 @@ void assembled_chunk_ringbuf::_check_invariants()
 	    // Nonempty entries...
 	    ch_assert(chunk);
 	    ch_assert(chunk->beam_id == this->beam_id);
-	    ch_assert(chunk->nupfreq == this->nupfreq);
-	    ch_assert(chunk->nt_per_packet == this->nt_per_packet);
-	    ch_assert(chunk->fpga_counts_per_sample == this->fpga_counts_per_sample);
+	    ch_assert(chunk->nupfreq == this->ini_params.nupfreq);
+	    ch_assert(chunk->nt_per_packet == this->ini_params.nt_per_packet);
+	    ch_assert(chunk->fpga_counts_per_sample == this->ini_params.fpga_counts_per_sample);
 	    ch_assert(chunk->binning == (1 << ids));
 	    ch_assert(chunk->isample == chunk->ichunk * constants::nt_per_assembled_chunk);
 
@@ -545,9 +533,9 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     struct assembled_chunk::initializer chunk_params;
 
     chunk_params.beam_id = this->beam_id;
-    chunk_params.nupfreq = this->nupfreq;
-    chunk_params.nt_per_packet = this->nt_per_packet;
-    chunk_params.fpga_counts_per_sample = this->fpga_counts_per_sample;
+    chunk_params.nupfreq = this->ini_params.nupfreq;
+    chunk_params.nt_per_packet = this->ini_params.nt_per_packet;
+    chunk_params.fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     chunk_params.force_reference = this->ini_params.force_reference_kernels;
     chunk_params.force_fast = this->ini_params.force_fast_kernels;
     chunk_params.binning = binning;

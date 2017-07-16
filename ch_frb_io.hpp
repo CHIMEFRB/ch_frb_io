@@ -248,6 +248,10 @@ struct intensity_hdf5_ofile {
 // packets.  The stream presents the incoming data to the "outside world" as a per-beam sequence 
 // of regular arrays which are obtained by calling get_assembled_chunk().
 //
+// Reminder: normal startup sequence works as follows.
+//
+//   - network thread is spawned and waits for 
+//
 // Reminder: normal shutdown sequence works as follows.
 //  
 //   - in network thread, end-of-stream packet is received (in intensity_network_stream::_network_thread_body())
@@ -282,6 +286,10 @@ public:
 	std::vector<int> beam_ids;
 	std::shared_ptr<memory_slab_pool> memory_pool;
 
+	int nupfreq = 0;
+	int nt_per_packet = 0;
+	int fpga_counts_per_sample = 384;
+
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
@@ -290,7 +298,7 @@ public:
 	bool force_fast_kernels = false;
 	bool emit_warning_on_buffer_drop = true;
 	bool throw_exception_on_beam_id_mismatch = true;
-	bool throw_exception_on_first_packet_mismatch = true;
+	bool throw_exception_on_packet_mismatch = true;
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
@@ -339,7 +347,7 @@ public:
 	packet_dropped = 4,            // network thread will drop packets if assembler thread runs slow and ring buffer overfills
 	packet_end_of_stream = 5,
 	beam_id_mismatch = 6,          // beam id in packet doesn't match any element of initializer::beam_ids
-	first_packet_mismatch = 7,     // stream params (nupfreq, nt_per_packet, fpga_counts_per_sample) don't match first packet received
+	stream_mismatch = 7,           // stream params (nupfreq, nt_per_packet, fpga_counts_per_sample) don't match values sepcified in constructor
 	assembler_hit = 8,
 	assembler_miss = 9,
 	assembled_chunk_dropped = 10,  // assembler thread will drop assembled_chunks if processing thread runs slow
@@ -363,11 +371,7 @@ public:
     // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
 
-    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index,
-                                                         bool wait=true);
-
-    // Will block until first packet is received, or stream ends.  Returns true if packet was received.
-    bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
+    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index, bool wait=true);
     
     // Can be called at any time, from any thread.  Note that the event counts returned by get_event_counts()
     // may slightly lag the real-time event counts (this behavior derives from wanting to avoid acquiring a
@@ -411,24 +415,7 @@ public:
 protected:
     // Constant after construction, so not protected by lock
     const initializer ini_params;
-    const int nassemblers = 0;
-
-    // This is initialized by the assembler thread before it sets 'first_packet_received' flag.
-    // Therefore, other threads can access it without a lock, but should wait for this flag to be set (which does
-    // require a lock).  There is a corner case where the vector is still length-zero after the flag gets set.
-    // This happens if the stream was asynchronously cancelled before receiving the first packet.
-
     std::vector<std::unique_ptr<assembled_chunk_ringbuf>> assemblers;
-    
-    // These fields are initialized from the first packet received ("fp_" stands for "first packet").
-    // They are initialized by the assembler thread, which then advances the state model to "first_packet_received".
-    // They are not protected by a lock!  This is OK as long as non-assembler threads access them read-only, and
-    // only after checking the first_packet_received flag (which does require a lock).
-
-    uint16_t fp_nupfreq = 0;
-    uint16_t fp_nt_per_packet = 0;
-    uint16_t fp_fpga_counts_per_sample = 0;
-    uint64_t fp_fpga_count = 0;
 
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
@@ -481,8 +468,6 @@ protected:
     pthread_cond_t cond_state_changed;       // threads wait here for state to change
 
     bool stream_started = false;             // set asynchonously by calling start_stream()
-    bool first_packet_received = false;      // set by network thread
-    bool assemblers_initialized = false;     // set by assembler thread
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
     bool threads_joined = false;             // set when both threads (network + assembler) are joined
@@ -492,15 +477,9 @@ protected:
     std::vector<int64_t> cumulative_event_counts;
     std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
-    std::string stream_filename;
-
-    std::vector<std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
-
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
-
-    void _wait_for_assemblers_initialized(bool prelocked=false);
 
     void _open_socket();
     void _network_flush_packets();
