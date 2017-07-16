@@ -27,7 +27,7 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
 	cout << "ch_frb_io: allocating " << gb << " GB memory pool";
 	if (allocation_cores.size() > 0)
 	    cout << ", cores=" << vstr(allocation_cores);
-	cout << endl;
+	cout << ", this may take a few seconds..." << endl;
     }
 
     std::thread t(std::bind(&memory_slab_pool::allocate, this, allocation_cores));
