@@ -14,7 +14,7 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     nslabs(nslabs_),
     verbosity(verbosity_)
 {
-    double gb = 1.0e-9 * double(nbytes_per_slab) * double(nslabs);
+    double gb = pow(2.,-30.) * double(nbytes_per_slab) * double(nslabs);
 
     if (nbytes_per_slab <= 0)
 	throw runtime_error("ch_frb_io: memory_slab_pool constructor expects nbytes_per_slab > 0");
@@ -34,7 +34,7 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     t.join();
 
     if (verbosity >= 1)
-	cout << "ch_frb_io:" << gb << " GB memory pool allocated" << endl;
+	cout << "ch_frb_io: " << gb << " GB memory pool allocated" << endl;
 }
 
 
