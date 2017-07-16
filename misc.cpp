@@ -15,7 +15,7 @@ void pin_thread_to_cores(const vector<int> &core_list)
 	return;
 
 #ifdef __APPLE__
-    cerr << "warning: pinning threads to cores is not implemented in osx\n";
+    cout << "warning: pinning threads to cores is not implemented in osx" << endl;
 #else
     int hwcores = std::thread::hardware_concurrency();
     pthread_t thread = pthread_self();

@@ -510,7 +510,7 @@ void intensity_network_stream::network_thread_main() {
     try {
 	_network_thread_body();
     } catch (exception &e) {
-	cerr << e.what() << "\n";
+	cout << e.what() << endl;
 	_network_thread_exit();
 	throw;
     }
@@ -537,7 +537,7 @@ void intensity_network_stream::_network_thread_body()
 
     // Start listening on socket 
 
-    string listening_msg = "ch_frb_io: listening for packets (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
+    string listening_msg = "ch_frb_io: listening for packets (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")";
     string receiving_msg = "ch_frb_io: receiving packets! (ip_addr=" + ini_params.ipaddr + ", udp_port=" + to_string(ini_params.udp_port) + ")\n";
 
     struct sockaddr_in server_address;
@@ -553,7 +553,7 @@ void intensity_network_stream::_network_thread_body()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed (" + ini_params.ipaddr + ":" + to_string(ini_params.udp_port) + "): " + strerror(errno)));
 
-    cerr << listening_msg;
+    cout << listening_msg << endl;
 
     // Main packet loop
 
@@ -666,7 +666,7 @@ void intensity_network_stream::_network_thread_body()
 	    pthread_cond_broadcast(&this->cond_state_changed);
 	    pthread_mutex_unlock(&this->state_lock);
 
-	    cerr << receiving_msg;
+	    cout << receiving_msg;
 	}
 
 	// The incoming_packet_list is timestamped with the arrival time of its first packet.
@@ -731,7 +731,7 @@ void intensity_network_stream::_put_unassembled_packets()
 	network_thread_event_subcounts[event_type::packet_dropped] += npackets;
 
 	if (ini_params.emit_warning_on_buffer_drop)
-	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
+	    cout << "ch_frb_io: assembler thread crashed or is running slow, dropping packets" << endl;
 	if (ini_params.throw_exception_on_buffer_drop)
 	    throw runtime_error("ch_frb_io: unassembled packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
     }
@@ -753,7 +753,7 @@ void intensity_network_stream::assembler_thread_main() {
     try {
 	_assembler_thread_body();
     } catch (exception &e) {
-	cerr << e.what() << "\n";
+	cout << e.what() << endl;
 	_assembler_thread_exit();
 	throw;
     }
@@ -986,9 +986,9 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    assembler hits: " << counts[event_type::assembler_hit] << "\n"
        << "    assembler misses: " << counts[event_type::assembler_miss] << "\n"
        << "    assembled chunks dropped: " << counts[event_type::assembled_chunk_dropped] << "\n"
-       << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
+       << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued];
 
-    cerr << ss.str().c_str();
+    cout << ss.str().c_str() << endl;
 #endif
 }
 

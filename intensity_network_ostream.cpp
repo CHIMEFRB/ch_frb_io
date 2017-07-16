@@ -305,7 +305,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 
     // If we get here, then packet list was dropped!
     if (ini_params.emit_warning_on_buffer_drop)
-	cerr << "ch_frb_io: network write thread crashed or is running slow, dropping packets\n";
+	cout << "ch_frb_io: network write thread crashed or is running slow, dropping packets" << endl;
     if (ini_params.throw_exception_on_buffer_drop)
 	throw runtime_error("ch_frb_io: packets were dropped and output stream was constructed with 'throw_exception_on_buffer_drop' flag");
 
@@ -354,7 +354,7 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
     try {
 	stream->_network_thread_body();
     } catch (exception &e) {
-	cerr << e.what() << endl;
+	cout << e.what() << endl;
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
@@ -499,7 +499,7 @@ void intensity_network_ostream::_send_end_of_stream_packets()
 	// the receiving socket has been closed.
 
 	if (ipacket == 0)
-	    cerr << "warning: end-of-stream packets failed to send\n";
+	    cout << "warning: end-of-stream packets failed to send" << endl;
 
 	break;
     }

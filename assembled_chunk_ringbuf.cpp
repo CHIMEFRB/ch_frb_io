@@ -388,7 +388,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     }
 
     if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
-	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
+	cout << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk" << endl;
     if (ini_params.throw_exception_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
 
