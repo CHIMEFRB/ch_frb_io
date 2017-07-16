@@ -38,9 +38,18 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
 }
 
 
+memory_slab_pool::~memory_slab_pool()
+{
+    if (verbosity >= 1) {
+	cout << "ch_frb_io: memory_slab_pool size_on_exit=" << curr_size << "/" << nslabs
+	     <<", low_water_mark=" << low_water_mark << "/" << nslabs << endl;
+    }
+}
+
+
 unique_ptr<uint8_t[]> memory_slab_pool::get_slab(bool zero, bool wait)
 {
-    int loc_size = 0;
+    ssize_t loc_size = 0;
     unique_ptr<uint8_t[]> ret;
     unique_lock<std::mutex> ulock(this->lock);
 
@@ -48,6 +57,7 @@ unique_ptr<uint8_t[]> memory_slab_pool::get_slab(bool zero, bool wait)
 	if (curr_size > 0) {
 	    ret.swap(slabs[curr_size-1]);
 	    loc_size = --curr_size;
+	    low_water_mark = min(low_water_mark, loc_size);
 	    break;
 	}
 
@@ -87,7 +97,7 @@ void memory_slab_pool::put_slab(unique_ptr<uint8_t[]> &p)
 	throw runtime_error("ch_frb_io: internal error: unexpected null pointer 'slabs[curr_size]' in memory_slab_pool::put_slab()");
     
     slabs[curr_size].swap(p);
-    int loc_size = ++curr_size;
+    ssize_t loc_size = ++curr_size;
 
     cv.notify_all();
     ulock.unlock();
@@ -104,6 +114,7 @@ void memory_slab_pool::allocate(const vector<int> &allocation_cores)
 
     this->slabs.resize(nslabs);
     this->curr_size = nslabs;
+    this->low_water_mark = nslabs;
 
     for (ssize_t i = 0; i < nslabs; i++) {
 	uint8_t *p = aligned_alloc<uint8_t> (nbytes_per_slab);

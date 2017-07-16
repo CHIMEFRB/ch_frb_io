@@ -690,6 +690,7 @@ public:
     //   1 = a little output during initialization
     //   2 = debug trace of all allocations/deallocations
     memory_slab_pool(ssize_t nbytes_per_slab, ssize_t nslabs, const std::vector<int> &allocation_cores, int verbosity=1);
+    ~memory_slab_pool();
 
     // Returns a new slab from the pool.
     //
@@ -712,8 +713,9 @@ protected:
     std::mutex lock;
     std::condition_variable cv;
 
-    ssize_t curr_size = 0;
     std::vector<std::unique_ptr<uint8_t[]>> slabs;
+    ssize_t curr_size = 0;
+    ssize_t low_water_mark = 0;
 
     // Called by constructor, in separate thread.
     void allocate(const std::vector<int> &allocation_cores);
