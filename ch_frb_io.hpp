@@ -248,10 +248,6 @@ struct intensity_hdf5_ofile {
 // packets.  The stream presents the incoming data to the "outside world" as a per-beam sequence 
 // of regular arrays which are obtained by calling get_assembled_chunk().
 //
-// Reminder: normal startup sequence works as follows.
-//
-//   - network thread is spawned and waits for 
-//
 // Reminder: normal shutdown sequence works as follows.
 //  
 //   - in network thread, end-of-stream packet is received (in intensity_network_stream::_network_thread_body())
@@ -354,6 +350,8 @@ public:
 	assembled_chunk_queued = 11,
 	num_types = 12                 // must be last
     };
+
+    const initializer ini_params;
     
     // It's convenient to initialize intensity_network_streams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns network and assembler threads,
@@ -376,8 +374,6 @@ public:
     // Can be called at any time, from any thread.  Note that the event counts returned by get_event_counts()
     // may slightly lag the real-time event counts (this behavior derives from wanting to avoid acquiring a
     // lock in every iteration of the packet read loop).
-
-    initializer get_initializer();
     std::vector<int64_t> get_event_counts();
 
     std::unordered_map<std::string, uint64_t> get_perhost_packets();
@@ -414,7 +410,6 @@ public:
 
 protected:
     // Constant after construction, so not protected by lock
-    const initializer ini_params;
     std::vector<std::unique_ptr<assembled_chunk_ringbuf>> assemblers;
 
     // Used to exchange data between the network and assembler threads

@@ -301,12 +301,6 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
 }
 
 
-intensity_network_stream::initializer intensity_network_stream::get_initializer()
-{
-    return this->ini_params;
-}
-
-
 vector<int64_t> intensity_network_stream::get_event_counts()
 {
     vector<int64_t> ret(event_type::num_types, 0);
