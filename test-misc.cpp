@@ -65,6 +65,7 @@ static void test_encode_decode(std::mt19937 &rng)
 	ini_params.nt_per_packet = nt_per_packet;
 	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 	ini_params.wt_cutoff = wt_cutoff;
+	ini_params.target_gbps = 1.0;  // dummy
 
 	// Note: intensity_network_ostream::make() initializes some things we don't need 
 	// (e.g. spawns network thread) but that's OK.
