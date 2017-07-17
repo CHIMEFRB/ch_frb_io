@@ -1429,7 +1429,8 @@ void test_avx2_kernels(std::mt19937 &rng)
 		double eps_o = fabs(off0 - off1) / (fabs(sca0) + fabs(sca1));   // 'sca' denominator is intentional here
 		double eps_s = fabs(sca0 - sca1) / (fabs(sca0) + fabs(sca1));
 		
-		if ((eps_o < 1.0e-4) && (eps_s < 1.0e-4))
+		// Cutoffs here are empirical.
+		if ((eps_o < 2.0e-4) && (eps_s < 2.0e-4))
 		    continue;
 
 		cerr << "\n" << "test_avx2_kernels: downsample test failed: offsets/scales are inconsistent,"
