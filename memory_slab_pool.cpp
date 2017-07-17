@@ -33,6 +33,8 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
     std::thread t(std::bind(&memory_slab_pool::allocate, this, allocation_cores));
     t.join();
 
+    if (curr_size != nslabs)
+	throw runtime_error("ch_frb_io::memory_slab_pool: something went wrong during allocation");
     if (verbosity >= 1)
 	cout << "ch_frb_io: " << gb << " GB memory pool allocated" << endl;
 }
@@ -113,13 +115,14 @@ void memory_slab_pool::allocate(const vector<int> &allocation_cores)
     pin_thread_to_cores(allocation_cores);
 
     this->slabs.resize(nslabs);
-    this->curr_size = nslabs;
-    this->low_water_mark = nslabs;
 
     for (ssize_t i = 0; i < nslabs; i++) {
 	uint8_t *p = aligned_alloc<uint8_t> (nbytes_per_slab);
 	this->slabs[i] = unique_ptr<uint8_t[]> (p);
     }
+
+    this->curr_size = nslabs;
+    this->low_water_mark = nslabs;
 }
 
 
