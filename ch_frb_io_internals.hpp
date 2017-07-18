@@ -436,6 +436,22 @@ inline int randint(std::mt19937 &rng, int lo, int hi)
     return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
 }
 
+// Returns true if string 's1' is a prefix of 's2'.
+inline bool is_prefix(const std::string &s1, const std::string &s2)
+{
+    const char *p1 = s1.c_str();
+    const char *p2 = s2.c_str();
+
+    for(;;) {
+	if (*p1 == 0)
+            return true;
+	if (*p1 != *p2)
+	    return false;
+	p1++;
+	p2++;
+    }
+}
+
 inline bool file_exists(const std::string &filename)
 {
     struct stat s;
