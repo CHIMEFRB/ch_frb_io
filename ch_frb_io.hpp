@@ -696,6 +696,116 @@ protected:
 };
 
 
+// -------------------------------------------------------------------------------------------------
+//
+// output_device and helper classes.
+
+
+// write_chunk_request: mini-struct consisting of a (chunk, filename, priority) triple.
+//
+// If the write_callback() virtual function is overridden, it will be called when the write
+// request completes, either successfully or unsuccessfully.  Note that the callback is made
+// from the i/o thread!
+
+struct write_chunk_request {
+    std::shared_ptr<ch_frb_io::assembled_chunk> chunk;
+    std::string filename;
+    int priority = 0;
+
+    virtual void write_callback(const std::string &status, const std::string &error_message) { }
+    virtual ~write_chunk_request() { }
+
+    // used internally by output_device -- don't touch!
+    std::shared_ptr<write_chunk_request> next;
+};
+
+
+// output_device: corresponds to one "device" where assembled_chunks may be written.
+//
+// An output_device is identified by a device_name string, which is a directory such
+// as '/ssd0' or /nfs1'.  When the output_device is created (with output_device::make(),
+// an i/o thread is automatically spawned, which runs in the background.
+
+class output_device : noncopyable {
+public:
+    struct initializer {
+	std::string device_name;       // if empty string, this output_device will write all chunks
+	std::string io_thread_name;    // if empty string, a default io_thread_name will be used
+	std::vector<int> io_thread_allowed_cores;  // if empty vector, the io thread will be unpinned
+
+	// Possible 'verbosity' values:
+	//   0 = log nothing
+	//   1 = log unsuccessful writes
+	//   2 = log i/o thread startup/shutdown
+	//   3 = verbose trace of all write_requests
+	int verbosity = 1;
+    };
+
+    const initializer ini_params;
+
+    // This factory function should be used to create a new output_device.
+    // Returns a shared_ptr to a new output_device, and spawns a thread which
+    // runs in the background, and also holds a shared_ptr.
+    static std::shared_ptr<output_device> make(const initializer &ini_params);
+
+    // Can be called by either the assembler thread, or an RPC thread.
+    void enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    
+    // If 'wait' is true, then end_stream() blocks until pending writes are complete.
+    // If 'wait' is false, then end_stream() cancels all pending writes.
+    void end_stream(bool wait);
+
+    // Blocks until i/o thread exits.  Call end_stream() first!
+    void join_thread();
+
+protected:
+    std::thread output_thread;
+
+    // State model.
+    bool end_stream_called = false;
+    bool join_thread_called = false;
+    bool thread_joined = false;
+
+    // The queue of write requests to be run by the output thread.
+    // Note that we currently use an O(N) data structure here -- could be improved to O(log N) but nontrivial!
+    std::vector<std::shared_ptr<write_chunk_request>> _write_reqs;
+
+    // The state model and request queue are protected by this lock and condition variable.
+    std::mutex _lock;
+    std::condition_variable _cond;
+
+    // Constructor is protected -- use output_device::make() instead!
+    output_device(const initializer &ini_params);
+
+    // This is "main()" for the i/o thread.
+    void io_thread_main();
+
+    // Helper function called by output thread.
+    // Blocks until a write request is available; returns highest-priority request.
+    std::shared_ptr<write_chunk_request> pop_write_request();
+};
+
+
+// output_device_pool: this little helper class is a wrapper around a list of
+// output_devices with different device_names.
+
+class output_device_pool {
+public:
+    // Note: length-zero vector is OK!
+    output_device_pool(const std::vector<std::shared_ptr<output_device>> &streams);
+
+    // Sends the write request to the appropriate output_device (based on filename).
+    void enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    
+    // Loops over output_devices, and calls either end_stream() or join_thread().
+    void end_streams(bool wait);
+    void join_threads();
+
+protected:
+    std::vector<std::shared_ptr<output_device>> streams;
+    std::vector<std::string> device_names;
+};
+
 
 // -------------------------------------------------------------------------------------------------
 //

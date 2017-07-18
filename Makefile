@@ -43,6 +43,8 @@ OFILES = assembled_chunk.o \
 	lexical_cast.o \
 	memory_slab_pool.o \
 	misc.o \
+	output_device.o \
+	output_device_pool.o \
 	udp_packet_list.o \
 	udp_packet_ringbuf.o \
 	bitshuffle/bitshuffle.o \
