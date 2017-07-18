@@ -92,11 +92,13 @@ void output_device::io_thread_main()
 void output_device::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
 {
     if (!req)
-	throw runtime_error("internal error: null req pointer in enqueue_write_request");
+	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req is null");
     if (!req->chunk)
-	throw runtime_error("internal error: null req->chunk pointer in enqueue_write_request");
+	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->chunk is null");
     if (req->next)
-	throw runtime_error("internal error: exepected null req->next pointer in enqueue_write_request!");
+	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->next is non-null");
+    if (!is_prefix(this->ini_params.device_name, req->filename))
+	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename, device_name mismatch");
 
     unique_lock<std::mutex> ulock(_lock);
 
