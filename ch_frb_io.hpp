@@ -591,6 +591,13 @@ public:
     void write_hdf5_file(const std::string &filename);
     void write_msgpack_file(const std::string &filename);
 
+    // A shared pointer to a buffer that can be used for temporary storage
+    // during msgpack compression.  There is no locking of this buffer, so it
+    // is responsibility of the user to ensure that assembled_chunks that
+    // share a buffer never try to use it simultaneously.
+    // Should be at least max_compressed_size().
+    std::shared_ptr<uint8_t> compression_buffer;
+    
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
     //   (BEAM)    -> %04i beam_id
@@ -644,10 +651,16 @@ public:
     fast_assembled_chunk(const assembled_chunk::initializer &ini_params);
     virtual ~fast_assembled_chunk();
 
+<<<<<<< HEAD
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
+=======
+    // How big can the compressed data become?
+    size_t max_compressed_size();
+    
+>>>>>>> msgpack-nomalloc
 };
 
 
