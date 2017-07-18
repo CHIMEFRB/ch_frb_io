@@ -369,6 +369,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
 	wreq->priority = loc_stream_priority;
 	wreq->chunk = pushlist[0];	
+
+	// return value from enqueue_write_request() is ignored.
 	output_devices.enqueue_write_request(wreq);
     }
 

@@ -33,19 +33,19 @@ output_device_pool::output_device_pool(const vector<shared_ptr<output_device>> &
 }
 
 
-void output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
+bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
 {
     for (unsigned int i = 0; i < device_names.size(); i++) {
 	if (is_prefix(device_names[i], req->filename)) {
 	    streams[i]->enqueue_write_request(req);
-	    return;
+	    return true;
 	}
     }
 
     if (device_names.size() == 0)
 	throw runtime_error("ch_frb_io: enqueue_write_request() was called, but no output_devices were registered");
 
-    throw runtime_error("ch_frb_io: write_request filename '" + req->filename + "' is not contained in any registered output_devices");
+    return false;
 }
 
 

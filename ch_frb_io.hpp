@@ -793,7 +793,8 @@ public:
     output_device_pool(const std::vector<std::shared_ptr<output_device>> &streams);
 
     // Sends the write request to the appropriate output_device (based on filename).
-    void enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    // Returns false if no output_device could be found.
+    bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
     
     // Loops over output_devices, and calls either end_stream() or join_thread().
     void end_streams(bool wait);
