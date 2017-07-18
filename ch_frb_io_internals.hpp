@@ -273,6 +273,11 @@ public:
     // Debugging: inject the given chunk
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
+    // For debugging/testing: stream data to disk.  
+    //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
+    //   'priority': see write_chunk_request::priority
+    void stream_to_files(const std::string &filename_pattern, int priority);
+
     // Debugging: print state
     void print_state();
 
@@ -299,15 +304,11 @@ public:
                           uint64_t* ringbuf_fpga_min,
                           uint64_t* ringbuf_fpga_max);
 
-    // Are we streaming data to disk?
-    std::string stream_filename_pattern;
-
-    // Debugging: callbacks for each enqueued assembled_chunk.
-    std::vector< std::function<void(std::shared_ptr<assembled_chunk>)> > chunk_callbacks;
-
 protected:
     const intensity_network_stream::initializer ini_params;
     const int beam_id;
+
+    output_device_pool output_devices;
 
     // Set to 'true' in the first call to put_unassembled_packet().
     bool first_packet_received = false;
@@ -360,6 +361,10 @@ protected:
     {
 	return ringbuf[ids][ipos % ringbuf_capacity[ids]];
     }
+
+    // Are we streaming data to disk?  (Note: these fields require the lock for either read or write access.)
+    std::string stream_pattern;
+    int stream_priority = 0;
 
     bool doneflag = false;
 };

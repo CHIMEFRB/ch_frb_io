@@ -11,7 +11,8 @@ namespace ch_frb_io {
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_) :
     ini_params(ini_params_),
-    beam_id(beam_id_)
+    beam_id(beam_id_),
+    output_devices(ini_params.output_devices)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
@@ -180,6 +181,15 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 }
 
 
+void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority)
+{
+    pthread_mutex_lock(&this->lock);
+    this->stream_pattern = filename_pattern;
+    this->stream_priority = priority;
+    pthread_mutex_unlock(&this->lock);
+}
+
+
 // In assembled_chunk_ringbuf::put_unassembled_packet(), it's OK to modify 'event_counts' 
 // without acquiring any locks.  This is because the assembler thread passes an event_subcounts 
 // array which is updated on a per-packet basis, and accumulated into the global event_counts 
@@ -297,21 +307,6 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	pushlist[ids+1]->downsample(poplist[2*ids].get(), poplist[2*ids+1].get());
     }
 
-    // We process the stream_filename and chunk_callbacks here (without the lock held!)
-
-    if (stream_filename_pattern.length()) {
-        string fn = pushlist[0]->format_filename(stream_filename_pattern);
-        // turn on compression, but revert the state of pushlist[0]->msgpack_bitshuffle after writing.
-        bool bitpack = pushlist[0]->msgpack_bitshuffle;
-        pushlist[0]->msgpack_bitshuffle = true;
-        pushlist[0]->write_msgpack_file(fn);
-        pushlist[0]->msgpack_bitshuffle = bitpack;
-    }
-
-    for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {
-	(*it)(pushlist[0]);
-    }
-
     // Step 2: acquire lock and modify the ring buffer.  We have already computed the chunks to
     // be added/removed at each level (pushlist/poplist), so we don't malloc/free/downsample with
     // the lock held.
@@ -358,8 +353,24 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	downstream_pos = max_allowed_downstream_pos;
     }
 
+    // Make thread-local copies with lock held.
+    string loc_stream_pattern = this->stream_pattern;
+    int loc_stream_priority = this->stream_priority;
+
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
+
+    // Stream new chunk to disk (if 'stream_pattern' is a nonempty string).
+    // It's better to do this processing without the lock held, we just need to use
+    // 'loc_stream_pattern' and 'loc_stream_priority' here, for thread-safety.
+
+    if (loc_stream_pattern.size() > 0) {
+	shared_ptr<write_chunk_request> wreq = make_shared<write_chunk_request> ();
+	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
+	wreq->priority = loc_stream_priority;
+	wreq->chunk = pushlist[0];	
+	output_devices.enqueue_write_request(wreq);
+    }
 
     // This call to _check_invariants() is a good test during debugging, but
     // shouldn't be enabled in production.

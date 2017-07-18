@@ -37,6 +37,7 @@ struct noncopyable
 // Defined later in this file
 class assembled_chunk;
 class memory_slab_pool;
+class output_device;
 
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
@@ -281,6 +282,7 @@ public:
     struct initializer {
 	std::vector<int> beam_ids;
 	std::shared_ptr<memory_slab_pool> memory_pool;
+	std::vector<std::shared_ptr<output_device>> output_devices;
 
 	int nupfreq = 0;
 	int nt_per_packet = 0;
@@ -394,14 +396,10 @@ public:
     // room in the ring buffer for the new chunk.
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
-    // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
-    void stream_to_files(const std::string& filename_pattern);
-
-    // For debugging/testing: request that the given callback be
-    // called each time an assembled_chunk is enqueued in the ring
-    // buffer.
-    void add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
-    //void remove_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback);
+    // For debugging/testing: stream data to disk.  
+    //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
+    //   'priority': see write_chunk_request::priority
+    void stream_to_files(const std::string &filename_pattern, int priority);
 
     // For debugging: print state.
     void print_state();

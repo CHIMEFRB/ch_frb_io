@@ -242,46 +242,12 @@ void intensity_network_stream::join_threads()
 }
 
 
-void intensity_network_stream::stream_to_files(const std::string& filename_pattern) 
+void intensity_network_stream::stream_to_files(const std::string &filename_pattern, int priority)
 {
-    for (auto it = assemblers.begin(); it != assemblers.end(); it++)
-	(*it)->stream_filename_pattern = filename_pattern;
+    for (const auto &a: assemblers)
+	a->stream_to_files(filename_pattern, priority);
 }
 
-void intensity_network_stream::add_assembled_chunk_callback(std::function<void(std::shared_ptr<assembled_chunk>)> callback) 
-{
-    for (auto it = assemblers.begin(); it != assemblers.end(); it++)
-	(*it)->chunk_callbacks.push_back(callback);
-}
-
-/*
- std::function has no sensible == operator, so how do we do this?!
-
-void intensity_network_stream::remove_assembled_chunk_callback(std::function<void()> callback) {
-    pthread_mutex_lock(&this->state_lock);
-    bool inited = this->assemblers_initialized;
-    pthread_mutex_unlock(&this->state_lock);
-    if (inited)
-        for (auto it = assemblers.begin(); it != assemblers.end(); it++) {
-            std::vector<std::function<void()> > &vec = (*it)->chunk_callbacks;
-            for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
-                if ((*it2) == callback) {
-                    vec.erase(it2);
-                    break;
-                }
-            }
-        }
-    else {
-        std::vector<std::function<void()> > &vec = chunk_callbacks;
-        for (auto it2 = vec.begin(); it2 != vec.end(); it2++) {
-            if ((*it2) == callback) {
-                vec.erase(it2);
-                break;
-            }
-        }
-    }
-}
- */
 
 void intensity_network_stream::print_state() {
     cout << "Intensity network stream state:" << endl;
