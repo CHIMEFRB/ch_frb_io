@@ -120,12 +120,12 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         bool compress = ch->msgpack_bitshuffle;
         size_t maxsize;
         if (compress) {
+            compression = (uint8_t)comp_bitshuffle;
             if (ch->compression_buffer) {
                 // We can use this shared buffer for compression
                 data = ch->compression_buffer;
             } else {
                 // Try to allocate a temp buffer for the compressed data.
-                compression = (uint8_t)comp_bitshuffle;
                 // How big can the compressed data become?
                 maxsize = ch->max_compressed_size();
                 std::cout << "bitshuffle: uncompressed size " << ch->ndata << ", max compressed size " << maxsize << std::endl;
