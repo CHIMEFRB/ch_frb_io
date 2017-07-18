@@ -62,6 +62,17 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 2" << endl;
     }
 
+    // Set the shared compression buffer and write compressed data.
+    chunk->compression_buffer = shared_ptr<uint8_t>((uint8_t*)malloc(chunk->max_compressed_size()));
+    chunk->msgpack_bitshuffle = true;
+    fn = "test_assembled_chunk_3.msgpack";
+    chunk->write_msgpack_file(fn);
+    cout << "Wrote to " << fn << endl;
+    
+    shared_ptr<assembled_chunk> inchunk3 = assembled_chunk::read_msgpack_file(fn);
+    if (memcmp(inchunk3->data, chunk->data, chunk->ndata)) {
+        cout << "MISMATCH in data 3" << endl;
+    }
 
     unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
 
