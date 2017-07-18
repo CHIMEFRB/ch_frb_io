@@ -651,16 +651,14 @@ public:
     fast_assembled_chunk(const assembled_chunk::initializer &ini_params);
     virtual ~fast_assembled_chunk();
 
-<<<<<<< HEAD
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
-=======
-    // How big can the compressed data become?
+
+    // How big can the bitshuffle-compressed data for a chunk of this size become?
     size_t max_compressed_size();
     
->>>>>>> msgpack-nomalloc
 };
 
 
