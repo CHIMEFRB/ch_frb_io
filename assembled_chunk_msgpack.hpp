@@ -95,6 +95,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
     }
 };
 
+// Pack an assembled_chunk object into a msgpack stream.
 template<>
 struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
     template <typename Stream>
@@ -102,44 +103,54 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         // packing member variables as an array.
         //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
         uint8_t version = 1;
+        // We are going to pack 17 items as a msgpack array (with mixed types)
         o.pack_array(17);
+        // Item 0: header string
         o.pack("assembled_chunk in msgpack format");
+        // Item 1: version number
         o.pack(version);
 
         uint8_t compression = (uint8_t)comp_none;
         int data_size = ch->ndata;
-        uint8_t* data = ch->data;
-        uint8_t* freedata = NULL;
+
+        // Create a shared pointer to the block of data to be written
+        // (which defaults to this assembled_chunk's data, which is not to be deleted)
+        std::shared_ptr<uint8_t> chdata(std::shared_ptr<uint8_t>(), ch->data);
+        std::shared_ptr<uint8_t> data = chdata;
         bool compress = ch->msgpack_bitshuffle;
         size_t maxsize;
         if (compress) {
-            compression = (uint8_t)comp_bitshuffle;
-            // compress!
-            maxsize = bshuf_compress_lz4_bound(ch->ndata, 1, 0);
-            std::cout << "bitshuffle: uncompressed size " << ch->ndata << ", max compressed size " << maxsize << std::endl;
-            data = freedata = (uint8_t*)malloc(maxsize);
-            if (!data) {
-                std::cout << "Failed to allocate a buffer to compress an assembled_chunk; writing uncompressed" << std::endl;
-                compression = (uint8_t)comp_none;
-                data = ch->data;
-                compress = false;
+            if (ch->compression_buffer) {
+                // We can use this shared buffer for compression
+                data = ch->compression_buffer;
+            } else {
+                // Try to allocate a temp buffer for the compressed data.
+                compression = (uint8_t)comp_bitshuffle;
+                // How big can the compressed data become?
+                maxsize = ch->max_compressed_size();
+                std::cout << "bitshuffle: uncompressed size " << ch->ndata << ", max compressed size " << maxsize << std::endl;
+                data = std::shared_ptr<uint8_t>((uint8_t*)malloc(maxsize));
+                // unlikely...
+                if (!data) {
+                    std::cout << "Failed to allocate a buffer to compress an assembled_chunk; writing uncompressed" << std::endl;
+                    compression = (uint8_t)comp_none;
+                    data = chdata;
+                    compress = false;
+                }
             }
         }
         if (compress) {
-            int64_t n = bshuf_compress_lz4(ch->data, data, ch->ndata, 1, 0);
+            // Try compressing.  If the compressed size is not smaller than the original, write uncompressed instead.
+            int64_t n = bshuf_compress_lz4(ch->data, data.get(), ch->ndata, 1, 0);
             if ((n < 0) || (n >= ch->ndata)) {
                 if (n < 0)
                     std::cout << "bitshuffle compression failed; writing uncompressed" << std::endl;
                 else
                     std::cout << "bitshuffle compression did not actually compress the data (" + std::to_string(n) + " vs orig " + std::to_string(ch->ndata) + "); writing uncompressed" << std::endl;
-                free(freedata);
-                freedata = NULL;
-                data = ch->data;
+                data = chdata;
                 compression = (uint8_t)comp_none;
                 compress = false;
             } else {
-                data = (uint8_t*)realloc(data, n);
-                freedata = data;
                 data_size = n;
                 std::cout << "Bitshuffle compressed to " << n << std::endl;
             }
@@ -166,11 +177,7 @@ struct pack<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         o.pack_bin_body(reinterpret_cast<const char*>(ch->offsets),
                         nscalebytes);
         o.pack_bin(data_size);
-        o.pack_bin_body(reinterpret_cast<const char*>(data), data_size);
-        
-        if (freedata)
-            free(freedata);
-
+        o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
         return o;
     }
 };

@@ -515,6 +515,10 @@ void assembled_chunk::write_msgpack_file(const string &filename)
         throw runtime_error("ch_frb_io: failed to rename temp file in writing assembled_chunk msgpack file: " + string(tempfilename) + ": " + string(strerror(errno)));
 }
 
+size_t assembled_chunk::max_compressed_size() {
+    return bshuf_compress_lz4_bound(this->ndata, 1, 0);
+}
+
 shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
 {
     struct stat st;

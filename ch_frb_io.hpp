@@ -563,6 +563,13 @@ struct assembled_chunk : noncopyable {
 
     bool msgpack_bitshuffle = false;
 
+    // A shared pointer to a buffer that can be used for temporary storage
+    // during msgpack compression.  There is no locking of this buffer, so it
+    // is responsibility of the user to ensure that assembled_chunks that
+    // share a buffer never try to use it simultaneously.
+    // Should be at least max_compressed_size().
+    std::shared_ptr<uint8_t> compression_buffer;
+    
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
 
@@ -617,6 +624,9 @@ struct assembled_chunk : noncopyable {
     // msgpack file output
     void write_msgpack_file(const std::string &filename);
 
+    // How big can the compressed data become?
+    size_t max_compressed_size();
+    
 };
 
 // For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
