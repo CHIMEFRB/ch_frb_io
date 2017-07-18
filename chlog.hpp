@@ -1,8 +1,9 @@
 #ifndef _CH_FRB_LOG_HPP
 #define _CH_FRB_LOG_HPP
 
-#include <ostream>
+#include <thread>
 #include <sstream>
+#include <iostream>
 #include <zmq.hpp>
 
 namespace ch_frb_io {
