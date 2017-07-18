@@ -566,8 +566,6 @@ public:
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
 
-    bool msgpack_bitshuffle = false;
-
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
@@ -589,15 +587,12 @@ public:
 
     // Note: the hdf5 file format has been phased out now..
     void write_hdf5_file(const std::string &filename);
-    void write_msgpack_file(const std::string &filename);
+    void write_msgpack_file(const std::string &filename, bool compress,
+                            uint8_t* buffer=NULL);
 
-    // A shared pointer to a buffer that can be used for temporary storage
-    // during msgpack compression.  There is no locking of this buffer, so it
-    // is responsibility of the user to ensure that assembled_chunks that
-    // share a buffer never try to use it simultaneously.
-    // Should be at least max_compressed_size().
-    std::shared_ptr<uint8_t> compression_buffer;
-    
+    // How big can the bitshuffle-compressed data for a chunk of this size become?
+    size_t max_compressed_size();
+
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
     //   (BEAM)    -> %04i beam_id
@@ -656,9 +651,6 @@ public:
     virtual void decode(float *intensity, float *weights, int stride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
 
-    // How big can the bitshuffle-compressed data for a chunk of this size become?
-    size_t max_compressed_size();
-    
 };
 
 

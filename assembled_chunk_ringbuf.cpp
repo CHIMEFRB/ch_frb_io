@@ -302,10 +302,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     if (stream_filename_pattern.length()) {
         string fn = pushlist[0]->format_filename(stream_filename_pattern);
         // turn on compression, but revert the state of pushlist[0]->msgpack_bitshuffle after writing.
-        bool bitpack = pushlist[0]->msgpack_bitshuffle;
-        pushlist[0]->msgpack_bitshuffle = true;
-        pushlist[0]->write_msgpack_file(fn);
-        pushlist[0]->msgpack_bitshuffle = bitpack;
+        pushlist[0]->write_msgpack_file(fn, true);
     }
 
     for (auto it=chunk_callbacks.begin(); it!=chunk_callbacks.end(); it++) {

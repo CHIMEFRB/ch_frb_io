@@ -45,9 +45,8 @@ int main(int argc, char **argv)
      chunk->write_hdf5_file(string(filename));
      */
 
-    chunk->msgpack_bitshuffle = true;
     string fn = "test_assembled_chunk.msgpack";
-    chunk->write_msgpack_file(fn);
+    chunk->write_msgpack_file(fn, true);
     cout << "Wrote to " << fn << endl;
 
     shared_ptr<assembled_chunk> inchunk = assembled_chunk::read_msgpack_file(fn);
@@ -60,7 +59,7 @@ int main(int argc, char **argv)
     memset(chunk->data, 42, chunk->ndata);
 
     fn = "test_assembled_chunk_2.msgpack";
-    chunk->write_msgpack_file(fn);
+    chunk->write_msgpack_file(fn, true);
     cout << "Wrote to " << fn << endl;
 
     shared_ptr<assembled_chunk> inchunk2 = assembled_chunk::read_msgpack_file(fn);
@@ -69,15 +68,10 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 2" << endl;
     }
 
-
-    ini_params.ichunk = ichunk + 1;
-    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(ini_params);
-
-    // Set the shared compression buffer and write compressed data.
-    chunk->compression_buffer = shared_ptr<uint8_t>((uint8_t*)malloc(chunk->max_compressed_size()));
-    chunk->msgpack_bitshuffle = true;
+    // allocate a compression buffer and write chunk.
+    uint8_t* buffer = (uint8_t*)malloc(chunk->max_compressed_size());
     fn = "test_assembled_chunk_3.msgpack";
-    chunk->write_msgpack_file(fn);
+    chunk->write_msgpack_file(fn, true, buffer);
     cout << "Wrote to " << fn << endl;
     
     shared_ptr<assembled_chunk> inchunk3 = assembled_chunk::read_msgpack_file(fn);
@@ -85,12 +79,10 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 3" << endl;
     }
 
-    // Just write again, testing the buffer...?
-    fn = "test_assembled_chunk_4.msgpack";
-    chunk->write_msgpack_file(fn);
-    cout << "Wrote to " << fn << endl;
+    ini_params.ichunk = ichunk + 1;
+    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(ini_params);
 
-    unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
+    //unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
 
     assembled_chunk* chunk2 = uchunk2.get();
     assembled_chunk* chunk1 = chunk.get();
@@ -127,12 +119,15 @@ int main(int argc, char **argv)
         }
     }
 
-    chunk1->write_msgpack_file("test-chunk1.msgpack");
-    chunk2->write_msgpack_file("test-chunk2.msgpack");
+    chunk1->write_msgpack_file("test-chunk1.msgpack", true);
+    chunk2->write_msgpack_file("test-chunk2.msgpack", true);
 
-    shared_ptr<assembled_chunk> chunk3 = shared_ptr<assembled_chunk>(assembled_chunk::downsample(NULL, chunk1, chunk2));
-    chunk3->write_msgpack_file("test-chunk3.msgpack");
-
+    /*
+     unique_ptr<assembled_chunk> uchunk3 = assembled_chunk::make(ini_params);
+     uchunk3->downsample(chunk1, chunk2);
+     uchunk3->write_msgpack_file("test-chunk3.msgpack", true);
+     */
+    
     float* intensity = (float*)malloc(chunk1->ndata * sizeof(float));
     float* weight    = (float*)malloc(chunk1->ndata * sizeof(float));
 
@@ -148,11 +143,13 @@ int main(int argc, char **argv)
     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
     fclose(f);
 
-    chunk3->decode(intensity, weight, constants::nt_per_assembled_chunk);
-    f = fopen("chunk3-decoded.raw", "w");
-    fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
-    fclose(f);
-
+    /*
+     uchunk3->decode(intensity, weight, constants::nt_per_assembled_chunk);
+     f = fopen("chunk3-decoded.raw", "w");
+     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
+     fclose(f);
+     */
+    
     free(intensity);
     free(weight);
     

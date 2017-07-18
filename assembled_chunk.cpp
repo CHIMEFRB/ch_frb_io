@@ -512,7 +512,8 @@ void assembled_chunk::write_hdf5_file(const string &filename)
     data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
 }
 
-void assembled_chunk::write_msgpack_file(const string &filename)
+void assembled_chunk::write_msgpack_file(const string &filename, bool compress,
+                                         uint8_t* buffer)
 {
     char tempfilename[filename.size() + 10];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
@@ -523,10 +524,12 @@ void assembled_chunk::write_msgpack_file(const string &filename)
     if (!f)
         throw runtime_error("ch_frb_io: failed to open temp file " + string(tempfilename) + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
     // msgpack buffer that will write to file "f"
-    msgpack::fbuffer buffer(f);
+    msgpack::fbuffer fb(f);
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
-    msgpack::pack(buffer, shthis);
+    msgpack::packer<msgpack::fbuffer> packer(fb);
+    pack_assembled_chunk(packer, shthis, compress, buffer);
+
     if (fclose(f))
         throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack temp file " + string(tempfilename) + ": " + string(strerror(errno)));
 
@@ -541,6 +544,12 @@ void assembled_chunk::write_msgpack_file(const string &filename)
     if (rename(tempfilename, filename.c_str()))
         throw runtime_error("ch_frb_io: failed to rename temp file in writing assembled_chunk msgpack file: " + string(tempfilename) + ": " + string(strerror(errno)));
 }
+
+/*
+// We could do this using msgpack::sbuffer, but if we're just going to write to a file, no real point first serializing into memory and then writing to disk.
+ int assembled_chunk::serialize(uint8_t* buf, int capacity, bool compress) {
+ }
+ */
 
 size_t assembled_chunk::max_compressed_size() {
     return bshuf_compress_lz4_bound(this->ndata, 1, 0);
