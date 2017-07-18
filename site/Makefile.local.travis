@@ -9,8 +9,8 @@ INCDIR=$(HOME)/chime/include
 # Directory where executables will be installed
 BINDIR=$(HOME)/chime/bin
 
-# HDF5_INC_DIR=/usr/local/include
-# HDF5_LIB_DIR=/usr/local/lib
+HDF5_INC_DIR ?= /usr/local/include
+HDF5_LIB_DIR ?= /usr/local/lib
 
 MSGPACK_INC_DIR ?= /home/travis/build/CHIMEFRB/ch_frb_io/msgpack-2.1.0/include
 
@@ -39,6 +39,6 @@ ifeq ($(COVERAGE), yes)
     OPT_FLAGS += -fprofile-arcs -ftest-coverage
 endif
 
-CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) -I$(MSGPACK_INC_DIR) -I$(ZMQ_INC_DIR)
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) -I$(MSGPACK_INC_DIR) -I$(ZMQ_INC_DIR) -I$(HDF5_INC_DIR)
 
-CPP_LFLAGS := -L. -L$(LIBDIR) -L$(ZMQ_LIB_DIR)
+CPP_LFLAGS := -L. -L$(LIBDIR) -L$(ZMQ_LIB_DIR) -L$(HDF5_LIB_DIR)

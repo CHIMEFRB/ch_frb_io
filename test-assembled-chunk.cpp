@@ -74,6 +74,11 @@ int main(int argc, char **argv)
         cout << "MISMATCH in data 3" << endl;
     }
 
+    // Just write again, testing the buffer...?
+    fn = "test_assembled_chunk_4.msgpack";
+    chunk->write_msgpack_file(fn);
+    cout << "Wrote to " << fn << endl;
+
     unique_ptr<assembled_chunk> uchunk2 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk+1);
 
     assembled_chunk* chunk2 = uchunk2.get();
@@ -114,7 +119,7 @@ int main(int argc, char **argv)
     chunk1->write_msgpack_file("test-chunk1.msgpack");
     chunk2->write_msgpack_file("test-chunk2.msgpack");
 
-    assembled_chunk* chunk3 = assembled_chunk::downsample(NULL, chunk1, chunk2);
+    shared_ptr<assembled_chunk> chunk3 = shared_ptr<assembled_chunk>(assembled_chunk::downsample(NULL, chunk1, chunk2));
     chunk3->write_msgpack_file("test-chunk3.msgpack");
 
     float* intensity = (float*)malloc(chunk1->ndata * sizeof(float));
@@ -137,5 +142,8 @@ int main(int argc, char **argv)
     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
     fclose(f);
 
+    free(intensity);
+    free(weight);
+    
     return 0;
 }
