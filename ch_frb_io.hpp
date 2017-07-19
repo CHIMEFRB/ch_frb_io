@@ -752,7 +752,8 @@ public:
     static std::shared_ptr<output_device> make(const initializer &ini_params);
 
     // Can be called by either the assembler thread, or an RPC thread.
-    void enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    // Returns 'false' if request could not be queued (because end_stream() was called)
+    bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
     
     // If 'wait' is true, then end_stream() blocks until pending writes are complete.
     // If 'wait' is false, then end_stream() cancels all pending writes.
@@ -798,7 +799,7 @@ public:
     output_device_pool(const std::vector<std::shared_ptr<output_device>> &streams);
 
     // Sends the write request to the appropriate output_device (based on filename).
-    // Returns false if no output_device could be found.
+    // Returns 'false' if request could not be queued.
     bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
     
     // Loops over output_devices, and calls either end_stream() or join_thread().

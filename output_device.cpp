@@ -87,7 +87,7 @@ void output_device::io_thread_main()
 
 
 // Called by an "external" thread (assembler thread or RPC thread).
-void output_device::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
+bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
 {
     if (!req)
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req is null");
@@ -101,7 +101,7 @@ void output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     unique_lock<std::mutex> ulock(_lock);
 
     if (end_stream_called)
-	throw runtime_error("output_device::enqueue_write_request() was called after end_stream()");
+	return false;
 
     // Two requests are considered "redundant" if they have the same (chunk, filename) pair.
     // For each pending request, we maintain ..
@@ -118,7 +118,7 @@ void output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	    if (ini_params.verbosity >= 3)
 		chlog("write_request for filename '" + req->filename + "' absorbed into existing write request");
 
-	    return;
+	    return true;
 	}
     }
 
@@ -134,6 +134,8 @@ void output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	      + ", chunk " + to_string(req->chunk->ichunk) 
 	      + ", FPGA counts " + to_string(req->chunk->fpga_begin));
     }
+
+    return true;
 }
 
 
