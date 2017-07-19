@@ -564,8 +564,6 @@ public:
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
 
-    bool msgpack_bitshuffle = false;
-
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
@@ -587,7 +585,11 @@ public:
 
     // Note: the hdf5 file format has been phased out now..
     void write_hdf5_file(const std::string &filename);
-    void write_msgpack_file(const std::string &filename);
+    void write_msgpack_file(const std::string &filename, bool compress,
+                            uint8_t* buffer=NULL);
+
+    // How big can the bitshuffle-compressed data for a chunk of this size become?
+    size_t max_compressed_size();
 
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
@@ -646,6 +648,7 @@ public:
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
+
 };
 
 
@@ -773,10 +776,13 @@ protected:
     // The queue of write requests to be run by the output thread.
     // Note that we currently use an O(N) data structure here -- could be improved to O(log N) but nontrivial!
     std::vector<std::shared_ptr<write_chunk_request>> _write_reqs;
-
+    
     // The state model and request queue are protected by this lock and condition variable.
     std::mutex _lock;
     std::condition_variable _cond;
+
+    // Temporary buffer used for assembled_chunk serialization, accessed only by I/O thread
+    std::unique_ptr<uint8_t[]> _buffer;
 
     // Constructor is protected -- use output_device::make() instead!
     output_device(const initializer &ini_params);

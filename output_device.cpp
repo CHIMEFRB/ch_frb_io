@@ -24,7 +24,11 @@ output_device::output_device(const output_device::initializer &ini_params_) :
     ini_params(ini_params_)
 {
     // Note: no sanity-checking of ini_params needed here!
+
     this->_write_reqs.reserve(32768);
+
+    // XXX 32M is overkill!  How much space should I use here?
+    this->_buffer = unique_ptr<uint8_t[]> (new uint8_t[32 * 1024 * 1024]);
 }
 
 
@@ -59,8 +63,7 @@ void output_device::io_thread_main()
 	string error_message;
 
 	try {
-	    w->chunk->msgpack_bitshuffle = true;
-	    w->chunk->write_msgpack_file(w->filename);
+	    w->chunk->write_msgpack_file(w->filename, true, this->_buffer.get());  // compress=true
 	} catch (exception &e) {
 	    // Note: we now include the exception text in the error_message.
 	    error_message = "Write msgpack file '" + w->filename + "' failed: " + e.what();
