@@ -697,6 +697,11 @@ protected:
 // -------------------------------------------------------------------------------------------------
 //
 // output_device and helper classes.
+//
+// FIXME(?): it would be natural to add member functions of 'class output_device' or 
+// 'class output_device_pool' which return summary information, such as number of
+// chunks queued for writing, total number of chunks written, etc.  (Same goes for
+// the memory_slab_pool!)
 
 
 // write_chunk_request: mini-struct consisting of a (chunk, filename, priority) triple.
@@ -706,11 +711,11 @@ protected:
 // from the i/o thread!
 
 struct write_chunk_request {
-    std::shared_ptr<ch_frb_io::assembled_chunk> chunk;
+    std::shared_ptr<assembled_chunk> chunk;
     std::string filename;
     int priority = 0;
 
-    virtual void write_callback(const std::string &status, const std::string &error_message) { }
+    virtual void write_callback(const std::string &error_message) { }
     virtual ~write_chunk_request() { }
 
     // used internally by output_device -- don't touch!

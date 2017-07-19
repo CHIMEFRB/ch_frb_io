@@ -56,7 +56,6 @@ void output_device::io_thread_main()
 		  + ", FPGA counts " + to_string(w->chunk->fpga_begin));
 	}
 
-	string status = "SUCCEEDED";
 	string error_message;
 
 	try {
@@ -64,7 +63,6 @@ void output_device::io_thread_main()
 	    w->chunk->write_msgpack_file(w->filename);
 	} catch (exception &e) {
 	    // Note: we now include the exception text in the error_message.
-	    status = "FAILED";
 	    error_message = "Write msgpack file '" + w->filename + "' failed: " + e.what();
 	}
 
@@ -80,7 +78,7 @@ void output_device::io_thread_main()
 	// and do the write_callbacks.
 
 	for (shared_ptr<write_chunk_request> ww = w; ww; ww = ww->next)
-	    ww->write_callback(status, error_message);
+	    ww->write_callback(error_message);
     }
 
     if (ini_params.verbosity >= 2)
