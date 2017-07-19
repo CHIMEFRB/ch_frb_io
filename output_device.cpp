@@ -107,8 +107,8 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	return false;
 
     // Two requests are considered "redundant" if they have the same (chunk, filename) pair.
-    // For each pending request, we maintain ..
-    // If the new write_request is redundant with an existing request, we 
+    // For each pending request, we maintain a linked list of associated redundant requests.
+    // If the new write_request is redundant with an existing request, we add it to the linked list here.
 
     for (const auto &qreq: _write_reqs) {
 	if ((qreq->chunk == req->chunk) && (qreq->filename == req->filename)) {
