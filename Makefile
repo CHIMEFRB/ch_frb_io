@@ -70,6 +70,7 @@ TEST_BINARIES = test-intensity-hdf5-file \
 	test-misc \
 	test-network-streams \
 	test-log \
+	time-assembled-chunk-write \
 	time-kernels
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
@@ -110,6 +111,9 @@ test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
+time-assembled-chunk-write: time-assembled-chunk-write.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 time-kernels: time-kernels.cpp $(INCFILES) libch_frb_io.so
