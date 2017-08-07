@@ -179,7 +179,8 @@ static void usage(const char *msg = nullptr)
     cerr << "Usage: time-assembled-chunk-write [-zbu] <target_dir> <target_gb>\n"
 	 << "   -z uses zeroed chunks (default is to randomize)\n"
 	 << "   -b uses boneheaded file format (default is compressed msgpack)\n"
-	 << "   -u uses uncompressed msgpack file format (default is compressed msgpack)\n";
+	 << "   -u uses uncompressed msgpack file format (default is compressed msgpack)\n"
+	 << "   -p pins process to core 0 (default is unpinned)\n";
 
     if (msg)
 	cerr << "Fatal: " << msg << endl;
@@ -216,6 +217,7 @@ int main(int argc, char **argv)
     bool zflag = false;
     bool bflag = false;
     bool uflag = false;
+    bool pflag = false;
 
     for (int i = 1; i < argc; i++) {
 	const char *arg = argv[i];
@@ -235,6 +237,8 @@ int main(int argc, char **argv)
 	    else if (arg[j] == 'b')
 		bflag = true;
 	    else if (arg[j] == 'u')
+		uflag = true;
+	    else if (arg[j] == 'p')
 		uflag = true;
 	    else
 		usage();
@@ -262,6 +266,11 @@ int main(int argc, char **argv)
 
     std::random_device rd;
     std::mt19937 rng(rd());
+
+    if (pflag) {
+	int hwcon = std::thread::hardware_concurrency();
+	pin_thread_to_cores({0,hwcon/2});
+    }
 
     int nchunks = int(target_gb / gb_per_chunk) + 1;
     double actual_gb = nchunks * gb_per_chunk;
