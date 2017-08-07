@@ -536,7 +536,7 @@ inline struct timeval xgettimeofday()
     struct timeval tv;
 
     int err = gettimeofday(&tv, NULL);
-    if (err)
+    if (_unlikely(err))
 	throw std::runtime_error("gettimeofday failed");
 
     return tv;
