@@ -14,7 +14,7 @@ using namespace ch_frb_io;
 
 // -------------------------------------------------------------------------------------------------
 //
-// File utils
+// Utils (all cut-and-paste from elsewhere)
 
 
 static void delete_file(const string &filename)
@@ -23,6 +23,7 @@ static void delete_file(const string &filename)
     if (err < 0)
 	throw runtime_error(filename + ": " + strerror(errno));
 }
+
 
 static bool is_empty_directory(const string &dirname)
 {
@@ -96,6 +97,46 @@ static void write_file(const string &filename, const void *buf, ssize_t count, b
 }
 
 
+static ssize_t get_physical_memory()
+{
+    ssize_t pagesize = sysconf(_SC_PAGESIZE);
+    if (pagesize < 0)
+	throw runtime_error(string("sysconf(_SC_PAGESIZE) failed: ") + strerror(errno));
+
+    ssize_t npages = sysconf(_SC_PHYS_PAGES);
+    if (npages < 0)
+	throw runtime_error(string("sysconf(_SC_PHYS_PAGES) failed: ") + strerror(errno));
+
+    return npages * pagesize;
+}
+
+
+static ssize_t get_file_size(const string &filename)
+{
+    struct stat s;
+
+    int err = stat(filename.c_str(), &s);
+    if (err < 0)
+	throw runtime_error(filename + ": " + strerror(errno));
+
+    return s.st_size;
+}
+
+
+static void sync_filesystem(const string &filename)
+{
+    int fd = open(filename.c_str(), O_RDONLY, 0);
+    if (fd < 0)
+	throw runtime_error(filename + ": open() failed: " + strerror(errno));
+
+    int err = syncfs(fd);
+    close(fd);
+    
+    if (err < 0)
+	throw runtime_error(filename + ": syncfs() failed: " + strerror(errno));
+}
+
+
 // -------------------------------------------------------------------------------------------------
 //
 // "Boneheaded" write
@@ -123,6 +164,7 @@ static void boneheaded_write(const string &filename, const unique_ptr<assembled_
 
     uint8_t *enc3 = (uint8_t *) enc2;
     memcpy(enc3, chunk->data, chunk->ndata);
+    enc3 += chunk->ndata;
     
     ssize_t nbytes = (enc3 - tmp_buffer);  // OK since buffer,enc3 are both (uint8_t *)
     write_file(filename, tmp_buffer, nbytes);
@@ -209,10 +251,12 @@ int main(int argc, char **argv)
 	usage(target_dir + " must be an empty directory");
     if (target_gb <= 0.0)
 	usage("target_gb must be > 0");
-    if (target_gb > 100.0)
-	usage("target_gb must be <= 100");
     if (bflag && uflag)
 	usage("-b with -u does not make sense");
+
+    double gb_physical = get_physical_memory() / pow(2.,30.0);
+    if (target_gb > gb_physical)
+	usage("target_gb must be <= " + to_string(gb_physical) + " (total physical memory)");
 
     // Command-line parsing finished!
 
@@ -241,11 +285,17 @@ int main(int argc, char **argv)
 	stringstream filename;
 	filename << target_dir << "/deleteme_" << i << ".msgpack";
 	filenames[i] = filename.str();
+
+	if ((i % 100 == 0) && (i > 0))
+	    cout << i << "/" << nchunks << " chunks generated" << endl;
     }
     
     // Temp buffer for encoding.
     // 32MB is overkill here!
     vector<uint8_t> tmp_buffer(32 * 1024 * 1024, 0);
+    
+    // Sync filesystem before writing.
+    sync_filesystem(target_dir);
 
     cout << "Writing files";
     struct timeval tv0 = xgettimeofday();
@@ -260,11 +310,20 @@ int main(int argc, char **argv)
 	    chunks[i]->write_msgpack_file(filenames[i], compress, &tmp_buffer[0]);
     }
 
+    // Sync filesystem after writing.
+    sync_filesystem(target_dir);
+
     struct timeval tv1 = xgettimeofday();
     double secs = 1.0e-6 * usec_between(tv0,tv1);
 
     cout << "done" << endl;
     cout << "Write speed: " << (actual_gb/secs) << " GB/sec" << endl;
+
+    double compressed_gb = 0.0;
+    for (int i = 0; i < nchunks; i++)
+	compressed_gb += get_file_size(filenames[i]) / pow(2.,30.);
+
+    cout << "Actual file size / Nominal size = " << (compressed_gb / actual_gb) << endl;
     cout << "Deleting files..." << flush;
 
     for (int i = 0; i < nchunks; i++)
