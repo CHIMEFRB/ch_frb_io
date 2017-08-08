@@ -324,9 +324,10 @@ int main(int argc, char **argv)
 
     struct timeval tv1 = xgettimeofday();
     double secs = 1.0e-6 * usec_between(tv0,tv1);
+    double gb_per_sec = actual_gb / secs;
 
     cout << "done" << endl;
-    cout << "Write speed: " << (actual_gb/secs) << " GB/sec" << endl;
+    cout << "Write speed: " << gb_per_sec << " GB/sec (" << (8*gb_per_sec) << " Gbps)"<< endl;
 
     double compressed_gb = 0.0;
     for (int i = 0; i < nchunks; i++)
