@@ -129,7 +129,7 @@ static void sync_filesystem(const string &filename)
     if (fd < 0)
 	throw runtime_error(filename + ": open() failed: " + strerror(errno));
 
-    int err = syncfs(fd);
+    int err = fsync(fd);
     close(fd);
     
     if (err < 0)
@@ -176,11 +176,12 @@ static void boneheaded_write(const string &filename, const unique_ptr<assembled_
 
 static void usage(const char *msg = nullptr)
 {
-    cerr << "Usage: time-assembled-chunk-write [-zbu] <target_dir> <target_gb>\n"
+    cerr << "Usage: time-assembled-chunk-write [-zbuph] <target_dir> <target_gb>\n"
 	 << "   -z uses zeroed chunks (default is to randomize)\n"
 	 << "   -b uses boneheaded file format (default is compressed msgpack)\n"
 	 << "   -u uses uncompressed msgpack file format (default is compressed msgpack)\n"
-	 << "   -p pins process to core 0 (default is unpinned)\n";
+	 << "   -p pins process to core 0 (default is unpinned)\n"
+	 << "   -h waits for human input, after generating chunks but before writing them\n";
 
     if (msg)
 	cerr << "Fatal: " << msg << endl;
@@ -209,7 +210,7 @@ int main(int argc, char **argv)
     constexpr ssize_t nt_c = nt_f / nt_per_packet;
     constexpr ssize_t header_nbytes = 2 * nfreq_c * nt_c * sizeof(float);
     constexpr ssize_t data_nbytes = nfreq_f * nt_f;
-    constexpr double gb_per_chunk = (header_nbytes + data_nbytes) / pow(2.,30.);
+    const double gb_per_chunk = (header_nbytes + data_nbytes) / pow(2.,30.);
 
     // Parse command line
 
@@ -218,6 +219,7 @@ int main(int argc, char **argv)
     bool bflag = false;
     bool uflag = false;
     bool pflag = false;
+    bool hflag = false;
 
     for (int i = 1; i < argc; i++) {
 	const char *arg = argv[i];
@@ -239,7 +241,9 @@ int main(int argc, char **argv)
 	    else if (arg[j] == 'u')
 		uflag = true;
 	    else if (arg[j] == 'p')
-		uflag = true;
+		pflag = true;
+	    else if (arg[j] == 'h')
+		hflag = true;
 	    else
 		usage();
 	}
@@ -302,6 +306,12 @@ int main(int argc, char **argv)
     // Temp buffer for encoding.
     // 32MB is overkill here!
     vector<uint8_t> tmp_buffer(32 * 1024 * 1024, 0);
+
+    if (hflag) {
+	cout << "Press return to contine, human!" << endl;
+	string dummy;
+	getline(cin, dummy);
+    }
     
     // Sync filesystem before writing.
     sync_filesystem(target_dir);
