@@ -308,7 +308,7 @@ int main(int argc, char **argv)
     vector<uint8_t> tmp_buffer(32 * 1024 * 1024, 0);
 
     if (hflag) {
-	cout << "Press return to contine, human!" << endl;
+	cout << "Press return to continue, human!" << endl;
 	string dummy;
 	getline(cin, dummy);
     }
