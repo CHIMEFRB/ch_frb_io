@@ -129,7 +129,7 @@ static void sync_filesystem(const string &filename)
     if (fd < 0)
 	throw runtime_error(filename + ": open() failed: " + strerror(errno));
 
-    int err = syncfs(fd);
+    int err = fsync(fd);
     close(fd);
     
     if (err < 0)
