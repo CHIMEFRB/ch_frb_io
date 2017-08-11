@@ -103,11 +103,7 @@ void output_device::io_thread_main()
 	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
 
-<<<<<<< HEAD
 	w->write_callback(error_message);
-=======
-        w->write_callback(error_message);
->>>>>>> beam-int
     }
 
     if (ini_params.verbosity >= 2)
