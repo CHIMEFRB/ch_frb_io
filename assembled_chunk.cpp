@@ -114,7 +114,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 	throw runtime_error("assembled_chunk constructor: bad 'fpga_counts_per_sample' argument");
     if ((binning <= 0) || !is_power_of_two(binning) || (binning > 8))
 	throw runtime_error("assembled_chunk constructor: bad 'binning' argument");
-    if ((stream_id < 0) || (stream_id > 16))
+    if ((stream_id < 0) || (stream_id > 9))
 	throw runtime_error("assembled_chunk constructor: bad 'stream_id' argument");
 
     uint64_t ichunk_max = UINT64_MAX / uint64_t(constants::nt_per_assembled_chunk * fpga_counts_per_sample);
