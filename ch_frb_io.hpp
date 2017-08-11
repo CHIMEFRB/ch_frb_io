@@ -736,7 +736,12 @@ struct write_chunk_request {
     struct _less_than {
 	bool operator()(const std::shared_ptr<write_chunk_request> &x, const std::shared_ptr<write_chunk_request> &y)
 	{
-	    return x->priority < y->priority;
+	    // Compare priority first, then time.
+	    if (x->priority < y->priority) return true;
+	    if (x->priority > y->priority) return false;
+
+	    // Reversed inequality is intentional here (earlier time = higher priority)
+	    return x->chunk->fpga_begin > y->chunk->fpga_begin;
 	}
     };
 };
