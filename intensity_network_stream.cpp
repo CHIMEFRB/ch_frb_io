@@ -373,25 +373,40 @@ intensity_network_stream::get_statistics() {
 }
 
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
-intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
+intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
                                                 uint64_t min_fpga_counts,
                                                 uint64_t max_fpga_counts)
 {
     vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > > R;
-
     int nbeams = this->ini_params.beam_ids.size();
+    R.reserve(beams.size() ? beams.size() : nbeams);
 
-    for (size_t ib=0; ib<beams.size(); ib++) {
-        uint64_t beam = beams[ib];
-        vector<pair<shared_ptr<assembled_chunk>, uint64_t > > chunks;
-        // Which of my assemblers (if any) is handling the requested beam?
-        for (int i=0; i<nbeams; i++) {
-	    if (this->ini_params.beam_ids[i] != (int)beam)
-                continue;
-            chunks = this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
-                                                               max_fpga_counts);
+    if (beams.size()) {
+        // Grab a snapshot for each requested beam (empty if we don't
+        // have that beam number).
+        for (size_t ib=0; ib<beams.size(); ib++) {
+            int beam = beams[ib];
+            bool found = false;
+            // Which of my assemblers (if any) is handling the requested beam?
+            for (int i=0; i<nbeams; i++) {
+                if (this->ini_params.beam_ids[i] != (int)beam)
+                    continue;
+                R.push_back(this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
+                                                                      max_fpga_counts));
+                found = true;
+                break;
+            }
+            if (!found) {
+                // add empty list
+                R.push_back(vector<pair<shared_ptr<assembled_chunk>, uint64_t > >());
+            }
         }
-        R.push_back(chunks);
+    } else {
+        // Grab a snapshot from each of my assemblers.
+        for (int i=0; i<nbeams; i++) {
+            R.push_back(this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
+                                                                  max_fpga_counts));
+        }
     }
     return R;
 }
