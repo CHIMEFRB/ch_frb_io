@@ -64,7 +64,7 @@ void output_device::io_thread_main()
 		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
 
 	    w->write_callback("");
-	    return;
+	    continue;
 	}
 	
 	// If this write request is a "pseudo-duplicate", i.e. the same chunk has been
