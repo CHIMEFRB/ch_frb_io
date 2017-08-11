@@ -242,7 +242,7 @@ struct udp_packet_ringbuf : noncopyable {
 
 class assembled_chunk_ringbuf : noncopyable {
 public:
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     ~assembled_chunk_ringbuf();
 
@@ -307,6 +307,7 @@ public:
 protected:
     const intensity_network_stream::initializer ini_params;
     const int beam_id;
+    const int stream_id;   // only used in assembled_chunk::format_filename().
 
     output_device_pool output_devices;
 

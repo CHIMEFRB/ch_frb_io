@@ -289,6 +289,7 @@ public:
 	int nupfreq = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 384;
+	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
@@ -544,6 +545,7 @@ public:
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	int binning = 1;
+	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 	uint64_t ichunk = 0;
 	bool force_reference = false;
 	bool force_fast = false;
@@ -560,6 +562,7 @@ public:
     const int nt_per_packet = 0;
     const int fpga_counts_per_sample = 0;    // no binning factor applied here
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
+    const int stream_id = 0;
     const uint64_t ichunk = 0;
     
     // Derived parameters.
@@ -599,6 +602,7 @@ public:
 
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
+    //   (STREAM)  -> %02i stream_id
     //   (BEAM)    -> %04i beam_id
     //   (CHUNK)   -> %08i ichunk
     //   (NCHUNK)  -> %02i  size in chunks
