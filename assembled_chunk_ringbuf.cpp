@@ -9,9 +9,10 @@ namespace ch_frb_io {
 #endif
 
 
-assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_) :
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
     ini_params(ini_params_),
     beam_id(beam_id_),
+    stream_id(stream_id_),
     output_devices(ini_params.output_devices)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
@@ -551,6 +552,7 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     chunk_params.fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     chunk_params.force_reference = this->ini_params.force_reference_kernels;
     chunk_params.force_fast = this->ini_params.force_fast_kernels;
+    chunk_params.stream_id = this->stream_id;
     chunk_params.binning = binning;
     chunk_params.ichunk = ichunk;
 

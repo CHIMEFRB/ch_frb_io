@@ -95,6 +95,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     nt_per_packet(ini_params.nt_per_packet),
     fpga_counts_per_sample(ini_params.fpga_counts_per_sample), 
     binning(ini_params.binning),
+    stream_id(ini_params.stream_id),
     ichunk(ini_params.ichunk),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
@@ -113,6 +114,8 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 	throw runtime_error("assembled_chunk constructor: bad 'fpga_counts_per_sample' argument");
     if ((binning <= 0) || !is_power_of_two(binning) || (binning > 8))
 	throw runtime_error("assembled_chunk constructor: bad 'binning' argument");
+    if ((stream_id < 0) || (stream_id > 16))
+	throw runtime_error("assembled_chunk constructor: bad 'stream_id' argument");
 
     uint64_t ichunk_max = UINT64_MAX / uint64_t(constants::nt_per_assembled_chunk * fpga_counts_per_sample);
     if (ichunk > ichunk_max)
@@ -226,6 +229,7 @@ static string replaceAll(const string &input, const string &from, const string &
 }
 
 string assembled_chunk::format_filename(const string &pattern) const {
+    //   (STREAM)  -> %01i stream_id
     //   (BEAM)    -> %04i beam_id
     //   (CHUNK)   -> %08i ichunk
     //   (NCHUNK)  -> %02i  size in chunks
@@ -233,6 +237,7 @@ string assembled_chunk::format_filename(const string &pattern) const {
     //   (FPGA0)   -> %012i start FPGA-counts
     //   (FPGAN)   -> %08i  FPGA-counts size
     string s = pattern;
+    s = replaceAll(s, "(STREAM)",  stringprintf("%01i",        stream_id));
     s = replaceAll(s, "(BEAM)",    stringprintf("%04i",        beam_id));
     s = replaceAll(s, "(CHUNK)",   stringprintf("%08"  PRIu64, ichunk));
     s = replaceAll(s, "(NCHUNK)",  stringprintf("%02i",        binning));

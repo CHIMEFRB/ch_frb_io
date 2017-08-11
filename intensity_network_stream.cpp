@@ -77,6 +77,9 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     if ((ini_params.fpga_counts_per_sample <= 0) || (ini_params.fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("ch_frb_io: bad value of 'fpga_counts_per_sample'");	
 
+    if ((ini_params.stream_id < 0) || (ini_params.stream_id > 16))
+	throw runtime_error("ch_frb_io: bad value of 'steram_id'");
+
     if ((ini_params.udp_port <= 0) || (ini_params.udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(ini_params.udp_port));
 
@@ -100,7 +103,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     this->assemblers.resize(nbeams);
     for (int ix = 0; ix < nbeams; ix++)
-	assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix]);
+	assemblers[ix] = make_unique<assembled_chunk_ringbuf> (ini_params, ini_params.beam_ids[ix], ini_params.stream_id);
 
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
 								 ini_params.max_unassembled_packets_per_list, 
