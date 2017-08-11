@@ -559,7 +559,7 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
 	chunk_params.slab = ini_params.memory_pool->get_slab(zero);
 
 	if (!chunk_params.slab)
-	    throw runtime_error("ch_frb_io: assembled chunk allocation failed!  FIXME: currently treated as an error, should add code to recover gracefully");
+	    throw runtime_error("**** Too much memory pressure for this poor L1 node to survive!  Blowing up now... ****");
     }
 
     return assembled_chunk::make(chunk_params);
