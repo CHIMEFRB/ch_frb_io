@@ -54,13 +54,6 @@ void output_device::io_thread_main()
 	string error_message;
 	string link_src;
 
-	if (ini_params.verbosity >= 3) {
-	    chlog("dequeued write request: filename " + w->filename
-		  + ", beam " + to_string(chunk->beam_id) 
-		  + ", chunk " + to_string(chunk->ichunk) 
-		  + ", FPGA counts " + to_string(chunk->fpga_begin));
-	}
-
 	unique_lock<mutex> ulock(chunk->filename_mutex);
 
 	// If this write request is a duplicate of a previous write request, return immediately.
@@ -71,7 +64,7 @@ void output_device::io_thread_main()
 		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
 
 	    w->write_callback("");
-            continue;
+	    continue;
 	}
 	
 	// If this write request is a "pseudo-duplicate", i.e. the same chunk has been
@@ -107,10 +100,10 @@ void output_device::io_thread_main()
 	    
 	if (error_message.size() > 0 && ini_params.verbosity >= 1)
 	    chlog(error_message);
-	else if (ini_params.verbosity >= 3)
+	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
 
-        w->write_callback(error_message);
+	w->write_callback(error_message);
     }
 
     if (ini_params.verbosity >= 2)
@@ -138,13 +131,15 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     _write_reqs.push(req);
     _cond.notify_all();
 
+    int n = _write_reqs.size();
     ulock.unlock();
     
     if (ini_params.verbosity >= 3) {
 	chlog("enqueued write request: filename " + req->filename
 	      + ", beam " + to_string(req->chunk->beam_id) 
 	      + ", chunk " + to_string(req->chunk->ichunk) 
-	      + ", FPGA counts " + to_string(req->chunk->fpga_begin));
+	      + ", FPGA counts " + to_string(req->chunk->fpga_begin)
+	      + ", write_queue_size=" + to_string(n));
     }
 
     return true;
@@ -167,6 +162,18 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
     shared_ptr<write_chunk_request> ret = _write_reqs.top();
     _write_reqs.pop();
     _cond.notify_all();
+
+    int n = _write_reqs.size();
+    ulock.unlock();
+
+    if (ini_params.verbosity >= 3) {
+	chlog("dequeued write request: filename " + ret->filename
+	      + ", beam " + to_string(ret->chunk->beam_id) 
+	      + ", chunk " + to_string(ret->chunk->ichunk) 
+	      + ", FPGA counts " + to_string(ret->chunk->fpga_begin)
+	      + ", write_queue_size=" + to_string(n));
+    }
+
     return ret;
 }
 
