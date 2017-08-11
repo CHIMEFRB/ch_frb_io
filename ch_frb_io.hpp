@@ -388,9 +388,13 @@ public:
     // Retrieves chunks from one or more ring buffers.  The uint64_t
     // return value is a bitmask of l1_ringbuf_level values saying
     // where in the ringbuffer the chunk was found; this is an
-    // implementation detail revealed for debugging purposes
+    // implementation detail revealed for debugging purposes.
+    //
+    // If a vector of beam numbers is given, only the ring buffers for
+    // those beams will be returned; otherwise the ring buffers for
+    // all beams will be returned.
     std::vector< std::vector< std::pair<std::shared_ptr<assembled_chunk>, uint64_t> > >
-    get_ringbuf_snapshots(std::vector<uint64_t> &beams,
+    get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
     // For debugging/testing purposes: pretend that the given
