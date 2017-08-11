@@ -5,6 +5,7 @@
 #error "This source file needs to be compiled with C++11 support (g++ -std=c++11)"
 #endif
 
+#include <queue>
 #include <string>
 #include <vector>
 #include <functional>
@@ -726,6 +727,14 @@ struct write_chunk_request {
 
     virtual void write_callback(const std::string &error_message) { }
     virtual ~write_chunk_request() { }
+
+    // This comparator class is used below, to make an STL priority queue.
+    struct _less_than {
+	bool operator()(const std::shared_ptr<write_chunk_request> &x, const std::shared_ptr<write_chunk_request> &y)
+	{
+	    return x->priority < y->priority;
+	}
+    };
 };
 
 
@@ -776,9 +785,10 @@ protected:
     bool join_thread_called = false;
     bool thread_joined = false;
 
-    // The queue of write requests to be run by the output thread.
-    // Note that we currently use an O(N) data structure here -- could be improved to O(log N) but nontrivial!
-    std::vector<std::shared_ptr<write_chunk_request>> _write_reqs;
+    // The priority queue of write requests to be run by the output thread.
+    std::priority_queue<std::shared_ptr<write_chunk_request>,
+			std::vector<std::shared_ptr<write_chunk_request>>,
+			write_chunk_request::_less_than> _write_reqs;
     
     // The state model and request queue are protected by this lock and condition variable.
     std::mutex _lock;

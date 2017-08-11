@@ -24,9 +24,6 @@ output_device::output_device(const output_device::initializer &ini_params_) :
     ini_params(ini_params_)
 {
     // Note: no sanity-checking of ini_params needed here!
-
-    this->_write_reqs.reserve(32768);
-
     // XXX 32M is overkill!  How much space should I use here?
     this->_buffer = unique_ptr<uint8_t[]> (new uint8_t[32 * 1024 * 1024]);
 }
@@ -136,7 +133,7 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     if (end_stream_called)
 	return false;
 
-    _write_reqs.push_back(req);
+    _write_reqs.push(req);
     _cond.notify_all();
 
     ulock.unlock();
@@ -158,27 +155,15 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
     unique_lock<std::mutex> ulock(_lock);
 
     for (;;) {
-	if (_write_reqs.size() > 0)
+	if (!_write_reqs.empty())
 	    break;
 	if (end_stream_called)
 	    return shared_ptr<write_chunk_request> ();
 	_cond.wait(ulock);
     }
 
-    int n = _write_reqs.size();
-    int max_pri = _write_reqs[0]->priority;
-    int max_ix = 0;
-
-    for (int i = 0; i < n; i++) {
-	if (_write_reqs[i]->priority > max_pri) {
-	    max_pri = _write_reqs[i]->priority;
-	    max_ix = i;
-	}
-    }
-
-    shared_ptr<write_chunk_request> ret = _write_reqs[max_ix];
-    _write_reqs[max_ix] = _write_reqs[n-1];
-    _write_reqs.resize(n-1);
+    shared_ptr<write_chunk_request> ret = _write_reqs.top();
+    _write_reqs.pop();
     _cond.notify_all();
     return ret;
 }
@@ -193,13 +178,14 @@ void output_device::end_stream(bool wait)
 
     // If 'wait' is false, cancel all pending writes and return.
     if (!wait) {
-	_write_reqs.clear();
+	while (!_write_reqs.empty())
+	    _write_reqs.pop();
 	_cond.notify_all();
 	return;
     }
 
     // If 'wait' is true, wait for pending writes to complete before returning.
-    while (_write_reqs.size() > 0)
+    while (!_write_reqs.empty())
 	_cond.wait(ulock);
 }
 
