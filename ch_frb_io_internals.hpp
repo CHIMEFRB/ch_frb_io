@@ -470,6 +470,13 @@ inline bool file_exists(const std::string &filename)
     throw std::runtime_error(filename + ": " + strerror(errno));
 }
 
+inline void hard_link(const std::string &src_filename, const std::string &dst_filename)
+{
+    int err = link(src_filename.c_str(), dst_filename.c_str());
+    if (err < 0)
+	throw std::runtime_error("hard_link() failed (" + src_filename + " -> " + dst_filename + ": " + strerror(errno));
+}
+
 template<typename T> inline T sum(const std::vector<T> &v)
 {
     T ret = T(0);

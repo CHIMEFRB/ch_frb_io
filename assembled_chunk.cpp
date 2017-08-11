@@ -512,8 +512,7 @@ void assembled_chunk::write_hdf5_file(const string &filename)
     data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
 }
 
-void assembled_chunk::write_msgpack_file(const string &filename, bool compress,
-                                         uint8_t* buffer)
+void assembled_chunk::write_msgpack_file(const string &filename, bool compress, uint8_t *buffer)
 {
     char tempfilename[filename.size() + 10];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());

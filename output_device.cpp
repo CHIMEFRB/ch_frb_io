@@ -53,35 +53,65 @@ void output_device::io_thread_main()
 	if (!w)
 	    break;
 
+	shared_ptr<assembled_chunk> chunk = w->chunk;
+	string error_message;
+	string link_src;
+
 	if (ini_params.verbosity >= 3) {
 	    chlog("dequeued write request: filename " + w->filename
-		  + ", beam " + to_string(w->chunk->beam_id) 
-		  + ", chunk " + to_string(w->chunk->ichunk) 
-		  + ", FPGA counts " + to_string(w->chunk->fpga_begin));
+		  + ", beam " + to_string(chunk->beam_id) 
+		  + ", chunk " + to_string(chunk->ichunk) 
+		  + ", FPGA counts " + to_string(chunk->fpga_begin));
 	}
 
-	string error_message;
+	unique_lock<mutex> ulock(chunk->filename_mutex);
+
+	// If this write request is a duplicate of a previous write request, return immediately.
+	if (chunk->filename_set.count(w->filename) > 0) {
+	    ulock.unlock();
+
+	    if (ini_params.verbosity >= 3)
+		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
+
+	    w->write_callback("");
+	    return;
+	}
+	
+	// If this write request is a "pseudo-duplicate", i.e. the same chunk has been
+	// previously written to a different filename on the same output_device, then
+	// we'll make a hard link instead of a copy.
+
+	auto p = chunk->filename_map.find(ini_params.device_name);	
+	if (p != chunk->filename_map.end())
+	    link_src = p->second;
+
+	ulock.unlock();
 
 	try {
-	    w->chunk->write_msgpack_file(w->filename, true, this->_buffer.get());  // compress=true
+	    if (file_exists(w->filename))
+		throw runtime_error("file already exists");
+	    else if (link_src.size() == 0)
+		chunk->write_msgpack_file(w->filename, false, this->_buffer.get());  // compress=false
+	    else {
+		if (ini_params.verbosity >= 3)
+		    chlog("write request '" + w->filename + "' is a pseudo-duplicate, will hard-link from '" + link_src + "' instead of writing new copy");
+		hard_link(link_src, w->filename);
+	    }
 	} catch (exception &e) {
 	    // Note: we now include the exception text in the error_message.
 	    error_message = "Write msgpack file '" + w->filename + "' failed: " + e.what();
 	}
-
+	
+	// Success!
+	ulock.lock();
+	chunk->filename_set.insert(w->filename);
+	chunk->filename_map[ini_params.device_name] = w->filename;
+	ulock.unlock();
+	    
 	if (error_message.size() > 0 && ini_params.verbosity >= 1)
 	    chlog(error_message);
 	else if (ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
-
-	// The write_chunk_request::next pointers are used to maintain a linked list
-	// of "redundant" write requests for the same (chunk, filename) pair.  Maintaining
-	// this list is only necessary in order to ensure that all write_callbacks get
-	// called, whether or not the request was redundant.  Here, we traverse the list 
-	// and do the write_callbacks.
-
-	for (shared_ptr<write_chunk_request> ww = w; ww; ww = ww->next)
-	    ww->write_callback(error_message);
     }
 
     if (ini_params.verbosity >= 2)
@@ -96,8 +126,8 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req is null");
     if (!req->chunk)
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->chunk is null");
-    if (req->next)
-	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->next is non-null");
+    if (req->filename.size() == 0)
+	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename is an empty string");
     if (!is_prefix(this->ini_params.device_name, req->filename))
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename, device_name mismatch");
 
@@ -106,26 +136,6 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     if (end_stream_called)
 	return false;
 
-    // Two requests are considered "redundant" if they have the same (chunk, filename) pair.
-    // For each pending request, we maintain a linked list of associated redundant requests.
-    // If the new write_request is redundant with an existing request, we add it to the linked list here.
-
-    for (const auto &qreq: _write_reqs) {
-	if ((qreq->chunk == req->chunk) && (qreq->filename == req->filename)) {
-	    qreq->priority = max(req->priority, qreq->priority);
-	    req->next = qreq->next;
-	    qreq->next = req;
-	    
-	    ulock.unlock();
-
-	    if (ini_params.verbosity >= 3)
-		chlog("write_request for filename '" + req->filename + "' absorbed into existing write request");
-
-	    return true;
-	}
-    }
-
-    // No redundant request was found, just add the new request to the list.
     _write_reqs.push_back(req);
     _cond.notify_all();
 

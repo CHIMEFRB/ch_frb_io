@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <unordered_set>
 #include <unordered_map>
 #include <memory>
 #include <cstdint>
@@ -619,6 +620,11 @@ public:
     float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
     int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
 
+    // Used in the write path, to keep track of writes to disk.
+    std::mutex filename_mutex;
+    std::unordered_set<std::string> filename_set;
+    std::unordered_map<std::string, std::string> filename_map;  // hash output_device_name -> filename
+
 protected:
     // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
     std::shared_ptr<memory_slab_pool> memory_pool;
@@ -720,9 +726,6 @@ struct write_chunk_request {
 
     virtual void write_callback(const std::string &error_message) { }
     virtual ~write_chunk_request() { }
-
-    // used internally by output_device -- don't touch!
-    std::shared_ptr<write_chunk_request> next;
 };
 
 

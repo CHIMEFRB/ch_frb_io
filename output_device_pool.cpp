@@ -35,6 +35,9 @@ output_device_pool::output_device_pool(const vector<shared_ptr<output_device>> &
 
 bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
 {
+    if (req->filename.size() == 0)
+	retturn false;
+
     for (unsigned int i = 0; i < device_names.size(); i++) {
 	if (is_prefix(device_names[i], req->filename))
 	    return streams[i]->enqueue_write_request(req);
