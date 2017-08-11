@@ -100,8 +100,10 @@ void output_device::io_thread_main()
 	    
 	if (error_message.size() > 0 && ini_params.verbosity >= 1)
 	    chlog(error_message);
-	else if (ini_params.verbosity >= 3)
+	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
+
+	w->write_callback(error_message);
     }
 
     if (ini_params.verbosity >= 2)
