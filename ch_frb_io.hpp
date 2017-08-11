@@ -602,7 +602,7 @@ public:
 
     // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
     // Replacements:
-    //   (STREAM)  -> %02i stream_id
+    //   (STREAM)  -> %01i stream_id
     //   (BEAM)    -> %04i beam_id
     //   (CHUNK)   -> %08i ichunk
     //   (NCHUNK)  -> %02i  size in chunks
