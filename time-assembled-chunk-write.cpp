@@ -125,15 +125,23 @@ static ssize_t get_file_size(const string &filename)
 
 static void sync_filesystem(const string &filename)
 {
+    // Linux has the syncfs() system call, which syncs the filesystem
+    // containing a given file descriptor.  Otherwise the best we can
+    // do is sync(), which syncs all filesystems!
+    
+#if defined(__linux__)
     int fd = open(filename.c_str(), O_RDONLY, 0);
     if (fd < 0)
 	throw runtime_error(filename + ": open() failed: " + strerror(errno));
-
-    int err = fsync(fd);
+    
+    int err = syncfs(fd);
     close(fd);
     
     if (err < 0)
 	throw runtime_error(filename + ": syncfs() failed: " + strerror(errno));
+#else
+    sync();
+#endif
 }
 
 
