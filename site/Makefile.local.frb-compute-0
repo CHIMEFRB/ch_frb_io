@@ -9,26 +9,6 @@ INCDIR=$(HOME)/include
 # Directory where executables will be installed
 BINDIR=$(HOME)/bin
 
-MSGPACK_INC_DIR ?= /usr/include
-
-ZMQ_INC_DIR ?= /usr/include
-ZMQ_LIB_DIR ?= /usr/lib64
-
-CXX ?= g++
-
-OPTIMIZE ?= yes
-ifeq ($(OPTIMIZE), yes)
-    OPT_FLAGS := -O3 -funroll-loops
-else
-    OPT_FLAGS := -O0 -g
-endif
-
-COVERAGE ?= no
-ifeq ($(COVERAGE), yes)
-    # Travis + Coverall: include coverage tracking code.  Also note that we turned off optimization!
-    OPT_FLAGS += -fprofile-arcs -ftest-coverage
-endif
-
 #
 # C++ command line
 # Must support c++11
@@ -37,6 +17,6 @@ endif
 # Don't forget -pthread and -fPIC
 #
 
-CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) -I$(MSGPACK_INC_DIR) -I$(ZMQ_INC_DIR)
+CPP=g++ -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
 
-CPP_LFLAGS := -L. -L$(LIBDIR) -L$(ZMQ_LIB_DIR)
+CPP_LFLAGS=-L. -L$(LIBDIR)
