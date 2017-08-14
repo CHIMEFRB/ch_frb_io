@@ -168,69 +168,18 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
 ### LOOSE ENDS IN NETWORKING CODE
 
-  - We plan to implement RPC's which operate on the assembled_ringbufs, and support
-    operations such as flushes to disk, and retrieval of ring-buffered data over the network.
-    The first step here is doing some research to decide which RPC framework to use (maybe
-    google RPC?)
-
-  - We don't have thread-safe logging, so diagnostic messages from the various threads
-    sometimes interleave each other and are unreadable.  (Implementing thread-safe
-    logging is a general todo item for the whole CHIMEFRB backend, not just this repository!)
-
-  - There is a proposal to bitshuffle-compress the packets, which may reduce bandwidth
-    by ~20%, but this is currently unimplemented.
+  - Compression is not implemented yet.
 
   - Open-ended item: there are lots of things that can go wrong in a realtime system,
     such as temporary network failures, and threads running slow so that ring buffers
     overfill.  We need to think carefully about different failure modes and figure out
     how best to handle them.
 
-  - When the network stream is running, it maintains "event counts" for many types of
-    events, such as packet drops, assembler hits/misses etc.  Right now we don't really
-    do anything with this information but it's intended to be a starting point for some
-    sort of RPC-driven dashboard which can give a visual summary of how the backend is
-    performing.
-
-    Related: we probably want to generalize the event counts (currently cumulative) to
-    keep track of the event rate for some choice of timescale (say 10 sec).
-
-    Another possible improvement: another way of making events more granular is to
-    bin them by source IP address.
-
-    One more!  It would be nice to keep track of the fraction of intensity samples which
-    are masked (either 0x00 or 0xff bytes), or missing.  A natural place to put this counting 
-    is assembled_chunk::add_packet(), but this is a little nontrivial since it involves
-    modifying assembly language kernels, so I haven't done it yet.
-
-  - Eventually it would be nice to do an end-to-end test of the FRB backend, by having
-    a "simulator" node generate timestreams containing noise + FRB's, and sending them
-    over the network.  However, the current simulation code is too slow to do this!
-
-    The most important thing is to multithread the part of the code which simulates 
-    the timestream (e.g. we could have one rf_pipeline per beam, with outputs combined
-    into a ring buffer which feeds the intensity_network_ostream).  It may also help
-    a little to write an assembly language packet encoding kernel (the correlator
-    developers will probably do this eventually, so maybe we can just steal theirs).
-
-  - There are two ring buffer data structures in the network code, a udp_packet_ringbuf
-    and an assembled_chunk_ringbuf.  The udp_packet_ringbuf has been designed so that a 
-    fixed pool of buffers is recycled throughout the lifetime of the ring buffer, whereas
-    the assembled_chunk_ringbuf continually frees and allocates buffers.  It would be
-    better to change the assembled_chunk_ringbuf to use a fixed buffer pool, in order to avoid
-    the page-faulting cost of Linux malloc.
+  - End-to-end simulations (L0 simulation code needs work).
 
   - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
     multiple UDP packets, avoiding the overhead of one system call per packet.  This
     may help speed things up, or help reduce packet drops.
-
-  - In the full CHIME backend, do we want to pin the network and/or assembler threads
-    to specific cores?  Do we want to increase the scheduling priority of these threads?
-
-  - It might be possible to further optimize the assembly-language kernels for packet assembly
-    and decoding, using streaming writes.  See Chapter 7 ("optimizing cache usage") of the
-    intel optimization manual.  We also might be able to improve performance a little using
-    aligned loads/stores, but this would impose pointer alignment requirements on callers of
-    assembled_chunk::decode().
 
   - The assembler should handle packets which arrive in an arbitrary order, but our
     unit test doesn't fully test this.  (It does permute the coarse frequencies, since
