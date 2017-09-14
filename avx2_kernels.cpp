@@ -49,9 +49,9 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
     throw runtime_error("ch_frb_io: fast kernels not available (non-AVX2 machine), you need to use slow kernels");
 }
 
-void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
+void fast_assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride) const
 {
-    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::add_packet() called on a non-AVX2 machine");
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::decode() called on a non-AVX2 machine");
 }
 
 void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembled_chunk *src2)
@@ -871,12 +871,14 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 
 
 // virtual override
-void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
+void fast_assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride) const
 {
     if (!intensity || !weights)
 	throw runtime_error("ch_frb_io: null pointer passed to fast_assembled_chunk::decode()");
-    if (stride < constants::nt_per_assembled_chunk)
-	throw runtime_error("ch_frb_io: bad stride passed to fast_assembled_chunk::decode()");
+    if (istride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad istride passed to fast_assembled_chunk::decode()");
+    if (wstride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad wstride passed to fast_assembled_chunk::decode()");
 
     decoder d;
 
@@ -886,8 +888,8 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 	
 	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
 	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
-	    float *int_f = intensity + if_fine * stride;
-	    float *wt_f = weights + if_fine * stride;
+	    float *int_f = intensity + if_fine * istride;
+	    float *wt_f = weights + if_fine * wstride;
 
 	    d.decode_row(int_f, wt_f, src_f, scales_f, offsets_f);
 	}
@@ -1266,7 +1268,8 @@ void test_avx2_kernels(std::mt19937 &rng)
 	// Randomized in every iteration
 	const int nupfreq = 2 * randint(rng, 1, 9);
 	const int nfreq_coarse_per_packet = 1 << randint(rng, 0, 6);
-	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
+	const int istride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
+	const int wstride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
 
 	int nfreq_c = constants::nfreq_coarse_tot;
 	int nfreq_f = constants::nfreq_coarse_tot * nupfreq;
@@ -1367,33 +1370,34 @@ void test_avx2_kernels(std::mt19937 &rng)
 	chunk0->randomize(rng);
 	chunk1->fill_with_copy(chunk0);
 
-	unique_ptr<float[]> intensity0 = uniform_randvec<float> (rng, nfreq_f * stride, 0.0, 1.0);
-	unique_ptr<float[]> intensity1 = uniform_randvec<float> (rng, nfreq_f * stride, 0.0, 1.0);
-	unique_ptr<float[]> weights0 = uniform_randvec<float>(rng, nfreq_f * stride, 0.0, 1.0);
-	unique_ptr<float[]> weights1 = uniform_randvec<float>(rng, nfreq_f * stride, 0.0, 1.0);
+	unique_ptr<float[]> intensity0 = uniform_randvec<float> (rng, nfreq_f * istride, 0.0, 1.0);
+	unique_ptr<float[]> intensity1 = uniform_randvec<float> (rng, nfreq_f * istride, 0.0, 1.0);
+	unique_ptr<float[]> weights0 = uniform_randvec<float>(rng, nfreq_f * wstride, 0.0, 1.0);
+	unique_ptr<float[]> weights1 = uniform_randvec<float>(rng, nfreq_f * wstride, 0.0, 1.0);
 
-	chunk0->decode(&intensity0[0], &weights0[0], stride);
-	chunk1->decode(&intensity1[0], &weights1[0], stride);
+	chunk0->decode(&intensity0[0], &weights0[0], istride, wstride);
+	chunk1->decode(&intensity1[0], &weights1[0], istride, wstride);
 
 	for (int ifreq = 0; ifreq < nfreq_f; ifreq++) {
 	    for (int it = 0; it < constants::nt_per_assembled_chunk; it++) {
-		int i = ifreq*stride + it;
+		int ii = ifreq*istride + it;
+		int wi = ifreq*wstride + it;
 		int j = ifreq*constants::nt_per_assembled_chunk + it;
 
-		if (weights0[i] != weights1[i]) {
+		if (weights0[wi] != weights1[wi]) {
 		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
-			 << " " << weights0[i] << " " << weights1[i] << endl;
+			 << " " << weights0[wi] << " " << weights1[wi] << endl;
 		    throw runtime_error("test_avx2_kernels: weights mismatch");
 		}
 
-		if (weights0[i] == 0.0)
+		if (weights0[wi] == 0.0)
 		    continue;
 
-		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5) {
+		if (fabs(intensity0[ii] - intensity1[ii]) > 1.0e-5) {
 		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
-			 << " " << intensity0[i] << " " << intensity1[i] << endl;
+			 << " " << intensity0[ii] << " " << intensity1[ii] << endl;
 		    throw runtime_error("test_avx2_kernels: intensity mismatch");
 		}
 	    }

@@ -60,7 +60,8 @@ struct unit_test_instance {
     vector<int> send_freq_ids;
 
     int send_stride = 0;
-    int recv_stride = 0;
+    int recv_istride = 0;
+    int recv_wstride = 0;
 
     int nbytes_per_packet = 0;
     int npackets_per_chunk = 0;
@@ -122,7 +123,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->target_gbps = target_gbps_;
 
     this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
-    this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
+    this->recv_istride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
+    this->recv_wstride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
 
 #if 0
     // Sometimes it's convenient to debug a specific test case...
@@ -138,7 +140,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->wt_cutoff = 0.63584;
     this->target_gbps = 0.1;
     this->send_stride = 445;
-    this->recv_stride = 1455;
+    this->recv_istride = 1455;
+    this->recv_wstride = 1455;
 #endif
 
     // Clunky way of generating random beam_ids
@@ -182,7 +185,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 	 << "    wt_cutoff=" << wt_cutoff << endl
 	 << "    target_gbps=" << target_gbps << endl
 	 << "    send_stride=" << send_stride << endl
-	 << "    recv_stride=" << recv_stride << endl
+	 << "    recv_istride=" << recv_istride << endl
+	 << "    recv_wstride=" << recv_wstride << endl
 	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
 	 << "    npackets_per_chunk=" << npackets_per_chunk << endl;
 
@@ -275,9 +279,9 @@ static void *processing_thread_main(void *opaque_arg)
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
 
-    int nalloc = ch_frb_io::constants::nfreq_coarse_tot * tp->nupfreq * tp->recv_stride;
-    vector<float> all_intensities(nalloc, 0.0);
-    vector<float> all_weights(nalloc, 0.0);
+    int nfreq_f = ch_frb_io::constants::nfreq_coarse_tot * tp->nupfreq;
+    vector<float> all_intensities(nfreq_f * tp->recv_istride, 0.0);
+    vector<float> all_weights(nfreq_f * tp->recv_wstride, 0.0);
 
     double wt_cutoff = tp->wt_cutoff;
     int test_t0 = tp->initial_t0;
@@ -293,7 +297,7 @@ static void *processing_thread_main(void *opaque_arg)
 	if (!chunk)
 	    break;
 
-	chunk->decode(&all_intensities[0], &all_weights[0], tp->recv_stride);
+	chunk->decode(&all_intensities[0], &all_weights[0], tp->recv_istride, tp->recv_wstride);
 
 	assert(chunk->nupfreq == tp->nupfreq);
 	assert(chunk->nt_per_packet == tp->nt_per_packet);
@@ -316,9 +320,9 @@ static void *processing_thread_main(void *opaque_arg)
 
 	int chunk_t0 = chunk->isample;
 
-	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse_tot * tp->nupfreq; ifreq++) {
-	    const float *int_row = &all_intensities[0] + ifreq * tp->recv_stride;
-	    const float *wt_row = &all_weights[0] + ifreq * tp->recv_stride;
+	for (int ifreq = 0; ifreq < nfreq_f; ifreq++) {
+	    const float *int_row = &all_intensities[0] + ifreq * tp->recv_istride;
+	    const float *wt_row = &all_weights[0] + ifreq * tp->recv_wstride;
 
 	    for (int it = 0; it < ch_frb_io::constants::nt_per_assembled_chunk; it++) {
 		// Out of range

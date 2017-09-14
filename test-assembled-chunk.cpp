@@ -131,13 +131,14 @@ int main(int argc, char **argv)
     float* intensity = (float*)malloc(chunk1->ndata * sizeof(float));
     float* weight    = (float*)malloc(chunk1->ndata * sizeof(float));
 
-    chunk1->decode(intensity, weight, constants::nt_per_assembled_chunk);
+    int stride = constants::nt_per_assembled_chunk;
+    chunk1->decode(intensity, weight, stride, stride); 
 
     FILE* f = fopen("chunk1-decoded.raw", "w");
     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);
     fclose(f);
 
-    chunk2->decode(intensity, weight, constants::nt_per_assembled_chunk);
+    chunk2->decode(intensity, weight, stride, stride);
 
     f = fopen("chunk2-decoded.raw", "w");
     fwrite(intensity, 1, chunk1->ndata * sizeof(float), f);

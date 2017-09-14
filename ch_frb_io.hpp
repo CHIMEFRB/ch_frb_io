@@ -173,10 +173,10 @@ struct intensity_hdf5_file : noncopyable {
     // 
     // The 'out_int' and 'out_wt' arrays have shape (nfreq, out_nt).
     //
-    // The 'out_stride' arg can be negative, if reversing the channel ordering is desired.
-    // If out_stride is zero, it defaults to out_nt.
+    // The 'out_istride' and 'out_wstride' args can be negative, if reversing the channel ordering is desired.
+    // If out_istride is zero, it defaults to out_nt.  If out_wstride is zero, it defaults to out_istride.
     //
-    void get_unpolarized_intensity(float *out_int, float *out_wt, int out_t0, int out_nt, int out_stride=0) const;
+    void get_unpolarized_intensity(float *out_int, float *out_wt, int out_t0, int out_nt, int out_istride=0, int out_wstride=0) const;
 
     void run_unit_tests() const;
 };
@@ -584,7 +584,7 @@ public:
     // (currently nt_per_packet==16 and nupfreq even).
 
     virtual void add_packet(const intensity_packet &p);
-    virtual void decode(float *intensity, float *weights, int stride) const;
+    virtual void decode(float *intensity, float *weights, int istride, int wstride) const;
     virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int stride) const;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
 
@@ -661,7 +661,7 @@ public:
 
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
-    virtual void decode(float *intensity, float *weights, int stride) const override;
+    virtual void decode(float *intensity, float *weights, int istride, int wstride) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
 
 };

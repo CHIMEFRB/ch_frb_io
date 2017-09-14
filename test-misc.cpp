@@ -38,7 +38,8 @@ static void test_encode_decode(std::mt19937 &rng)
 	int nt_per_chunk = constants::nt_per_assembled_chunk;
 	double wt_cutoff = uniform_rand(rng, 0.2, 0.3);
 	int src_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
-	int dst_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
+	int dst_istride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
+	int dst_wstride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
 	int ichunk = randint(rng, 0, 1024);
 	int fpga_counts_per_sample = randint(rng, 1, 1024);
 
@@ -128,23 +129,24 @@ static void test_encode_decode(std::mt19937 &rng)
 	    }
 	}
 
-	vector<float> dst_intensity(nfreq_coarse_tot * nupfreq * dst_stride, 1.0e30);
-	vector<float> dst_weights(nfreq_coarse_tot * nupfreq * dst_stride, 1.0e30);
+	vector<float> dst_intensity(nfreq_coarse_tot * nupfreq * dst_istride, 1.0e30);
+	vector<float> dst_weights(nfreq_coarse_tot * nupfreq * dst_wstride, 1.0e30);
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-	    assembled_chunks[ibeam]->decode(&dst_intensity[0], &dst_weights[0], dst_stride);
+	    assembled_chunks[ibeam]->decode(&dst_intensity[0], &dst_weights[0], dst_istride, dst_wstride);
 
 	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse_tot; ifreq_coarse++) {
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 		    int s = ((ibeam*nfreq_coarse_tot + ifreq_coarse) * nupfreq + iupfreq) * src_stride;
-		    int d = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_stride;
+		    int id = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_istride;
+		    int wd = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_wstride;
 
 		    for (int it = 0; it < nt_per_chunk; it++) {
-			if (dst_weights[d+it] == 0.0)
+			if (dst_weights[wd+it] == 0.0)
 			    assert(src_weights[s+it] <= 1.00001 * wt_cutoff);
-			else if (dst_weights[d+it] == 1.0) {
+			else if (dst_weights[wd+it] == 1.0) {
 			    assert(src_weights[s+it] >= 0.99999 * wt_cutoff);
-			    assert(fabs(dst_intensity[d+it] - src_intensity[s+it]) < 0.02);
+			    assert(fabs(dst_intensity[id+it] - src_intensity[s+it]) < 0.02);
 			}
 			else
 			    throw runtime_error("dst_weights not equal to 0 or 1?!");

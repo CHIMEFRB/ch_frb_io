@@ -320,12 +320,14 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 
 
 // virtual member function; any changes made here should be reflected in override fast_assembled_chunk::decode().
-void assembled_chunk::decode(float *intensity, float *weights, int stride) const
+void assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride) const
 {
     if (!intensity || !weights)
 	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::decode()");	
-    if (stride < constants::nt_per_assembled_chunk)
-	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode()");
+    if (istride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad istride passed to assembled_chunk::decode()");
+    if (wstride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad wstride passed to assembled_chunk::decode()");
 
     for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
 	const float *scales_f = this->scales + if_coarse * nt_coarse;
@@ -333,8 +335,8 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 	
 	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
 	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
-	    float *int_f = intensity + if_fine * stride;
-	    float *wt_f = weights + if_fine * stride;
+	    float *int_f = intensity + if_fine * istride;
+	    float *wt_f = weights + if_fine * wstride;
 
 	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
 		float scale = scales_f[it_coarse];

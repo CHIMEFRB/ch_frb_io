@@ -46,7 +46,7 @@ static double time_decode(std::mt19937 &rng)
 	for (int ichunk = 0; ichunk < nchunks; ichunk++)
 	    chunks[ichunk]->decode(&intensity[ichunk * nfreq_f * stride],
 				   &weights[ichunk * nfreq_f * stride],
-				   stride);
+				   stride, stride);
 
     struct timeval tv1 = xgettimeofday();
 

@@ -170,10 +170,12 @@ intensity_hdf5_file::intensity_hdf5_file(const string &filename_, bool noisy) :
 }
 
 
-void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_wt, int out_t0, int out_nt, int out_stride) const
+void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_wt, int out_t0, int out_nt, int out_istride, int out_wstride) const
 {
-    if (out_stride == 0)
-	out_stride = out_nt;
+    if (out_istride == 0)
+	out_istride = out_nt;
+    if (out_wstride == 0)
+	out_wstride = out_istride;
 
     if (out_int==nullptr || out_wt==nullptr)
 	throw runtime_error("NULL pointer passed to intensity_hdf5_file::get_unpolarized_intensity()");
@@ -181,12 +183,14 @@ void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_w
 	throw runtime_error("intensity_hdf5_file::get_unpolarized_intensity(): expected out_nt > 0");
     if ((out_t0 < 0) || (out_t0 + out_nt > this->nt_logical))
 	throw runtime_error("intensity_hdf5_file::get_unpolarized_intensity(): requested time range overflows file");
-    if (abs(out_stride) < out_nt)
-	throw runtime_error("intensity_hdf5_file::get_unpolarized_intensity(): out_stride is too small");
+    if (abs(out_istride) < out_nt)
+	throw runtime_error("intensity_hdf5_file::get_unpolarized_intensity(): out_istride is too small");
+    if (abs(out_wstride) < out_nt)
+	throw runtime_error("intensity_hdf5_file::get_unpolarized_intensity(): out_wstride is too small");
 
     for (int ifreq = 0; ifreq < nfreq; ifreq++) {
-	memset(out_int + ifreq*out_stride, 0, out_nt * sizeof(*out_int));
-	memset(out_wt + ifreq*out_stride, 0, out_nt * sizeof(*out_wt));
+	memset(out_int + ifreq*out_istride, 0, out_nt * sizeof(*out_int));
+	memset(out_wt + ifreq*out_wstride, 0, out_nt * sizeof(*out_wt));
     }
 
     //
@@ -200,7 +204,7 @@ void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_w
 	if ((it_l < out_t0) || (it_l >= out_t0+out_nt))
 	    continue;
 
-	// 1D arrays with length=nfreq and stride=out_stride
+	// 1D arrays with length=nfreq and stride=(out_istride,out_wstride).
 	float *dst_int = out_int + (it_l - out_t0);
 	float *dst_wt = out_wt + (it_l - out_t0);
 
@@ -211,10 +215,9 @@ void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_w
 	    const int in_stride = npol * nt_file;
 
 	    for (int ifreq = 0; ifreq < nfreq; ifreq++) {
-		int d = ifreq * out_stride;
 		int s = ifreq * in_stride;
-		dst_int[d] += src_int[s] * src_wt[s];
-		dst_wt[d] += src_wt[s];
+		dst_int[ifreq*out_istride] += src_int[s] * src_wt[s];
+		dst_wt[ifreq*out_wstride] += src_wt[s];
 	    }
 	}
     }
@@ -223,8 +226,8 @@ void intensity_hdf5_file::get_unpolarized_intensity(float *out_int, float *out_w
 
     for (int ifreq = 0; ifreq < nfreq; ifreq++) {
 	// 1D arrays with length=out_nt
-	float *dst_int = out_int + ifreq * out_stride;
-	float *dst_wt = out_wt + ifreq * out_stride;
+	float *dst_int = out_int + ifreq * out_istride;
+	float *dst_wt = out_wt + ifreq * out_wstride;
 
 	for (int it = 0; it < out_nt; it++) {
 	    if (dst_wt[it] > 0.0)
@@ -299,28 +302,31 @@ void intensity_hdf5_file::run_unit_tests() const
 	if (buf_it0 > buf_it1) std::swap(buf_it0, buf_it1);
 	int buf_nt = buf_it1 - buf_it0 + 1;
 
-	// random stride, can be positive or negative
-	int stride = randint(rng, buf_nt, 2*nt_logical);
-	if (uniform_rand(rng) > 0.5) stride *= -1;
+	// random strides, can be positive or negative
+	int istride = randint(rng, buf_nt, 2*nt_logical);
+	int wstride = randint(rng, buf_nt, 2*nt_logical);
+	if (uniform_rand(rng) > 0.5) istride *= -1;
+	if (uniform_rand(rng) > 0.5) wstride *= -1;
 	
 	// randomize buffer
 	for (int ifreq = 0; ifreq < nfreq; ifreq++) {
-	    uniform_rand(rng, buf_int + ifreq*stride, buf_nt);
-	    uniform_rand(rng, buf_wt + ifreq*stride, buf_nt);
+	    uniform_rand(rng, buf_int + ifreq*istride, buf_nt);
+	    uniform_rand(rng, buf_wt + ifreq*wstride, buf_nt);
 	}
 
 	// randomized call to intensity_hdf5_file::get_unpolarized_intensity()
-	this->get_unpolarized_intensity(buf_int, buf_wt, buf_it0, buf_nt, stride);
+	this->get_unpolarized_intensity(buf_int, buf_wt, buf_it0, buf_nt, istride, wstride);
 
 	// compare with reference
 	for (int ifreq = 0; ifreq < nfreq; ifreq++) {
 	    for (int it = 0; it < buf_nt; it++) {
 		int sr = ifreq*nt_logical + it + buf_it0;
-		int sb = ifreq*stride + it;
+		int si = ifreq*istride + it;
+		int sw = ifreq*wstride + it;
 
-		if (fabs(ref_int[sr] - buf_int[sb]) > 1.0e-3)
+		if (fabs(ref_int[sr] - buf_int[si]) > 1.0e-3)
 		    throw runtime_error(filename + ": intensity consistency check failed");
-		if (fabs(ref_wt[sr] - buf_wt[sb]) > 1.0e-3)
+		if (fabs(ref_wt[sr] - buf_wt[sw]) > 1.0e-3)
 		    throw runtime_error(filename + ": weights consistency check failed");
 	    }
 	}
