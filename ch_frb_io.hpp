@@ -585,7 +585,7 @@ public:
 
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int istride, int wstride) const;
-    virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int stride) const;
+    virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int istride, int wstride) const;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
 
     // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.

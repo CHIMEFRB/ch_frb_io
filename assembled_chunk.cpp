@@ -352,12 +352,14 @@ void assembled_chunk::decode(float *intensity, float *weights, int istride, int 
     }
 }
 
-void assembled_chunk::decode_subset(float *intensity, float *weights,
-                                    int t0, int NT, int stride) const {
+void assembled_chunk::decode_subset(float *intensity, float *weights, int t0, int NT, int istride, int wstride) const 
+{                                    
     if (!intensity || !weights)
 	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::decode_subset()");
-    if (stride < NT)
-	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode_subset()");
+    if (istride < NT)
+	throw runtime_error("ch_frb_io: bad istride passed to assembled_chunk::decode_subset()");
+    if (wstride < NT)
+	throw runtime_error("ch_frb_io: bad wstride passed to assembled_chunk::decode_subset()");
     if ((t0 < 0) || (NT < 0) || (t0 + NT > constants::nt_per_assembled_chunk))
 	throw runtime_error("ch_frb_io: bad (t0,NT) passed to assembled_chunk::decode_subset()");
 
@@ -367,8 +369,8 @@ void assembled_chunk::decode_subset(float *intensity, float *weights,
 
 	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
 	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
-	    float *int_f = intensity + if_fine * stride;
-	    float * wt_f = weights   + if_fine * stride;
+	    float *int_f = intensity + if_fine * istride;
+	    float * wt_f = weights   + if_fine * wstride;
 
             for (int i=0; i<NT; i++) {
                 int it = t0 + i;
