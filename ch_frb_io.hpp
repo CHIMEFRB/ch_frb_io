@@ -940,11 +940,11 @@ public:
     // The 'intensity' and 'weights' arrays have logical shape
     //   (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
     //
-    // The 'stride' arg is the memory offset between time series in the arrays.
+    // The 'istride/wstride' args are tmemory offsets between time series in the intensity/weights arrays.
     // To write this out explicitly, the intensity sample with logical indices (b,fcoarse,u,t) has memory location
     //   intensity + ((b + fcoarse*nupfreq) * nupfreq + u) * stride + t
 
-    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
+    void send_chunk(const float *intensity, int istride, const float *weights, int wstride, uint64_t fpga_count);
 
     void get_statistics(int64_t& curr_timestamp,
                         int64_t& npackets_sent,
@@ -956,7 +956,7 @@ public:
     ~intensity_network_ostream();
 
     // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
-    void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
+    void _encode_chunk(const float *intensity, int istride, const float *weights, int wstride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
 
     void print_status(std::ostream &os = std::cout);
 

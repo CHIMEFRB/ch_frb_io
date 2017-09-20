@@ -247,10 +247,11 @@ void intensity_network_ostream::_open_socket()
 
 
 // The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
-void intensity_network_ostream::_encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const unique_ptr<udp_packet_list> &out)
+void intensity_network_ostream::_encode_chunk(const float *intensity, int istride, const float *weights, int wstride, uint64_t fpga_count, const unique_ptr<udp_packet_list> &out)
 {
     // The number of packets per chunk is (nf_outer * nt_outer)
-    int beam_stride = nfreq_coarse_per_chunk * nupfreq * stride;
+    int beam_istride = nfreq_coarse_per_chunk * nupfreq * istride;
+    int beam_wstride = nfreq_coarse_per_chunk * nupfreq * wstride;
     int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
     int nt_outer = nt_per_chunk / nt_per_packet;
 
@@ -278,13 +279,17 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, const floa
     // Loop over packets in chunk.
     for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
 	for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
-	    int data_offset = (if_outer * nfreq_coarse_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
+	    int ioffset = (if_outer * nfreq_coarse_per_packet * nupfreq * istride) + (it_outer * nt_per_packet);
+	    int woffset = (if_outer * nfreq_coarse_per_packet * nupfreq * wstride) + (it_outer * nt_per_packet);
 
 	    // Some intensity_packet fields are packet-dependent; these are initialized here.
 	    packet.coarse_freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
 	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
-	    int nbytes_encoded = packet.encode(out->data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
+	    int nbytes_encoded = packet.encode(out->data_end, 
+					       intensity + ioffset, beam_istride, istride, 
+					       weights + woffset, beam_wstride, wstride, 
+					       ini_params.wt_cutoff);
 
 	    // A probably-paranoid sanity check
 	    if (_unlikely(nbytes_encoded != nbytes_per_packet))
@@ -296,9 +301,9 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, const floa
 }
 
 
-void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
+void intensity_network_ostream::send_chunk(const float *intensity, int istride, const float *weights, int wstride, uint64_t fpga_count)
 {
-    this->_encode_chunk(intensity, weights, stride, fpga_count, this->tmp_packet_list);
+    this->_encode_chunk(intensity, istride, weights, wstride, fpga_count, this->tmp_packet_list);
 
     if (ringbuf->put_packet_list(tmp_packet_list, ini_params.is_blocking))
 	return;
