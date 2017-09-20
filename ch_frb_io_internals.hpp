@@ -109,7 +109,7 @@ struct intensity_packet {
     //
     //    - Caller should initialize the 'intensity' and 'weights' arrays to point to logical arrays 
     //      of shape (nbeams, nfreq_coarse, nupfreq, ntsamp).  This is the data that will be encoded 
-    //      into the packet.  The stride arguments are defined so that the intensity array element with 
+    //      into the packet.  The istride/wstride arguments are defined so that the intensity array element with 
     //      logical indices (b,f,u,t) has memory location
     //
     //          intensity + b*beam_stride + (f*nupfreq+u)*freq_stride + t
@@ -134,7 +134,10 @@ struct intensity_packet {
     // Caveat emptor: encode() doesn't do any argument checking at all, so it's easy to segfault
     // by calling it wrong!
 
-    int encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
+    int encode(uint8_t *dst, 
+	       const float *intensity, int beam_istride, int freq_istride, 
+	       const float *weights, int beam_wstride, int freq_wstride, 
+	       float wt_cutoff);
 
 
     // Currently used only for debugging

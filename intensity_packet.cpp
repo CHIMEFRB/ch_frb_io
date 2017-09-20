@@ -79,7 +79,7 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
 // Encodes a floating-point array of intensities into raw packet data, before sending packet.
 // The precise semantics aren't very intuitive, see extended comment in ch_frb_io_internals.hpp for details!
 
-int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
+int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istride, int freq_istride, const float *weights, int beam_wstride, int freq_wstride, float wt_cutoff)
 {
     int nb = this->nbeams;
     int nf = this->nfreq_coarse;
@@ -97,8 +97,8 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *
     for (int b = 0; b < nb; b++) {
 	for (int f = 0; f < nf; f++) {
 	    uint8_t *sub_data = data + (b*nf+f) * (nu*nt);
-	    const float *sub_int = intensity + b*beam_stride + f*nu*freq_stride;
-	    const float *sub_wt = weights + b*beam_stride + f*nu*freq_stride;
+	    const float *sub_int = intensity + b*beam_istride + f*nu*freq_istride;
+	    const float *sub_wt = weights + b*beam_wstride + f*nu*freq_wstride;
 
 	    float acc0 = 0.0;
 	    float acc1 = 0.0;
@@ -106,8 +106,8 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *
 
 	    for (int u = 0; u < nu; u++) {
 		for (int t = 0; t < nt; t++) {
-		    float x = sub_int[u*freq_stride+t];
-		    float w = (sub_wt[u*freq_stride+t] >= wt_cutoff) ? 1.0 : 0.0;
+		    float x = sub_int[u*freq_istride+t];
+		    float w = (sub_wt[u*freq_wstride+t] >= wt_cutoff) ? 1.0 : 0.0;
 
 		    acc0 += w;
 		    acc1 += w * x;
@@ -140,8 +140,8 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *
 
 	    for (int u = 0; u < nu; u++) {
 		for (int t = 0; t < nt; t++) {
-		    float x = sub_int[u*freq_stride+t];
-		    float w = (sub_wt[u*freq_stride+t] >= wt_cutoff) ? 1.0 : 0.0;
+		    float x = sub_int[u*freq_istride+t];
+		    float w = (sub_wt[u*freq_wstride+t] >= wt_cutoff) ? 1.0 : 0.0;
 
 		    x = w * (x - offset) / scale;
 		    x = min(x, float(255.));
