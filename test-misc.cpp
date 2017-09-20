@@ -37,7 +37,8 @@ static void test_encode_decode(std::mt19937 &rng)
 	int nfreq_coarse_tot = constants::nfreq_coarse_tot;
 	int nt_per_chunk = constants::nt_per_assembled_chunk;
 	double wt_cutoff = uniform_rand(rng, 0.2, 0.3);
-	int src_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
+	int src_istride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
+	int src_wstride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
 	int dst_istride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
 	int dst_wstride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
 	int ichunk = randint(rng, 0, 1024);
@@ -46,13 +47,13 @@ static void test_encode_decode(std::mt19937 &rng)
 	vector<int> send_freq_ids = vrange(constants::nfreq_coarse_tot);
 	std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
 
-	vector<float> src_intensity(nbeams * nfreq_coarse_tot * nupfreq * src_stride, 0.0);
-	vector<float> src_weights(nbeams * nfreq_coarse_tot * nupfreq * src_stride, 0.0);
+	vector<float> src_intensity(nbeams * nfreq_coarse_tot * nupfreq * src_istride, 0.0);
+	vector<float> src_weights(nbeams * nfreq_coarse_tot * nupfreq * src_wstride, 0.0);
 
 	for (int i = 0; i < nbeams * nfreq_coarse_tot * nupfreq; i++) {
 	    for (int it = 0; it < nt_per_chunk; it++) {
-		src_intensity[i*src_stride + it] = uniform_rand(rng);
-		src_weights[i*src_stride + it] = uniform_rand(rng);
+		src_intensity[i*src_istride + it] = uniform_rand(rng);
+		src_weights[i*src_wstride + it] = uniform_rand(rng);
 	    }
 	}
 
@@ -88,7 +89,7 @@ static void test_encode_decode(std::mt19937 &rng)
 	    assembled_chunks[ibeam] = assembled_chunk::make(ini_params);
 	}
 
-	ostream->_encode_chunk(&src_intensity[0], &src_weights[0], src_stride, ichunk * nt_per_chunk * fpga_counts_per_sample, packet_list);
+	ostream->_encode_chunk(&src_intensity[0], src_istride, &src_weights[0], src_wstride, ichunk * nt_per_chunk * fpga_counts_per_sample, packet_list);
 	
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
 	    uint8_t *packet_data = packet_list->get_packet_data(ipacket);
@@ -137,16 +138,17 @@ static void test_encode_decode(std::mt19937 &rng)
 
 	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse_tot; ifreq_coarse++) {
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
-		    int s = ((ibeam*nfreq_coarse_tot + ifreq_coarse) * nupfreq + iupfreq) * src_stride;
-		    int id = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_istride;
-		    int wd = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_wstride;
+		    int si = ((ibeam*nfreq_coarse_tot + ifreq_coarse) * nupfreq + iupfreq) * src_istride;
+		    int sw = ((ibeam*nfreq_coarse_tot + ifreq_coarse) * nupfreq + iupfreq) * src_wstride;
+		    int di = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_istride;
+		    int dw = ((send_freq_ids[ifreq_coarse] * nupfreq) + iupfreq) * dst_wstride;
 
 		    for (int it = 0; it < nt_per_chunk; it++) {
-			if (dst_weights[wd+it] == 0.0)
-			    assert(src_weights[s+it] <= 1.00001 * wt_cutoff);
-			else if (dst_weights[wd+it] == 1.0) {
-			    assert(src_weights[s+it] >= 0.99999 * wt_cutoff);
-			    assert(fabs(dst_intensity[id+it] - src_intensity[s+it]) < 0.02);
+			if (dst_weights[dw+it] == 0.0)
+			    assert(src_weights[sw+it] <= 1.00001 * wt_cutoff);
+			else if (dst_weights[dw+it] == 1.0) {
+			    assert(src_weights[sw+it] >= 0.99999 * wt_cutoff);
+			    assert(fabs(dst_intensity[di+it] - src_intensity[si+it]) < 0.02);
 			}
 			else
 			    throw runtime_error("dst_weights not equal to 0 or 1?!");

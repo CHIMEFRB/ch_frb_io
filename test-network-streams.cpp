@@ -59,7 +59,8 @@ struct unit_test_instance {
     vector<int> send_beam_ids;
     vector<int> send_freq_ids;
 
-    int send_stride = 0;
+    int send_istride = 0;
+    int send_wstride = 0;
     int recv_istride = 0;
     int recv_wstride = 0;
 
@@ -122,7 +123,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
     this->target_gbps = target_gbps_;
 
-    this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
+    this->send_istride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
+    this->send_wstride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
     this->recv_istride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
     this->recv_wstride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
 
@@ -139,7 +141,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->fpga_counts_per_sample = 244;
     this->wt_cutoff = 0.63584;
     this->target_gbps = 0.1;
-    this->send_stride = 445;
+    this->send_istride = 445;
+    this->send_wstride = 445;
     this->recv_istride = 1455;
     this->recv_wstride = 1455;
 #endif
@@ -184,7 +187,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    wt_cutoff=" << wt_cutoff << endl
 	 << "    target_gbps=" << target_gbps << endl
-	 << "    send_stride=" << send_stride << endl
+	 << "    send_istride=" << send_istride << endl
+	 << "    send_wstride=" << send_wstride << endl
 	 << "    recv_istride=" << recv_istride << endl
 	 << "    recv_wstride=" << recv_wstride << endl
 	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
@@ -441,12 +445,15 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     const int nupfreq = tp->nupfreq;
     const int nt_chunk = tp->nt_per_chunk;
     const int nchunks = tp->nt_tot / tp->nt_per_chunk;
-    const int stride = tp->send_stride;
-    const int s2 = nupfreq * stride;
-    const int s3 = nfreq_coarse_tot * s2;
+    const int istride = tp->send_istride;
+    const int wstride = tp->send_wstride;
+    const int si2 = nupfreq * istride;
+    const int sw2 = nupfreq * wstride;
+    const int si3 = nfreq_coarse_tot * si2;
+    const int sw3 = nfreq_coarse_tot * sw2;
 
-    vector<float> intensity(nbeams * s3, 0.0);
-    vector<float> weights(nbeams * s3, 0.0);
+    vector<float> intensity(nbeams * si3, 0.0);
+    vector<float> weights(nbeams * sw3, 0.0);
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
 	int chunk_t0 = tp->initial_t0 + ichunk * nt_chunk;   // start of chunk
@@ -460,9 +467,8 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 		    int ifreq_logical = coarse_freq_id * nupfreq + iupfreq;
 		    
-		    int row_start = ibeam*s3 + ifreq_coarse*s2 + iupfreq*stride;
-		    float *i_row = &intensity[row_start];
-		    float *w_row = &weights[row_start];
+		    float *i_row = &intensity[ibeam*si3 + ifreq_coarse*si2 + iupfreq*istride];
+		    float *w_row = &weights[ibeam*sw3 + ifreq_coarse*sw2 + iupfreq*wstride];
 
 		    for (int it = 0; it < nt_chunk; it++) {
 			i_row[it] = intval(beam_id, ifreq_logical, chunk_t0 + it);
@@ -482,7 +488,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	pthread_mutex_unlock(&tp->tpos_lock);
 
 	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
-	tp->ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count);
+	tp->ostream->send_chunk(&intensity[0], istride, &weights[0], wstride, fpga_count);
 	cout << "sent chunk " << ichunk << "/" << nchunks << endl;
     }
 
