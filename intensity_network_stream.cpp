@@ -266,7 +266,13 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     if ((assembler_index < 0) || (assembler_index >= (int)assemblers.size()))
 	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
 
-    return assemblers[assembler_index]->get_assembled_chunk(wait);
+    auto ret = assemblers[assembler_index]->get_assembled_chunk(wait);
+
+    // Note that we wait for data before crashing.
+    if (ini_params.deliberately_crash)
+	throw runtime_error("dedispersion thread will deliberately crash now!");
+
+    return ret;
 }
 
 

@@ -303,6 +303,7 @@ public:
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
+	bool deliberately_crash = false;  // deliberately crash dedispersion thread (for debugging purposes, obviously)
 
 	// If nonempty, threads will be pinned to given list of cores.
 	std::vector<int> network_thread_cores;
