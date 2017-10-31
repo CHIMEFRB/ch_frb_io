@@ -1,3 +1,13 @@
+- v6: part of "Mega Merge" affecting many parts of the CHIMEFRB pipeline
+  - minor API changes, now that we have independent strides for the intensity/weights ring buffers.
+
+- v5: lots of under-the-hood updates.
+
+  - fast assembly language downsampling kernels (needed to make telescoping ring buffer run in real time).
+  - simplified telescoping ring buffer logic.
+  - use assembled_chunk free pool, instead of dynamic malloc/free.
+  - more work on write_requests, assembled_chunk write path.
+
 - v4: large update from Dustin.
 
   - Backward incompatible: lz4 and msgpack are now dependencies.

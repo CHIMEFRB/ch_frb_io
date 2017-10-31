@@ -42,68 +42,48 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
 ### DEPENDENCIES
 
-  1. libhdf5 (https://www.hdfgroup.org/HDF5/release/obtainsrc518.html)
+  1. HDF5, including C++ support.
+  
+     **Currently, ch_frb_io requires HDF5 version 1.8.12 or later,
+     but does not work with version 1.10.x.  This will be fixed eventually!**
 
-     Note that this is a link to HDF5 v1.8.  I imagine v1.10 also works but haven't tested it yet.
-     Assuming you want to use bitshuffle (see below), you'll need to install a very recent hdf5,
-     so you'll need to compile one by hand instead of using 'yum'.  The following worked for me 
-     (assuming non-root privs):
-     ```
-     cd hdf5-1.8.18    # after downloading the source code .tar.gz from the url above
-     ./configure --prefix=$HOME
-     make
-     make install
-
-     # The --prefix=$HOME flag installs libhdf5 in $HOME/lib, so I suggest adding this to .bashrc
-     export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
-     ```
+     For instructions on installing a version of HDF5 which is neither too old nor too new, see
+     [kmsmith137/sp_hdf5/README.md](https://github.com/kmsmith137/sp_hdf5/blob/master/README.md).
 
   2. The lz4 compression library.
 
        - osx one-liner: `brew install lz4`
-
        - centos one-liner: `sudo yum install lz4-devel`
-
        - ubuntu one-liner: `sudo apt-get install liblz4-dev`
 
   3. The msgpack library.
 
        - osx one-liner: `brew install msgpack`
-
        - centos one-liner: `sudo yum install msgpack-devel.x86_64`
-
        - ubuntu: don't install the apt-get version, it is too old!  (e.g. it is missing /usr/include/msgpack/fbuffer.hpp)
-
        - Building from scratch.  This is easy because we only use the msgpack headers, not the compiled library.
-       
-       	 Kendrick's procedure:
-         ```
-         git clone https://github.com/msgpack/msgpack-c
-         sudo cp -r msgpack-c/include/* /usr/local/include
-         ```
-
-         Dustin's procedure: download the source package from, eg,
-         https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
-         and then extract it and add the "msgpack-2.1.0/include" into the
-         include path.
+       	   - Kendrick's procedure:
+             ```
+             git clone https://github.com/msgpack/msgpack-c
+             sudo cp -r msgpack-c/include/* /usr/local/include
+             ```
+           - Dustin's procedure: download the source package from, eg,
+             https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
+             and then extract it and add the "msgpack-2.1.0/include" into the
+             include path.
 
   4. zeromq and cppzmq.
 
        - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
-
        - centos one-liner: `sudo yum install cppzmq-devel.x86_64`
-
        - ubuntu: don't use the apt-get packages, they are too old!.  You'll need to build both zeromq and cppzmq from scratch, see below.
-
        - osx: zeromq can be installed with `brew install zeromq`, but you'll need to build cppzmq from scratch, see below.
-   
        - Building zmq from scratch: download from zeromq.org, and then do:
          ```
          ./configure --prefix=/usr/local
          make
          sudo make install
          ```
-
        - Building cppzmq from scratch: since it's a header-only library with two source files, I just ignored the build system and did:
          ```
          git clone https://github.com/zeromq/cppzmq.git
