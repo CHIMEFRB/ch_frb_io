@@ -1,4 +1,6 @@
-- v6: part of "Mega Merge" affecting many parts of the CHIMEFRB pipeline
+- v6:
+
+  - this large commit is part of the "2017 Mega Merge" affecting many parts of the CHIMEFRB pipeline
   - minor API changes, now that we have independent strides for the intensity/weights ring buffers.
 
 - v5: lots of under-the-hood updates.
