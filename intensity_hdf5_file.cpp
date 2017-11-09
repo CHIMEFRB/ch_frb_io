@@ -166,7 +166,7 @@ intensity_hdf5_file::intensity_hdf5_file(const string &filename_, bool noisy) :
     this->frac_unmasked = (wmax > 0.0) ? (wsum / wmax / (float)(nfreq*npol*nt_file)) : 0.0;
 
     if (noisy)
-	cerr << "read " << filename << ", frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked << endl;
+	cout << "read " << filename << ", frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked << endl;
 }
 
 
