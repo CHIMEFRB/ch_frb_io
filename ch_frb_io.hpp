@@ -284,8 +284,6 @@ struct packet_counts {
     void increment(const struct sockaddr_in& sender_addr, int nbytes);
 
     void update(const packet_counts& other);
-
-    void set_timestamp(const struct timeval& tv);
 };
 
 

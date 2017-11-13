@@ -338,10 +338,6 @@ void packet_counts::update(const packet_counts& other) {
     }
 }
 
-void packet_counts::set_timestamp(const struct timeval& tvo) {
-    tv = tvo;
-}
-
 double packet_counts::start_time() const {
     return (double)tv.tv_sec + 1e-6 * (double)tv.tv_usec;
 }
@@ -383,6 +379,7 @@ void intensity_network_stream::fake_packet_from(const struct sockaddr_in& sender
     // network_thread_perhost_packets, so it should work...
     pthread_mutex_lock(&this->event_lock);
     network_thread_perhost_packets->increment(sender, nbytes);
+    network_thread_perhost_packets->tv = xgettimeofday();
     pthread_mutex_unlock(&this->event_lock);
 }
 
@@ -573,7 +570,7 @@ void intensity_network_stream::_network_thread_body()
 
     std::shared_ptr<packet_counts> last_packet_counts = make_shared<packet_counts>();
     // the previous counts added to the history list
-    last_packet_counts->set_timestamp(tv_ini);
+    last_packet_counts->tv = tv_ini;
 
     std::shared_ptr<packet_counts> this_packet_counts;
     
@@ -610,13 +607,14 @@ void intensity_network_stream::_network_thread_body()
             // Update the "perhost_packets" counter from "network_thread_perhost_packets"
             pthread_mutex_lock(&this->event_lock);
             perhost_packets->update(*network_thread_perhost_packets);
+            perhost_packets->tv = network_thread_perhost_packets->tv;
             // deep copy
             this_packet_counts = make_shared<packet_counts>(*perhost_packets);
             pthread_mutex_unlock(&this->event_lock);
 
             // Build new packet_counts structure with differences vs last_
             shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
-            count_diff->set_timestamp(this_packet_counts->tv);
+            count_diff->tv = this_packet_counts->tv;
             count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
             for (auto it = this_packet_counts->counts.begin();
                  it != this_packet_counts->counts.end(); it++) {
@@ -625,24 +623,24 @@ void intensity_network_stream::_network_thread_body()
                     // not found in last_packet_counts; new sender
                     count_diff->counts[it->first] = it->second;
                 } else {
-                    count_diff->counts[it->first] = it2->second - it->second;
+                    count_diff->counts[it->first] = it->second - it2->second;
                 }
             }
+            //chlog("Adding packet count history for t " << count_diff->start_time() << ", period " << count_diff->period);
             // last_packet_count = this_packet_counts
             last_packet_counts.reset();
             last_packet_counts.swap(this_packet_counts);
             
             // Add *count_diff* to the packet history
             pthread_mutex_lock(&this->packet_history_lock);
-            if (packet_history.size() >= ini_params.max_packet_history_size)
+            if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
                 packet_history.pop_front();
             packet_history.push_back(count_diff);
             pthread_mutex_unlock(&this->packet_history_lock);
             packet_history_timestamp = curr_timestamp;
         }
         
-        curr_tv = xgettimeofday();
-        timestamp = usec_between(tv_ini, curr_tv);
+        timestamp = usec_between(tv_ini, xgettimeofday());
         network_thread_working_usec += (timestamp - curr_timestamp);
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
@@ -654,7 +652,8 @@ void intensity_network_stream::_network_thread_body()
         int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 
-	curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        curr_tv = xgettimeofday();
+        curr_timestamp = usec_between(tv_ini, curr_tv);
         network_thread_waiting_usec += (curr_timestamp - timestamp);
 
 	// Check for error or timeout in read()
@@ -677,6 +676,7 @@ void intensity_network_stream::_network_thread_body()
 
         // Increment the number of packets we've received from this sender:
         network_thread_perhost_packets->increment(sender_addr, packet_nbytes);
+        network_thread_perhost_packets->tv = curr_tv;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -709,6 +709,7 @@ void intensity_network_stream::_network_flush_packets()
     // Update the "perhost_packets" counter from "network_thread_perhost_packets"
     pthread_mutex_lock(&this->event_lock);
     perhost_packets->update(*network_thread_perhost_packets);
+    perhost_packets->tv = network_thread_perhost_packets->tv;
     pthread_mutex_unlock(&this->event_lock);
 }
 
