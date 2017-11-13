@@ -359,7 +359,7 @@ intensity_network_stream::get_packet_rates(double start, double period) {
                 if (t + (*first)->period >= start)
                     break;
             }
-            if (!counts) {
+            if (first == packet_history.end()) {
                 counts = packet_history.back();
             } else {
                 // XXX FIXME -- this is just the first overlapping one, &
@@ -368,6 +368,44 @@ intensity_network_stream::get_packet_rates(double start, double period) {
             }
         }
     }
+    pthread_mutex_unlock(&this->packet_history_lock);
+    return counts;
+}
+
+static void _get_history(double start, double end,
+                         const deque<shared_ptr<packet_counts> >& history,
+                         vector<shared_ptr<packet_counts> >& counts) {
+    if (history.size() == 0)
+        return;
+    struct timeval now = xgettimeofday();
+    double fnow = (double)now.tv_sec + 1e-6 * (double)now.tv_usec;
+    // Negative values: N seconds ago.
+    if (start <= 0.)
+        start = fnow + start;
+    if (end <= 0.)
+        end = fnow + end;
+
+    // find first history entry overlapping requested time period
+    deque<shared_ptr<packet_counts> >::const_iterator it;
+    for (it=history.begin(); it!=history.end(); it++) {
+        double t = (*it)->start_time();
+        if (t + (*it)->period >= start)
+            break;
+    }
+    for (; it!=history.end(); it++) {
+        // Append until we find a packet that doesn't overlap *end*
+        double t = (*it)->start_time();
+        if (t > end)
+            break;
+        counts.push_back(*it);
+    }
+}
+
+vector<shared_ptr<packet_counts> >
+intensity_network_stream::get_packet_rate_history(double start, double end, double period) {
+    vector<shared_ptr<packet_counts> > counts;
+    pthread_mutex_lock(&this->packet_history_lock);
+    _get_history(start, end, packet_history, counts);
     pthread_mutex_unlock(&this->packet_history_lock);
     return counts;
 }

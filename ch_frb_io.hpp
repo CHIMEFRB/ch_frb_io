@@ -423,10 +423,14 @@ public:
     get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    // Returns the packet rate matrix with timestamp closest to *start*.
-    // If *start* is zero, grabs the most recent rate matrix.
+    // Returns the packet rate with timestamp closest to *start*.
+    // If *start* is zero, grabs the most recent rate.
     std::shared_ptr<packet_counts> get_packet_rates(double start, double period);
 
+    // Returns the set of packet rates with timestamps overlapping *start* to *end*.
+    // If *start* is zero, treat as NOW.  If *start* or *end* are negative, NOW - that many seconds.
+    std::vector<std::shared_ptr<packet_counts> > get_packet_rate_history(double start, double end, double period);
+    
     // For debugging/testing purposes: pretend that the given
     // assembled_chunk has just arrived.  Returns true if there was
     // room in the ring buffer for the new chunk.
