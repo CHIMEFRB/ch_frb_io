@@ -116,6 +116,9 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
     this->assembler_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
 
+    network_thread_perhost_packets = make_shared<packet_counts>();
+    perhost_packets = make_shared<packet_counts>();
+
     pthread_mutex_init(&state_lock, NULL);
     pthread_mutex_init(&event_lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
