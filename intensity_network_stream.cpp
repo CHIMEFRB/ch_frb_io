@@ -121,6 +121,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     pthread_mutex_init(&state_lock, NULL);
     pthread_mutex_init(&event_lock, NULL);
+    pthread_mutex_init(&packet_history_lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
 }
 
@@ -129,6 +130,7 @@ intensity_network_stream::~intensity_network_stream()
 {
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
+    pthread_mutex_destroy(&packet_history_lock);
     pthread_mutex_destroy(&event_lock);
 
     if (sockfd >= 0) {
