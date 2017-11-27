@@ -335,6 +335,10 @@ public:
 	// Its capacity is a vector, whose length is the number of downsampling levels,
 	// and whose elements are the number of assembled_chunks at each level.
         std::vector<int> telescoping_ringbuf_capacity;
+
+	// A temporary hack that will go away soon.
+	// Sleep for specified number of seconds, after intensity_stream starts up.
+	double sleep_hack = 0.0;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
