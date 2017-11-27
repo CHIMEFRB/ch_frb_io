@@ -476,7 +476,7 @@ void intensity_network_stream::_network_thread_body()
 		break;
 
 	    stringstream ss;
-	    ss << ini_params.ipaddr << ":" << ini_params.udp_port << ": will start receiving packets in " << (1.0e-6 * usec_remaining) << " seconds\n";
+	    ss << ini_params.ipaddr << ":" << ini_params.udp_port << ": will start listening for packets in " << (1.0e-6 * usec_remaining) << " seconds\n";
 	    string s = ss.str();
 	    cout << s.c_str();   // more voodoo
 
