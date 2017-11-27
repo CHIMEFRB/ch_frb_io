@@ -1,3 +1,7 @@
+- v7:
+
+  - implement "sleep hack", a temporary kludge that will go away soon!
+
 - v6:
 
   - this large commit is part of the "2017 Mega Merge" affecting many parts of the CHIMEFRB pipeline
