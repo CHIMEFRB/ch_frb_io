@@ -116,8 +116,12 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
     this->assembler_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
 
+    network_thread_perhost_packets = make_shared<packet_counts>();
+    perhost_packets = make_shared<packet_counts>();
+
     pthread_mutex_init(&state_lock, NULL);
     pthread_mutex_init(&event_lock, NULL);
+    pthread_mutex_init(&packet_history_lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
 }
 
@@ -126,6 +130,7 @@ intensity_network_stream::~intensity_network_stream()
 {
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
+    pthread_mutex_destroy(&packet_history_lock);
     pthread_mutex_destroy(&event_lock);
 
     if (sockfd >= 0) {
@@ -264,7 +269,7 @@ void intensity_network_stream::print_state() {
 shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
     if ((assembler_index < 0) || (assembler_index >= (int)assemblers.size()))
-	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
+        throw runtime_error("ch_frb_io: bad assembler_ix " + std::to_string(assembler_index) + " passed to intensity_network_stream::get_assembled_chunk() -- allowable range [0, " + std::to_string(assemblers.size()) + ")");
 
     auto ret = assemblers[assembler_index]->get_assembled_chunk(wait);
 
@@ -291,21 +296,131 @@ unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
     // Quickly grab a copy of perhost_packets
     pthread_mutex_lock(&this->event_lock);
-    unordered_map<uint64_t, uint64_t> raw(perhost_packets);
+    packet_counts pc(*perhost_packets);
     pthread_mutex_unlock(&this->event_lock);
 
+    return pc.to_string();
+}
+
+packet_counts::packet_counts() {}
+
+packet_counts::packet_counts(const packet_counts& other) :
+    tv(other.tv),
+    period(other.period),
+    counts(other.counts)
+{}
+
+unordered_map<string, uint64_t> packet_counts::to_string() const {
     // Convert to strings
     unordered_map<string, uint64_t> rtn;
-    for (auto it = raw.begin(); it != raw.end(); it++) {
+    for (auto it = counts.begin(); it != counts.end(); it++) {
         // IPv4 address in high 32 bits, port in low 16 bits
         uint32_t ip = (it->first >> 32) & 0xffffffff;
         uint32_t port = (it->first & 0xffff);
-        string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
-            + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
-            + ":" + to_string(port);
+        string sender = std::to_string(ip >> 24) + "." + std::to_string((ip >> 16) & 0xff)
+            + "." + std::to_string((ip >> 8) & 0xff) + "." + std::to_string(ip & 0xff)
+            + ":" + std::to_string(port);
         rtn[sender] = it->second;
     }
     return rtn;
+}
+
+void packet_counts::increment(const struct sockaddr_in& sender_addr,
+                              int nbytes) {
+    uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
+    uint64_t port = ntohs(sender_addr.sin_port);
+    // IPv4 address in high 32 bits, port in low 16 bits
+    uint64_t sender = (ip << 32) | port;
+    counts[sender]++;
+}
+
+void packet_counts::update(const packet_counts& other) {
+    for (auto it=other.counts.begin(); it!=other.counts.end(); it++) {
+        counts[it->first] = it->second;
+    }
+}
+
+double packet_counts::start_time() const {
+    return (double)tv.tv_sec + 1e-6 * (double)tv.tv_usec;
+}
+
+shared_ptr<packet_counts>
+intensity_network_stream::get_packet_rates(double start, double period) {
+    shared_ptr<packet_counts> counts;
+    pthread_mutex_lock(&this->packet_history_lock);
+    if (packet_history.size() > 0) {
+        if (start == 0.0) {
+            counts = packet_history.back();
+        } else {
+            // XXX This code is UNTESTED
+            // find first history entry overlapping requested time period
+            std::deque<shared_ptr<packet_counts> >::iterator first;
+            for (first=packet_history.begin(); first!=packet_history.end();
+                 first++) {
+                double t = (*first)->start_time();
+                if (t + (*first)->period >= start)
+                    break;
+            }
+            if (first == packet_history.end()) {
+                counts = packet_history.back();
+            } else {
+                // XXX FIXME -- this is just the first overlapping one, &
+                // we do nothing about the requested period.
+                counts = *first;
+            }
+        }
+    }
+    pthread_mutex_unlock(&this->packet_history_lock);
+    return counts;
+}
+
+static void _get_history(double start, double end,
+                         const deque<shared_ptr<packet_counts> >& history,
+                         vector<shared_ptr<packet_counts> >& counts) {
+    if (history.size() == 0)
+        return;
+    struct timeval now = xgettimeofday();
+    double fnow = (double)now.tv_sec + 1e-6 * (double)now.tv_usec;
+    // Negative values: N seconds ago.
+    if (start <= 0.)
+        start = fnow + start;
+    if (end <= 0.)
+        end = fnow + end;
+
+    // find first history entry overlapping requested time period
+    deque<shared_ptr<packet_counts> >::const_iterator it;
+    for (it=history.begin(); it!=history.end(); it++) {
+        double t = (*it)->start_time();
+        if (t + (*it)->period >= start)
+            break;
+    }
+    for (; it!=history.end(); it++) {
+        // Append until we find a packet that doesn't overlap *end*
+        double t = (*it)->start_time();
+        if (t > end)
+            break;
+        counts.push_back(*it);
+    }
+}
+
+vector<shared_ptr<packet_counts> >
+intensity_network_stream::get_packet_rate_history(double start, double end, double period) {
+    vector<shared_ptr<packet_counts> > counts;
+    pthread_mutex_lock(&this->packet_history_lock);
+    _get_history(start, end, packet_history, counts);
+    pthread_mutex_unlock(&this->packet_history_lock);
+    return counts;
+}
+
+void intensity_network_stream::fake_packet_from(const struct sockaddr_in& sender, int nbytes) {
+    // network_thread_perhost_packets is normally only touched by the
+    // network thread so is not lock-protected, but when updating the
+    // history this is the lock used before reading the
+    // network_thread_perhost_packets, so it should work...
+    pthread_mutex_lock(&this->event_lock);
+    network_thread_perhost_packets->increment(sender, nbytes);
+    network_thread_perhost_packets->tv = xgettimeofday();
+    pthread_mutex_unlock(&this->event_lock);
 }
 
 vector<unordered_map<string, uint64_t> >
@@ -513,12 +628,20 @@ void intensity_network_stream::_network_thread_body()
 
     int64_t *event_subcounts = &this->network_thread_event_subcounts[0];
     struct timeval tv_ini = xgettimeofday();
+    uint64_t packet_history_timestamp = 0;
     uint64_t incoming_packet_list_timestamp = 0;
     uint64_t cancellation_check_timestamp = 0;
 
     // All timestamps are in microseconds relative to tv_ini.
     uint64_t curr_timestamp = 0;
+    struct timeval curr_tv = tv_ini;
 
+    std::shared_ptr<packet_counts> last_packet_counts = make_shared<packet_counts>();
+    // the previous counts added to the history list
+    last_packet_counts->tv = tv_ini;
+
+    std::shared_ptr<packet_counts> this_packet_counts;
+    
     for (;;) {
         uint64_t timestamp;
 
@@ -547,7 +670,45 @@ void intensity_network_stream::_network_thread_body()
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
-	timestamp = usec_between(tv_ini, xgettimeofday());
+        // Periodically store our per-sender packet counts
+        if (curr_timestamp > packet_history_timestamp + ini_params.packet_count_period_usec) {
+            // Update the "perhost_packets" counter from "network_thread_perhost_packets"
+            pthread_mutex_lock(&this->event_lock);
+            perhost_packets->update(*network_thread_perhost_packets);
+            perhost_packets->tv = network_thread_perhost_packets->tv;
+            // deep copy
+            this_packet_counts = make_shared<packet_counts>(*perhost_packets);
+            pthread_mutex_unlock(&this->event_lock);
+
+            // Build new packet_counts structure with differences vs last_
+            shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
+            count_diff->tv = this_packet_counts->tv;
+            count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
+            for (auto it = this_packet_counts->counts.begin();
+                 it != this_packet_counts->counts.end(); it++) {
+                auto it2 = last_packet_counts->counts.find(it->first);
+                if (it2 == last_packet_counts->counts.end()) {
+                    // not found in last_packet_counts; new sender
+                    count_diff->counts[it->first] = it->second;
+                } else {
+                    count_diff->counts[it->first] = it->second - it2->second;
+                }
+            }
+            //chlog("Adding packet count history for t " << count_diff->start_time() << ", period " << count_diff->period);
+            // last_packet_count = this_packet_counts
+            last_packet_counts.reset();
+            last_packet_counts.swap(this_packet_counts);
+            
+            // Add *count_diff* to the packet history
+            pthread_mutex_lock(&this->packet_history_lock);
+            if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
+                packet_history.pop_front();
+            packet_history.push_back(count_diff);
+            pthread_mutex_unlock(&this->packet_history_lock);
+            packet_history_timestamp = curr_timestamp;
+        }
+        
+        timestamp = usec_between(tv_ini, xgettimeofday());
         network_thread_working_usec += (timestamp - curr_timestamp);
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
@@ -559,7 +720,8 @@ void intensity_network_stream::_network_thread_body()
         int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 
-	curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        curr_tv = xgettimeofday();
+        curr_timestamp = usec_between(tv_ini, curr_tv);
         network_thread_waiting_usec += (curr_timestamp - timestamp);
 
 	// Check for error or timeout in read()
@@ -581,12 +743,8 @@ void intensity_network_stream::_network_thread_body()
         }
 
         // Increment the number of packets we've received from this sender:
-        uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
-        uint64_t port = ntohs(sender_addr.sin_port);
-
-        // IPv4 address in high 32 bits, port in low 16 bits
-        uint64_t sender = (ip << 32) | port;
-        network_thread_perhost_packets[sender]++;
+        network_thread_perhost_packets->increment(sender_addr, packet_nbytes);
+        network_thread_perhost_packets->tv = curr_tv;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -618,13 +776,10 @@ void intensity_network_stream::_network_flush_packets()
 
     // Update the "perhost_packets" counter from "network_thread_perhost_packets"
     pthread_mutex_lock(&this->event_lock);
-
-    for (auto it = network_thread_perhost_packets.begin(); it != network_thread_perhost_packets.end(); it++)
-        perhost_packets[it->first] = it->second;
-
+    perhost_packets->update(*network_thread_perhost_packets);
+    perhost_packets->tv = network_thread_perhost_packets->tv;
     pthread_mutex_unlock(&this->event_lock);
 }
-
 
 // This gets called when the network thread exits (on all exit paths).
 void intensity_network_stream::_network_thread_exit()
@@ -788,7 +943,7 @@ void intensity_network_stream::_assembler_thread_body()
 			// No match found
 			event_subcounts[event_type::beam_id_mismatch]++;
 			if (ini_params.throw_exception_on_beam_id_mismatch)
-			    throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag");
+                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
 			break;
 		    }
 

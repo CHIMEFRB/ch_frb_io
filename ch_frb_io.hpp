@@ -22,6 +22,8 @@
 
 #include <hdf5.h>
 
+#include <arpa/inet.h>
+
 namespace ch_frb_io {
 #if 0
 }; // pacify emacs c-mode
@@ -264,6 +266,26 @@ struct intensity_hdf5_ofile {
 //
 //   - in dedispersion thread, assembled_chunk_ringbuf::end_stream() returns an empty pointer.
 
+struct packet_counts {
+    struct timeval tv;
+    double period; // in seconds
+    std::unordered_map<uint64_t, uint64_t> counts;
+
+    // Default constructor
+    packet_counts();
+    // Copy constructor
+    packet_counts(const packet_counts& other);
+
+    // Convert keys to IP:port format
+    std::unordered_map<std::string, uint64_t> to_string() const;
+
+    double start_time() const;
+    
+    void increment(const struct sockaddr_in& sender_addr, int nbytes);
+
+    void update(const packet_counts& other);
+};
+
 
 class intensity_network_stream : noncopyable {
 public:
@@ -322,12 +344,15 @@ public:
 	int socket_timeout_usec = 10000;                // 0.01 sec
 	int stream_cancellation_latency_usec = 10000;   // 0.01 sec
 
+        int packet_count_period_usec = 1000000; // 1 sec
+        int max_packet_history_size = 3600; // keep an hour of history
+
 	// The 'unassembled_ringbuf' is between the network thread and assembler thread.
 	int unassembled_ringbuf_capacity = 16;
 	int max_unassembled_packets_per_list = 16384;
 	int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
 	int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
-	
+
 	// The 'assembled_ringbuf' is between the assembler thread and processing threads.
 	int assembled_ringbuf_capacity = 8;
 
@@ -387,7 +412,6 @@ public:
     std::vector<int64_t> get_event_counts();
 
     std::unordered_map<std::string, uint64_t> get_perhost_packets();
-    std::unordered_map<uint64_t, uint64_t> get_perhost_packets_raw();
 
     std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
@@ -403,11 +427,22 @@ public:
     get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
+    // Returns the packet rate with timestamp closest to *start*.
+    // If *start* is zero, grabs the most recent rate.
+    std::shared_ptr<packet_counts> get_packet_rates(double start, double period);
+
+    // Returns the set of packet rates with timestamps overlapping *start* to *end*.
+    // If *start* is zero, treat as NOW.  If *start* or *end* are negative, NOW - that many seconds.
+    std::vector<std::shared_ptr<packet_counts> > get_packet_rate_history(double start, double end, double period);
+    
     // For debugging/testing purposes: pretend that the given
     // assembled_chunk has just arrived.  Returns true if there was
     // room in the ring buffer for the new chunk.
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
+    // For debugging/testing: pretend a packet has just arrived.
+    void fake_packet_from(const struct sockaddr_in& sender, int nbytes);
+    
     // For debugging/testing: stream data to disk.  
     //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
     //   'priority': see write_chunk_request::priority
@@ -453,7 +488,7 @@ protected:
     int sockfd = -1;
     std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
-    std::unordered_map<uint64_t, uint64_t> network_thread_perhost_packets;
+    std::shared_ptr<packet_counts> network_thread_perhost_packets;
     char _pad2[constants::cache_line_size];
 
     // Used only by the assembler thread
@@ -480,7 +515,10 @@ protected:
 
     pthread_mutex_t event_lock;
     std::vector<int64_t> cumulative_event_counts;
-    std::unordered_map<uint64_t, uint64_t> perhost_packets;
+    std::shared_ptr<packet_counts> perhost_packets;
+
+    pthread_mutex_t packet_history_lock;
+    std::deque<std::shared_ptr<packet_counts> > packet_history;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.

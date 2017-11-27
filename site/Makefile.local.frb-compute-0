@@ -17,6 +17,11 @@ BINDIR=$(HOME)/bin
 # Don't forget -pthread and -fPIC
 #
 
-CPP=g++ -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+DEBUG ?= no
+ifeq ($(DEBUG),no)
+  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I.
+else
+  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O0 -g -ffast-math -funroll-loops -I.
+endif
 
 CPP_LFLAGS=-L. -L$(LIBDIR)
