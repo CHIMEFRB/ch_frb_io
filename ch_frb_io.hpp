@@ -8,9 +8,10 @@
 #include <queue>
 #include <string>
 #include <vector>
-#include <functional>
+#include <map>
 #include <unordered_set>
 #include <unordered_map>
+#include <functional>
 #include <memory>
 #include <cstdint>
 #include <atomic>
@@ -518,7 +519,7 @@ protected:
     std::shared_ptr<packet_counts> perhost_packets;
 
     pthread_mutex_t packet_history_lock;
-    std::deque<std::shared_ptr<packet_counts> > packet_history;
+    std::map<double, std::shared_ptr<packet_counts> > packet_history;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.

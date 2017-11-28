@@ -344,41 +344,18 @@ double packet_counts::start_time() const {
     return (double)tv.tv_sec + 1e-6 * (double)tv.tv_usec;
 }
 
-shared_ptr<packet_counts>
-intensity_network_stream::get_packet_rates(double start, double period) {
-    shared_ptr<packet_counts> counts;
-    pthread_mutex_lock(&this->packet_history_lock);
-    if (packet_history.size() > 0) {
-        if (start == 0.0) {
-            counts = packet_history.back();
-        } else {
-            // XXX This code is UNTESTED
-            // find first history entry overlapping requested time period
-            std::deque<shared_ptr<packet_counts> >::iterator first;
-            for (first=packet_history.begin(); first!=packet_history.end();
-                 first++) {
-                double t = (*first)->start_time();
-                if (t + (*first)->period >= start)
-                    break;
-            }
-            if (first == packet_history.end()) {
-                counts = packet_history.back();
-            } else {
-                // XXX FIXME -- this is just the first overlapping one, &
-                // we do nothing about the requested period.
-                counts = *first;
-            }
-        }
-    }
-    pthread_mutex_unlock(&this->packet_history_lock);
-    return counts;
-}
-
 static void _get_history(double start, double end,
-                         const deque<shared_ptr<packet_counts> >& history,
+                         const map<double, shared_ptr<packet_counts> >& history,
                          vector<shared_ptr<packet_counts> >& counts) {
     if (history.size() == 0)
         return;
+    // Most recent?
+    if (start == 0) {
+        auto it = history.end();
+        it--;
+        counts.push_back(it->second);
+        return;
+    }
     struct timeval now = xgettimeofday();
     double fnow = (double)now.tv_sec + 1e-6 * (double)now.tv_usec;
     // Negative values: N seconds ago.
@@ -387,20 +364,40 @@ static void _get_history(double start, double end,
     if (end <= 0.)
         end = fnow + end;
 
-    // find first history entry overlapping requested time period
-    deque<shared_ptr<packet_counts> >::const_iterator it;
-    for (it=history.begin(); it!=history.end(); it++) {
-        double t = (*it)->start_time();
-        if (t + (*it)->period >= start)
-            break;
-    }
+    // find first history entry overlapping requested time period.
+    // upper_bound() gives the first history entry > the start
+    auto it = history.upper_bound(start);
+    // the one before that, if it exists, should actually contain *start*.
+    if (it == history.begin())
+        return;
+    it--;
+
+    // likewise, upper_bound(end) gives us the history entry one past
+    // the last one we want.
+    //auto it2 = history.upper_bound(end);
+    // for (; it != it2; it++)
+    //counts.push_back(*it);
+    
     for (; it!=history.end(); it++) {
         // Append until we find a packet that doesn't overlap *end*
-        double t = (*it)->start_time();
+        double t = it->second->start_time();
         if (t > end)
             break;
-        counts.push_back(*it);
+        counts.push_back(it->second);
     }
+}
+
+shared_ptr<packet_counts>
+intensity_network_stream::get_packet_rates(double start, double period) {
+    // This returns a single history entry.
+    vector<shared_ptr<packet_counts> > counts;
+    pthread_mutex_lock(&this->packet_history_lock);
+    _get_history(start, start+period, packet_history, counts);
+    pthread_mutex_unlock(&this->packet_history_lock);
+    // FIXME -- if *period* is specified, we could sum over the requested period...
+    if (counts.size() == 0)
+        return shared_ptr<packet_counts>();
+    return counts[0];
 }
 
 vector<shared_ptr<packet_counts> >
@@ -702,8 +699,9 @@ void intensity_network_stream::_network_thread_body()
             // Add *count_diff* to the packet history
             pthread_mutex_lock(&this->packet_history_lock);
             if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
-                packet_history.pop_front();
-            packet_history.push_back(count_diff);
+                packet_history.erase(--packet_history.end());
+            packet_history.insert(make_pair(count_diff->start_time(),
+                                            count_diff));
             pthread_mutex_unlock(&this->packet_history_lock);
             packet_history_timestamp = curr_timestamp;
         }
