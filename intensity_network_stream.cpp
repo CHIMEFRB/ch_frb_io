@@ -622,7 +622,7 @@ void intensity_network_stream::_network_thread_body()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed (" + ini_params.ipaddr + ":" + to_string(ini_params.udp_port) + "): " + strerror(errno)));
 
-    cout << listening_msg;
+    cout << listening_msg.c_str();
 
     // Main packet loop
 
@@ -631,6 +631,7 @@ void intensity_network_stream::_network_thread_body()
     uint64_t packet_history_timestamp = 0;
     uint64_t incoming_packet_list_timestamp = 0;
     uint64_t cancellation_check_timestamp = 0;
+    bool first_packet_received = false;
 
     // All timestamps are in microseconds relative to tv_ini.
     uint64_t curr_timestamp = 0;
@@ -719,6 +720,11 @@ void intensity_network_stream::_network_thread_body()
         int slen = sizeof(sender_addr);
         int packet_nbytes = ::recvfrom(sockfd, packet_data, ini_params.max_packet_size + 1, 0,
                                        (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
+
+	if (!first_packet_received) {
+	    cout << receiving_msg;  // announce "receiving packets..."
+	    first_packet_received = true;
+	}
 
         curr_tv = xgettimeofday();
         curr_timestamp = usec_between(tv_ini, curr_tv);
