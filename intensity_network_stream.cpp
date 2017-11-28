@@ -269,7 +269,7 @@ void intensity_network_stream::print_state() {
 shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
     if ((assembler_index < 0) || (assembler_index >= (int)assemblers.size()))
-	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
+        throw runtime_error("ch_frb_io: bad assembler_ix " + std::to_string(assembler_index) + " passed to intensity_network_stream::get_assembled_chunk() -- allowable range [0, " + std::to_string(assemblers.size()) + ")");
 
     auto ret = assemblers[assembler_index]->get_assembled_chunk(wait);
 
@@ -913,7 +913,7 @@ void intensity_network_stream::_assembler_thread_body()
 			// No match found
 			event_subcounts[event_type::beam_id_mismatch]++;
 			if (ini_params.throw_exception_on_beam_id_mismatch)
-			    throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag");
+                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
 			break;
 		    }
 
