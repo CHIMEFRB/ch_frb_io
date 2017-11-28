@@ -417,6 +417,11 @@ void intensity_network_stream::fake_packet_from(const struct sockaddr_in& sender
     pthread_mutex_lock(&this->event_lock);
     network_thread_perhost_packets->increment(sender, nbytes);
     network_thread_perhost_packets->tv = xgettimeofday();
+
+    cumulative_event_counts[event_type::packet_received] ++;
+    cumulative_event_counts[event_type::packet_good] ++;
+    cumulative_event_counts[event_type::byte_received] += nbytes;
+
     pthread_mutex_unlock(&this->event_lock);
 }
 
