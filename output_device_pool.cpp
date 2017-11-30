@@ -1,4 +1,5 @@
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -20,7 +21,7 @@ output_device_pool::output_device_pool(const vector<shared_ptr<output_device>> &
 	device_names[i] = streams[i]->ini_params.device_name;
     }
 
-    // Sanity check: if one device_name is a prefix of anther, throw an exception
+    // Sanity check: if one device_name is a prefix of another, throw an exception
     for (int i = 0; i < nstreams; i++) {
 	for (int j = 0; j < nstreams; j++) {
 	    if ((i != j) && is_prefix(device_names[i], device_names[j])) {
@@ -45,6 +46,8 @@ bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_requ
 
     if (device_names.size() == 0)
 	throw runtime_error("ch_frb_io: enqueue_write_request() was called, but no output_devices were registered");
+
+    chlog("Request to write to file \"" << req->filename << "\" did not match any of the output_devices registered; request dropped.");
 
     return false;
 }
