@@ -1,9 +1,10 @@
-- v8:
+-v9:
+  - 'beam_ids' argument to intensity_network_stream::stream_files()
 
+- v8:
   - from Dustin: per-sender packet count history, retrievable by RPC
 
 - v7:
-
   - implement "sleep hack", a temporary kludge that will go away soon!
 
 - v6:
