@@ -443,11 +443,26 @@ public:
 
     // For debugging/testing: pretend a packet has just arrived.
     void fake_packet_from(const struct sockaddr_in& sender, int nbytes);
-    
-    // For debugging/testing: stream data to disk.  
-    //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
-    //   'priority': see write_chunk_request::priority
-    void stream_to_files(const std::string &filename_pattern, int priority);
+
+    // stream_to_files(): for streaming incoming data to disk.
+    //
+    //   'filename_pattern': see assembled_chunk::format_filename below (empty string means "streaming disabled")
+    //
+    //      On the DRAO backend, this will probably be one of the following two possibilities:
+    //         /local/acq_data/(ACQNAME)/beam_(BEAM)/chunk_(CHUNK).msg                      (save to local SSD in node)
+    //         /frb-archiver-(STREAM)/acq_data/(ACQNAME)/beam_(BEAM)/chunk_(CHUNK).msg      (save to NFS, with load-balancing)
+    //
+    //   'beam_ids': list of beam_ids to stream (if an empty list, this will also disable streaming)
+    //
+    //      This should be a subset of the beam_ids processed by the intensity_network_stream,
+    //      which in turn in a subset of all beam_ids processed by the node.
+    //    
+    //   'priority': see write_chunk_request::priority below
+    //
+    // Throws an exception if anything goes wrong!  When called from an RPC thread, caller will want to
+    // wrap in try..except, and use exception::what() to get the error message.
+
+    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority);
 
     // For debugging: print state.
     void print_state();
@@ -520,6 +535,12 @@ protected:
 
     pthread_mutex_t packet_history_lock;
     std::map<double, std::shared_ptr<packet_counts> > packet_history;
+    
+    // Streaming-related data (arguments to stream_to_files()).
+    std::mutex stream_lock;  // FIXME need to convert pthread_mutex to std::mutex everywhere
+    std::string stream_filename_pattern;
+    std::vector<int> stream_beam_ids;
+    int stream_priority;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
