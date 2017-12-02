@@ -331,12 +331,15 @@ protected:
     // fails.  (FIXME: add code to recover gracefully.)
     std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk, int binning, bool zero=true);
 
-    // The "active" chunks are in the process of being filled with data as packets arrive.
-    // Currently we take the active window to be two assembled_chunks long, but this could be generalized.
-    // When an active chunk is finished, it is added to the ring buffer.
-    // Note: the active_chunk pointers are not protected by a lock, but are only accessed by the assembler thread.
-    std::unique_ptr<assembled_chunk> active_chunk0;
-    std::unique_ptr<assembled_chunk> active_chunk1;
+    // The "active" ring buffer contains chunks are in the process of being filled with data 
+    // as packets arrive.  When an active chunk is finished, it is added to the telescoping 
+    // ring buffer (see below).
+    //
+    // Note: the active ringbuf is not protected by a lock (only accessed by the assembler thread).
+
+    int active_ringbuf_pos = 0;
+    int active_ringbuf_capacity = 0;
+    std::vector<std::unique_ptr<assembled_chunk>> active_ringbuf;   // length active_ringbuf_capacity
 
     // Not sure if this really affects bottom-line performance, but thought it would be a good idea
     // to ensure that the "assembler-only" and "shared" fields were on different cache lines.

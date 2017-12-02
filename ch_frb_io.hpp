@@ -85,6 +85,7 @@ namespace constants {
     static constexpr int output_ringbuf_capacity = 8;
 
     static constexpr int nt_per_assembled_chunk = 1024;
+    static constexpr int max_active_ringbuf_capacity = 10;
 
     // These parameters don't really affect anything but appear in asserts.
     static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
@@ -347,11 +348,17 @@ public:
         int packet_count_period_usec = 1000000; // 1 sec
         int max_packet_history_size = 3600; // keep an hour of history
 
-	// The 'unassembled_ringbuf' is between the network thread and assembler thread.
+	// The 'unassembled_ringbuf' contains UDP packets which have been read by the network thread,
+	// but not processed by the assembler thread.
 	int unassembled_ringbuf_capacity = 16;
 	int max_unassembled_packets_per_list = 16384;
 	int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
 	int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
+
+	// The 'active' ringbuf contains assembled_chunks which are in the process of
+	// being filled with data by the assembler thread.  Note that increasing the
+	// active_ringbuf_capacity also increases the latency of the pipeline.
+	int active_ringbuf_capacity = 2;
 
 	// The 'assembled_ringbuf' is between the assembler thread and processing threads.
 	int assembled_ringbuf_capacity = 8;

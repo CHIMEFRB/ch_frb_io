@@ -91,6 +91,12 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 	throw runtime_error("ch_frb_io: the 'force_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    if (ini_params.active_ringbuf_capacity <= 1)
+	throw runtime_error("ch_frb_io: intensity_network_stream::initializer::active_ringbuf_capacity must be >= 2");
+
+    if (ini_params.active_ringbuf_capacity > constants::max_active_ringbuf_capacity)
+	throw runtime_error("ch_frb_io: intensity_network_stream::initializer::active_ringbuf_capacity must be <= " + to_string(constants::max_active_ringbuf_capacity));
+
     if (ini_params.assembled_ringbuf_capacity <= 0)
 	throw runtime_error("ch_frb_io: intensity_network_stream::initializer::assembled_ringbuf_capacity must be > 0");
 

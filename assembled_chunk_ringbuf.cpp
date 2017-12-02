@@ -17,6 +17,13 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
+
+    if (ini_params.active_ringbuf_capacity <= 1)
+	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: active_ringbuf_capacity must be >= 2");
+
+    if (ini_params.active_ringbuf_capacity > constants::max_active_ringbuf_capacity)
+	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: active_ringbuf_capacity must be <= " + to_string(constants::max_active_ringbuf_capacity));
+
     if (ini_params.assembled_ringbuf_capacity <= 0)
 	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: assembled_ringbuf_capacity must be > 0");
 
@@ -32,6 +39,9 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
+
+    this->active_ringbuf_capacity = ini_params.active_ringbuf_capacity;
+    this->active_ringbuf.resize(active_ringbuf_capacity);
 
     this->num_downsampling_levels = max(ini_params.telescoping_ringbuf_capacity.size(), 1UL);
     this->ringbuf_pos.resize(num_downsampling_levels, 0);
@@ -202,17 +212,24 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
     if (!first_packet_received) {
-	this->active_chunk0 = this->_make_assembled_chunk(packet_ichunk, 1);
-	this->active_chunk1 = this->_make_assembled_chunk(packet_ichunk+1, 1);
+	// Initialize active_ringbuf.
+	for (int i = 0; i < active_ringbuf_capacity; i++)
+	    this->active_ringbuf[i] = this->_make_assembled_chunk(packet_ichunk+i, 1);   // (ichunk, binning)
+
 	this->first_packet_received = true;
     }
 
+    // XXX rethink
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
-    if (_unlikely(!active_chunk0 || !active_chunk1))
-	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
+    // if (_unlikely(!active_chunk0 || !active_chunk1))
+    //   throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
 
-    if (packet_ichunk >= active_chunk0->ichunk + 2) {
-	//
+    // Chunk range in active assembler window.
+    int active_ichunk0 = active_ringbuf[active_ringbuf_pos]->ichunk;
+    int active_ichunk1 = active_ichunk0 + active_ringbuf_capacity;
+
+    if (packet_ichunk >= active_ichunk1) {
+
 	// If we receive a packet whose timestamps extend past the range of our current
 	// assembly buffer, then we advance the buffer and send an assembled_chunk to the
 	// "downstream" thread.
@@ -221,25 +238,26 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// buffer by one assembled_chunk, rather than advancing all the way to the packet
 	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
-	//
-	this->_put_assembled_chunk(active_chunk0, event_counts);
 
-        // After _put_assembled_chunk(), active_chunk0 has been reset to a null pointer.
-        active_chunk0.swap(active_chunk1);
+	int i = active_ringbuf_pos % active_ringbuf_capacity;
 
-        // Note that we've just swapped active_chunk1 down to active_chunk0, so active_chunk1's ichunk is (active0 + 1).
-	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 1, 1);
+        // Resets active_ringbuf[i] to a null pointer.
+	this->_put_assembled_chunk(active_ringbuf[i], event_counts);
+
+	this->active_ringbuf[i] = this->_make_assembled_chunk(active_ichunk1, 1);   // (ichunk, binning)
+	this->active_ringbuf_pos++;
+
+	active_ichunk0++;
+	active_ichunk1++;
     }
 
-    if (packet_ichunk == active_chunk0->ichunk) {
+    if ((packet_ichunk >= active_ichunk0) && (packet_ichunk < active_ichunk1)) {
+	// Assembler hit.
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
-	active_chunk0->add_packet(packet);
-    }
-    else if (packet_ichunk == active_chunk1->ichunk) {
-	event_counts[intensity_network_stream::event_type::assembler_hit]++;
-	active_chunk1->add_packet(packet);
+	active_ringbuf[packet_ichunk % active_ringbuf_capacity]->add_packet(packet);
     }
     else {
+	// Assembler miss.
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
 	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
@@ -247,7 +265,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 }
 
 
-// Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
+// Helper function called from assembler thread, to add a new assembled_chunk to the telescoping ring buffer.
 // Resets 'chunk' to a null pointer.
 // Warning: only safe to call from assembler thread.
 bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
@@ -518,8 +536,9 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
 
 void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 {
-    if (!active_chunk0 || !active_chunk1)
-	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
+    // XXX rethink
+    // if (!active_chunk0 || !active_chunk1)
+    // throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
     if (active_chunk0)
         this->_put_assembled_chunk(active_chunk0, event_counts);
