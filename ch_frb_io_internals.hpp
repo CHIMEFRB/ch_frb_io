@@ -515,6 +515,18 @@ template<typename T> inline std::string vstr(const std::vector<T> &buf)
 
 
 template<typename T>
+inline bool vcontains(const std::vector<T> &v, T x)
+{
+    for (size_t i = 0; i < v.size(); i++) {
+	if (v[i] == x)
+	    return true;
+    }
+
+    return false;
+}
+
+
+template<typename T>
 inline T *aligned_alloc(size_t nelts)
 {
     if (nelts == 0)

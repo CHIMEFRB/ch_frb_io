@@ -258,17 +258,9 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     // Note: The 'nbeams', 'assemblers', and 'ini_params.beam_ids' fields are constant
     // after initialization, so we don't need to acquire a lock for these fields.
 
-    int nbeams = beam_ids.size();
-
-    for (int b: beam_ids) {
-	bool match = false;
-	for (int ibeam = 0; ibeam < nbeams; ibeam++)
-	    if (ini_params.beam_ids[ibeam] == b)
-		match = true;
-
-	if (!match)
-	    throw runtime_error("intensity_network_stream::stream_to_files(): specified beam_id " + to_string(b) + " is not processed by this stream");
-    }
+    for (int b: beam_ids)
+	if (!vcontains(ini_params.beam_ids, b))
+	    throw runtime_error("intensity_network_stream::stream_to_files(): specified beam_id " + to_string(b) + " is not contained in stream beam_ids: " + vstr(ini_params.beam_ids));
     
     // If we get here, the call is valid.  The stream_lock will be held throughout.
     unique_lock<mutex> ulock(stream_lock);
@@ -277,14 +269,8 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     this->stream_beam_ids = beam_ids;
     this->stream_priority = priority;
 
-    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-	bool stream_this_beam = false;
-
-	for (int b: beam_ids)
-	    if (b == ini_params.beam_ids[ibeam])
-		stream_this_beam = true;
-
-	if (stream_this_beam)
+    for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
+	if (vcontains(beam_ids, ini_params.beam_ids[ibeam]))
 	    assemblers[ibeam]->stream_to_files(filename_pattern, priority);
 	else
 	    assemblers[ibeam]->stream_to_files("", 0);
