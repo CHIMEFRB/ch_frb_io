@@ -20,8 +20,8 @@ memory_slab_pool::memory_slab_pool(ssize_t nbytes_per_slab_, ssize_t nslabs_, co
 	throw runtime_error("ch_frb_io: memory_slab_pool constructor expects nbytes_per_slab > 0");
     if (nslabs <= 0)
 	throw runtime_error("ch_frb_io: memory_slab_pool constructor expects nslabs > 0");
-    if (gb > 64.0)
-	throw runtime_error("ch_frb_io: memory_slab_pool constructor: attempt to allocate > 64 GB, this is assumed unintentional");
+    if (gb > 100.0)
+	throw runtime_error("ch_frb_io: memory_slab_pool constructor: attempt to allocate > 100 GB, this is assumed unintentional");
 
     if (verbosity >= 1) {
 	cout << "ch_frb_io: allocating " << gb << " GB memory pool";
