@@ -188,6 +188,8 @@ void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, in
     pthread_mutex_lock(&this->lock);
     this->stream_pattern = filename_pattern;
     this->stream_priority = priority;
+    this->stream_chunks_written = 0;
+    this->stream_bytes_written = 0;
     pthread_mutex_unlock(&this->lock);
 }
 

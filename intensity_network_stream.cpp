@@ -47,7 +47,10 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_waiting_usec(0),
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
-    assembler_thread_working_usec(0)
+    assembler_thread_working_usec(0),
+    stream_chunks_written(0),
+    stream_bytes_written(0),
+    stream_priority(0)
 {
     // Argument checking
 
@@ -268,7 +271,9 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     this->stream_filename_pattern = filename_pattern;
     this->stream_beam_ids = beam_ids;
     this->stream_priority = priority;
-
+    this->stream_chunks_written = 0;
+    this->stream_bytes_written = 0;
+    
     for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
 	if (vcontains(beam_ids, ini_params.beam_ids[ibeam]))
 	    assemblers[ibeam]->stream_to_files(filename_pattern, priority);
