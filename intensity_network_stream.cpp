@@ -277,6 +277,29 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     }
 }
 
+void intensity_network_stream::get_streaming_status(std::string &filename_pattern,
+                                                    std::vector<int> &beam_ids,
+                                                    int &priority,
+                                                    int &chunks_written,
+                                                    size_t &bytes_written) {
+    unique_lock<mutex> ulock(stream_lock);
+    filename_pattern = this->stream_filename_pattern;
+    beam_ids.insert(beam_ids.end(),
+                    this->stream_beam_ids.begin(), this->stream_beam_ids.end());
+    priority = this->stream_priority;
+
+    chunks_written = 0;
+    bytes_written = 0;
+    for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
+	if (!vcontains(beam_ids, ini_params.beam_ids[ibeam]))
+            continue;
+        int achunks = 0;
+        size_t abytes = 0;
+        assemblers[ibeam]->get_streamed_chunks(achunks, abytes);
+        chunks_written += achunks;
+        bytes_written += abytes;
+    }
+}
 
 void intensity_network_stream::print_state() {
     cout << "Intensity network stream state:" << endl;

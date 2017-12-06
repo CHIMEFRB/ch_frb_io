@@ -1,5 +1,6 @@
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -246,6 +247,34 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     }
 }
 
+struct streaming_write_chunk_request : public write_chunk_request {
+    assembled_chunk_ringbuf* assembler;
+    virtual void write_callback(const std::string &error_message) {
+        if (error_message.size() == 0) {
+            assembler->chunk_streamed(filename);
+        }
+    }
+    virtual ~streaming_write_chunk_request() { }
+};
+
+void assembled_chunk_ringbuf::chunk_streamed(const std::string &filename) {
+    //chlog("Assembled_chunk streamed: " << filename);
+    struct stat st;
+    if (stat(filename.c_str(), &st))
+        throw runtime_error("ch_frb_io: failed to stat file " + filename + " that was just streamed: " + strerror(errno));
+    size_t len = st.st_size;
+    pthread_mutex_lock(&this->lock);
+    this->stream_chunks_written ++;
+    this->stream_bytes_written += len;
+    pthread_mutex_unlock(&this->lock);
+}
+
+void assembled_chunk_ringbuf::get_streamed_chunks(int &achunks, size_t &abytes) {
+    pthread_mutex_lock(&this->lock);
+    achunks = stream_chunks_written;
+    abytes = stream_bytes_written;
+    pthread_mutex_unlock(&this->lock);
+}
 
 // Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
 // Resets 'chunk' to a null pointer.
@@ -366,10 +395,11 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // 'loc_stream_pattern' and 'loc_stream_priority' here, for thread-safety.
 
     if (loc_stream_pattern.size() > 0) {
-	shared_ptr<write_chunk_request> wreq = make_shared<write_chunk_request> ();
+	shared_ptr<streaming_write_chunk_request> wreq = make_shared<streaming_write_chunk_request> ();
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
 	wreq->priority = loc_stream_priority;
 	wreq->chunk = pushlist[0];	
+        wreq->assembler = this;
 
 	// return value from enqueue_write_request() is ignored.
 	output_devices.enqueue_write_request(wreq);

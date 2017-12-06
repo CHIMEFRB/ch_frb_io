@@ -281,6 +281,11 @@ public:
     //   'priority': see write_chunk_request::priority
     void stream_to_files(const std::string &filename_pattern, int priority);
 
+    // Callback from the write thread when a stream_to_files() write finishes
+    void chunk_streamed(const std::string &filename);
+
+    void get_streamed_chunks(int &achunks, size_t &abytes);
+
     // Debugging: print state
     void print_state();
 
@@ -369,6 +374,8 @@ protected:
     // Are we streaming data to disk?  (Note: these fields require the lock for either read or write access.)
     std::string stream_pattern;
     int stream_priority = 0;
+    int stream_chunks_written = 0;
+    size_t stream_bytes_written = 0;
 
     bool doneflag = false;
 };
