@@ -620,7 +620,7 @@ public:
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
-	mutable std::unique_ptr<uint8_t[]> slab;
+        mutable memory_slab_t slab = memory_slab_t(NULL, &std::free);
     };
 
     // Parameters specified at construction.
