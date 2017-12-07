@@ -107,6 +107,9 @@ test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.
 test-assembled-chunk: test-assembled-chunk.cpp $(INCFILES) $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5 -lzmq
 
+test-weakptr: test-weakptr.cpp $(INCFILES) $(OFILES)
+	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES)
+
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 

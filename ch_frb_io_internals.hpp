@@ -10,6 +10,7 @@
 #include <sstream>
 #include <iostream>
 #include <stdexcept>
+#include <memory>
 
 #include <errno.h>
 #include <unistd.h>
@@ -243,7 +244,8 @@ struct udp_packet_ringbuf : noncopyable {
 // It also manages the "active" assembled_chunks, which are being filled with data as new packets arrive.
 // There is one assembled_chunk_ringbuf for each beam.
 
-class assembled_chunk_ringbuf : noncopyable {
+class assembled_chunk_ringbuf : noncopyable,
+                                public std::enable_shared_from_this<assembled_chunk_ringbuf> {
 public:
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 

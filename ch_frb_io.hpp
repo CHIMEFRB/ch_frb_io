@@ -477,7 +477,7 @@ public:
 
 protected:
     // Constant after construction, so not protected by lock
-    std::vector<std::unique_ptr<assembled_chunk_ringbuf>> assemblers;
+    std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
 
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
