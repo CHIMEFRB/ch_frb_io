@@ -108,7 +108,7 @@ test-assembled-chunk: test-assembled-chunk.cpp $(INCFILES) $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5 -lzmq
 
 test-weakptr: test-weakptr.cpp $(INCFILES) $(OFILES)
-	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES)
+	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5 -lzmq
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io

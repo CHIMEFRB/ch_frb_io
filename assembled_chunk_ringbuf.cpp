@@ -258,6 +258,8 @@ struct streaming_write_chunk_request : public write_chunk_request {
             shared_ptr<assembled_chunk_ringbuf> realpointer = assembler.lock();
             if (realpointer)
                 realpointer->chunk_streamed(filename);
+	    else
+	      cout << "Assembled_chunk_ringbuffer: write chunk finished, but assembler has been deleted. No problem!" << endl;
         }
     }
     virtual ~streaming_write_chunk_request() { }
