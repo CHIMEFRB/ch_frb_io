@@ -50,8 +50,18 @@ struct udp_packet_list;
 struct udp_packet_ringbuf;
 class assembled_chunk_ringbuf;
 
-typedef std::unique_ptr<uint8_t[], decltype(&std::free) > memory_slab_t;
-//typedef std::unique_ptr<uint8_t[], void(*)(void *)> memory_slab_t;
+// "uptr" is a unique_ptr for memory that is allocated by
+// malloc()-like calls and should therefore be freed by free().
+// It uses this little custom deleter class (that is
+// default-constructable, so doesn't need to specified when creating a
+// uptr).  This was copy-pasted from rf_pipelines.
+struct uptr_deleter {
+    inline void operator()(const void *p) { std::free(const_cast<void *> (p)); }
+};
+template<typename T>
+using uptr = std::unique_ptr<T[], uptr_deleter>;
+// And we use it for blocks of memory used for assembled_chunks.
+typedef uptr<uint8_t> memory_slab_t;
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -620,7 +630,7 @@ public:
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
-        mutable memory_slab_t slab = memory_slab_t(NULL, &std::free);
+        mutable memory_slab_t slab;
     };
 
     // Parameters specified at construction.

@@ -102,8 +102,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
     isample(ichunk * constants::nt_per_assembled_chunk),
     fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
-    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
-    memory_slab(NULL, &std::free)
+    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad 'beam_id' argument");
@@ -143,7 +142,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 	    throw runtime_error("assembled_chunk constructor: 'pool' is an empty pointer, but 'slab' is nonempty");
 
 	uint8_t *p = aligned_alloc<uint8_t> (mc.slab_size);
-	this->memory_slab = memory_slab_t(p, &std::free);
+	this->memory_slab = memory_slab_t(p);
     }
 
     this->data = memory_slab.get() + mc.ib_data;

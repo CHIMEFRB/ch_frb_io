@@ -52,7 +52,7 @@ memory_slab_pool::~memory_slab_pool()
 memory_slab_t memory_slab_pool::get_slab(bool zero, bool wait)
 {
     ssize_t loc_size = 0;
-    memory_slab_t ret(NULL, &std::free);
+    memory_slab_t ret;
     unique_lock<std::mutex> ulock(this->lock);
 
     for (;;) {
@@ -118,7 +118,7 @@ void memory_slab_pool::allocate(const vector<int> &allocation_cores)
 
     for (ssize_t i = 0; i < nslabs; i++) {
 	uint8_t *p = aligned_alloc<uint8_t> (nbytes_per_slab);
-	this->slabs.push_back(memory_slab_t(p, &std::free));
+	this->slabs.push_back(memory_slab_t(p));
     }
 
     this->curr_size = nslabs;
