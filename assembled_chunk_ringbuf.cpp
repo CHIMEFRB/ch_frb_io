@@ -250,10 +250,20 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 }
 
 struct streaming_write_chunk_request : public write_chunk_request {
-    assembled_chunk_ringbuf* assembler;
+    weak_ptr<assembled_chunk_ringbuf> assembler;
+    int udelay;
     virtual void write_callback(const std::string &error_message) {
+        if (udelay) {
+            usleep(udelay);
+        }
         if (error_message.size() == 0) {
-            assembler->chunk_streamed(filename);
+            // "lock" our weak pointer to the assembler; this fails if
+            // it has been deleted already (in which case we do nothing).
+            shared_ptr<assembled_chunk_ringbuf> realpointer = assembler.lock();
+            if (realpointer)
+                realpointer->chunk_streamed(filename);
+	    else
+	      cout << "Assembled_chunk_ringbuffer: write chunk finished, but assembler has been deleted. No problem!" << endl;
         }
     }
     virtual ~streaming_write_chunk_request() { }
@@ -400,8 +410,11 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	shared_ptr<streaming_write_chunk_request> wreq = make_shared<streaming_write_chunk_request> ();
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
 	wreq->priority = loc_stream_priority;
+	// DEBUG
+	if (wreq->priority == -1000)
+            wreq->udelay = 1000000;
 	wreq->chunk = pushlist[0];	
-        wreq->assembler = this;
+        wreq->assembler = shared_from_this();
 
 	// return value from enqueue_write_request() is ignored.
 	output_devices.enqueue_write_request(wreq);
