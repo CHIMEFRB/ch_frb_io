@@ -210,15 +210,22 @@ template<> inline void incremental_downsample8::add<7> (__m256 x)
 struct incremental_upsample8 {
     __m256 x0;  // [x0 x0]
     __m256 x1;  // [x1 x1]
-    
-    incremental_upsample8(const float *p)
+
+    incremental_upsample8(__m256 x01)
     {
-	__m256 x01 = _mm256_load_ps(p);                       // [x0 x1]
 	__m256 x10 = _mm256_permute2f128_ps(x01, x01, 0x01);  // [x1 x0]
 
 	x0 = _mm256_blend_ps(x01, x10, 0xf0);  // [x0 x0]
 	x1 = _mm256_blend_ps(x01, x10, 0x0f);  // [x1 x1]
     }
+
+    incremental_upsample8(const float *p)
+	: incremental_upsample8(_mm256_load_ps(p))
+    { }
+
+    incremental_upsample8(const float *p, float c)
+	: incremental_upsample8(_mm256_load_ps(p) * _mm256_set1_ps(c))
+    { }
 
     template<int N> inline __m256 get();
 };
@@ -482,13 +489,13 @@ inline __m256 _unpack_16bit_data(__m128i x, __m256 offset, __m256 scale)
 // Decode kernel.
 // Reads 32 input data values (uint8).
 // Reads 2 offset values, by calling offset.get<2N> and offset.get<2N+1>
-// Reads 2 scale values, by calling scales.get<2N> and scales.get<2N+1>
+// Reads 2 (scale/2) values, by calling scales2.get<2N> and scales2.get<2N+1>
 // Writes 1 logical count value, by calling out_count.add<N>
 // Writes 1 logical mean value, by calling out_mean.add<N>
 
 template<int N>
 inline void _ds_kernel1a(float *out_data, int *out_mask, const uint8_t *in_data,
-			 incremental_upsample8 &in_offset, incremental_upsample8 &in_scale,
+			 incremental_upsample8 &in_offset, incremental_upsample8 &in_scale2,
 			 incremental_downsample8 &out_count, incremental_downsample8 &out_mean)
 {
     static constexpr int N2 = (2*N) % 8;
@@ -515,8 +522,8 @@ inline void _ds_kernel1a(float *out_data, int *out_mask, const uint8_t *in_data,
     m16 = _mm256_xor_si256(m16, all_ones);
 
     // Unpack output data to pair (float32[8], float32[8])
-    __m256 x0 = _unpack_16bit_data(_mm256_extracti128_si256(d16,0), in_offset.get<N2>(), in_scale.get<N2>());
-    __m256 x1 = _unpack_16bit_data(_mm256_extracti128_si256(d16,1), in_offset.get<N2+1>(), in_scale.get<N2+1>());
+    __m256 x0 = _unpack_16bit_data(_mm256_extracti128_si256(d16,0), in_offset.get<N2>(), in_scale2.get<N2>());
+    __m256 x1 = _unpack_16bit_data(_mm256_extracti128_si256(d16,1), in_offset.get<N2+1>(), in_scale2.get<N2+1>());
 
     // Unpack 16-bit output mask to pair (int32[8], int32[8])
     __m256i m0 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(m16,0));
@@ -560,7 +567,7 @@ inline void _ds_kernel1b(float *out_data, int *out_mask, const uint8_t *in_data,
     incremental_downsample8 mean;
 
     incremental_upsample8 offset0(in_offset);
-    incremental_upsample8 scale0(in_scale);
+    incremental_upsample8 scale0(in_scale, 0.5);   // _ds_kernel1a() expects (scale/2)
 
     _ds_kernel1a<0> (out_data, out_mask, in_data, offset0, scale0, count, mean);
     _ds_kernel1a<1> (out_data+16, out_mask+16, in_data+32, offset0, scale0, count, mean);
@@ -568,7 +575,7 @@ inline void _ds_kernel1b(float *out_data, int *out_mask, const uint8_t *in_data,
     _ds_kernel1a<3> (out_data+48, out_mask+48, in_data+96, offset0, scale0, count, mean);
 
     incremental_upsample8 offset1(in_offset+8);
-    incremental_upsample8 scale1(in_scale+8);
+    incremental_upsample8 scale1(in_scale+8, 0.5);  // _ds_kernel1a() expects (scale/2)
 
     _ds_kernel1a<4> (out_data+64, out_mask+64, in_data+128, offset1, scale1, count, mean);
     _ds_kernel1a<5> (out_data+80, out_mask+80, in_data+160, offset1, scale1, count, mean);

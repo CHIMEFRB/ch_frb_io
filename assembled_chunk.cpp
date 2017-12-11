@@ -640,7 +640,7 @@ void ds_slow_kernel1(float *out_data, int *out_mask, const uint8_t *in_data,
     for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 	for (int p = 0; p < np; p++) {
 	    float offset = in_offsets[p];
-	    float scale = in_scales[p];
+	    float scale = 0.5 * in_scales[p];  // Note factor 0.5 here
 
 	    for (int q = 0; q < nq; q++) {
 		uint8_t d0 = in_data[iupfreq*nt_per_chunk + p*nt_per_packet + 2*q];
