@@ -48,9 +48,9 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
+    stream_priority(0),
     stream_chunks_written(0),
-    stream_bytes_written(0),
-    stream_priority(0)
+    stream_bytes_written(0)
 {
     // Argument checking
 
