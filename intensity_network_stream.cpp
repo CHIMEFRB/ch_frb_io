@@ -106,7 +106,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     this->assemblers.resize(nbeams);
     for (int ix = 0; ix < nbeams; ix++)
-	assemblers[ix] = make_unique<assembled_chunk_ringbuf> (ini_params, ini_params.beam_ids[ix], ini_params.stream_id);
+	assemblers[ix] = make_shared<assembled_chunk_ringbuf> (ini_params, ini_params.beam_ids[ix], ini_params.stream_id);
 
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
 								 ini_params.max_unassembled_packets_per_list, 
