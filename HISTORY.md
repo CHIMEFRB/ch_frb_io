@@ -1,3 +1,7 @@
+- v10:
+  - fix factor-of-two bug in chunk downsampling kernel
+  - Dustin: add get_streaming_status() call; record the number of chunks and number of bytes written during current streaming capture
+
 -v9:
   - 'beam_ids' argument to intensity_network_stream::stream_files()
 
