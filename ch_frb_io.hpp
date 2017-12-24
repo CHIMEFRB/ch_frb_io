@@ -464,6 +464,12 @@ public:
 
     void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority);
 
+    void get_streaming_status(std::string &filename_pattern,
+                              std::vector<int> &beam_ids,
+                              int &priority,
+                              int &chunks_written,
+                              size_t &bytes_written);
+
     // For debugging: print state.
     void print_state();
 
@@ -541,6 +547,8 @@ protected:
     std::string stream_filename_pattern;
     std::vector<int> stream_beam_ids;
     int stream_priority;
+    int stream_chunks_written;
+    size_t stream_bytes_written;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
