@@ -70,6 +70,7 @@ TEST_BINARIES = test-intensity-hdf5-file \
 	test-misc \
 	test-network-streams \
 	test-log \
+	test-weakptr \
 	time-assembled-chunk-write \
 	time-kernels
 
