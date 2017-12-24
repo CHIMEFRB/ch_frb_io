@@ -272,8 +272,13 @@ struct streaming_write_chunk_request : public write_chunk_request {
 void assembled_chunk_ringbuf::chunk_streamed(const std::string &filename) {
     //chlog("Assembled_chunk streamed: " << filename);
     struct stat st;
-    if (stat(filename.c_str(), &st))
-        throw runtime_error("ch_frb_io: failed to stat file " + filename + " that was just streamed: " + strerror(errno));
+    int err = stat(filename.c_str(), &st);
+
+    if (err < 0) {
+	chlog("warning: failed to stat file " + filename + " that was just streamed: " + strerror(errno));
+	return;
+    }
+
     size_t len = st.st_size;
     pthread_mutex_lock(&this->lock);
     this->stream_chunks_written ++;
