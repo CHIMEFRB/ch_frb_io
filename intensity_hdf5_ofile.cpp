@@ -61,9 +61,16 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
     vector<hsize_t> time_shape = { hsize_t(16384) };
     this->time_dataset = make_unique<hdf5_extendable_dataset<double>> (g_index_map, "time", time_shape, 0);
 
+    vector<string> compression;
+
+    if (bitshuffle >= 1)
+	compression.push_back("bitshuffle");
+    if (bitshuffle <= 2)
+	compression.push_back("none");
+
     vector<hsize_t> chunk_shape = { hsize_t(nfreq), hsize_t(npol), hsize_t(nt_chunk) };
-    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float>> (f, "intensity", chunk_shape, 2);
-    this->weights_dataset = make_unique<hdf5_extendable_dataset<float>>  (f, "weight", chunk_shape, 2);
+    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float>> (f, "intensity", chunk_shape, 2, compression);
+    this->weights_dataset = make_unique<hdf5_extendable_dataset<float>>  (f, "weight", chunk_shape, 2, compression);
 }
 
 

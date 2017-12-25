@@ -217,8 +217,7 @@ struct intensity_hdf5_ofile {
     //
     // The meaning of the 'bitshuffle' arg is:
     //   0 = no compression
-    //   1 = try to compress, but if plugin fails then just write uncompressed data instead
-    //   2 = try to compress, but if plugin fails then print a warning and write uncompressed data instead
+    //   1-2 = try to compress, but if plugin fails then just write uncompressed data instead
     //   3 = compression mandatory
     //
     // The default nt_chunk=128 comes from ch_vdif_assembler chunk size, assuming downsampling by factor 512.
