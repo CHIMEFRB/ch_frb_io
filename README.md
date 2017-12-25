@@ -42,12 +42,14 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
 ### DEPENDENCIES
 
-  1. HDF5, including C++ support.
+  1. [kmsmith137/sp_hdf5](https://github.com/kmsmith137/sp_hdf5).
+     This should be an optional dependency, but it's currently required!
   
-     **Currently, ch_frb_io requires HDF5 version 1.8.12 or later,
-     but does not work with version 1.10.x.  This will be fixed eventually!**
+     Note that `sp_hdf5` has HDF5 as a dependency, and the versioning requirements are nontrivial:
+       - Must be version 1.8.x (i.e. **HDF5 1.10.x will not work**), where x >= 12.
+       - Must be built with C++ support (`./configure --enable-cxx ...` when building HDF5).
 
-     For instructions on installing a version of HDF5 which is neither too old nor too new, see
+     For instructions on installing a version of HDF5 which meets these requirements, see
      [kmsmith137/sp_hdf5/README.md](https://github.com/kmsmith137/sp_hdf5/blob/master/README.md).
 
   2. The lz4 compression library.
