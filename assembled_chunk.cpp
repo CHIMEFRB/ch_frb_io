@@ -12,6 +12,7 @@
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
+using namespace sp_hdf5;
 
 namespace ch_frb_io {
 #if 0
@@ -482,43 +483,31 @@ unique_ptr<assembled_chunk> assembled_chunk::make(const assembled_chunk::initial
 
 void assembled_chunk::write_hdf5_file(const string &filename)
 {
-    bool write = true;
-    bool clobber = true;
-    hdf5_file f(filename, write, clobber);
-
     string chunkname = "/assembled-chunk-beam" + to_string(beam_id)
         + "-ichunk" + to_string(ichunk);
-    bool create = true;
-    hdf5_group g_chunk(f, chunkname, create);
+
+    H5::H5File f = hdf5_open_trunc(filename);
+    H5::Group g_chunk = hdf5_create_group(f, chunkname);
 
     // Header
-    g_chunk.write_attribute("beam_id", this->beam_id);
-    g_chunk.write_attribute("nupfreq", this->nupfreq);
-    g_chunk.write_attribute("nt_per_packet", this->nt_per_packet);
-    g_chunk.write_attribute("fpga_counts_per_sample", this->fpga_counts_per_sample);
-    g_chunk.write_attribute("nt_coarse", this->nt_coarse);
-    g_chunk.write_attribute("nscales", this->nscales);
-    g_chunk.write_attribute("ndata", this->ndata);
-    g_chunk.write_attribute("ichunk", this->ichunk);
-    g_chunk.write_attribute("isample", this->isample);
+    hdf5_write_attribute(g_chunk, "beam_id", this->beam_id);
+    hdf5_write_attribute(g_chunk, "nupfreq", this->nupfreq);
+    hdf5_write_attribute(g_chunk, "nt_per_packet", this->nt_per_packet);
+    hdf5_write_attribute(g_chunk, "fpga_counts_per_sample", this->fpga_counts_per_sample);
+    hdf5_write_attribute(g_chunk, "nt_coarse", this->nt_coarse);
+    hdf5_write_attribute(g_chunk, "nscales", this->nscales);
+    hdf5_write_attribute(g_chunk, "ndata", this->ndata);
+    hdf5_write_attribute(g_chunk, "ichunk", this->ichunk);
+    hdf5_write_attribute(g_chunk, "isample", this->isample);
 
     // Offset & scale vectors
-    vector<hsize_t> scaleshape = { (hsize_t)constants::nfreq_coarse_tot,
-                                   (hsize_t)this->nt_coarse };
-    g_chunk.write_dataset("scales",  this->scales,  scaleshape);
-    g_chunk.write_dataset("offsets", this->offsets, scaleshape);
+    vector<hsize_t> scaleshape = { (hsize_t)constants::nfreq_coarse_tot, (hsize_t)this->nt_coarse };
+    hdf5_write_dataset(g_chunk, "scales", this->scales, scaleshape);
+    hdf5_write_dataset(g_chunk, "offsets", this->offsets, scaleshape);
 
     // Raw data
-    int bitshuffle = 0;
-    vector<hsize_t> datashape = {
-        (hsize_t)constants::nfreq_coarse_tot,
-        (hsize_t)nupfreq,
-        (hsize_t)constants::nt_per_assembled_chunk };
-    unique_ptr<hdf5_extendable_dataset<uint8_t> > data_dataset =
-        make_unique<hdf5_extendable_dataset<uint8_t> >(g_chunk, "data", datashape, 2, bitshuffle);
-    data_dataset->write(this->data, datashape);
-    // close
-    data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
+    vector<hsize_t> datashape = { (hsize_t)constants::nfreq_coarse_tot, (hsize_t)nupfreq, (hsize_t)constants::nt_per_assembled_chunk };
+    hdf5_write_dataset(g_chunk, "data", this->data, datashape);
 }
 
 void assembled_chunk::write_msgpack_file(const string &filename, bool compress, uint8_t *buffer)

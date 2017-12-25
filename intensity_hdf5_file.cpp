@@ -2,6 +2,7 @@
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
+using namespace sp_hdf5;
 
 namespace ch_frb_io {
 #if 0
@@ -10,18 +11,16 @@ namespace ch_frb_io {
 
 
 // Helper function for intensity_hdf5_file constructor
-static void _init_frequencies(intensity_hdf5_file &f, hdf5_group &g)
+static void _init_frequencies(intensity_hdf5_file &f, H5::Group &g)
 {
-    vector<hsize_t> freq_shape;
-    g.get_dataset_shape("freq", freq_shape);
+    vector<hsize_t> freq_shape = hdf5_get_dataset_shape(g, "freq");
 
     if (freq_shape.size() != 1)
 	throw runtime_error(f.filename + ": expected index_map.freq.ndim == 1");
 
     f.nfreq = freq_shape[0];
 
-    vector<double> frequency_Hz(f.nfreq);
-    g.read_dataset("freq", &frequency_Hz[0], freq_shape);
+    vector<double> frequency_Hz = hdf5_read_dataset<double> (g, "freq", freq_shape);
 
     if (f.nfreq < 2)
 	throw runtime_error(f.filename + ": expected nfreq >= 2");
@@ -49,10 +48,9 @@ static void _init_frequencies(intensity_hdf5_file &f, hdf5_group &g)
 
 
 // Helper function for intensity_hdf5_file constructor
-static void _init_polarizations(intensity_hdf5_file &f, hdf5_group &g)
+static void _init_polarizations(intensity_hdf5_file &f, H5::Group &g)
 {
-    vector<hsize_t> pol_shape;
-    g.get_dataset_shape("pol", pol_shape);
+    vector<hsize_t> pol_shape = hdf5_get_dataset_shape(g, "pol");
 
     if (pol_shape.size() != 1)
 	throw runtime_error(f.filename + ": expected index_map.pol.ndim == 1");
@@ -60,7 +58,7 @@ static void _init_polarizations(intensity_hdf5_file &f, hdf5_group &g)
 	throw runtime_error(f.filename + ": expected npol==1 or npol==2");
 
     f.npol = pol_shape[0];
-    g.read_string_dataset("pol", f.polarizations, pol_shape);
+    f.polarizations = hdf5_read_dataset<string> (g, "pol", pol_shape);
 
     for (int ipol = 0; ipol < f.npol; ipol++) {
 	if ((f.polarizations[ipol] != "XX") && (f.polarizations[ipol] != "YY"))
@@ -74,10 +72,9 @@ static void _init_polarizations(intensity_hdf5_file &f, hdf5_group &g)
 
 
 // Helper function for intensity_hdf5_file constructor
-static void _init_times(intensity_hdf5_file &f, hdf5_group &g)
+static void _init_times(intensity_hdf5_file &f, H5::Group &g)
 {
-    vector<hsize_t> time_shape;
-    g.get_dataset_shape("time", time_shape);
+    vector<hsize_t> time_shape = hdf5_get_dataset_shape(g, "time");
     
     if (time_shape.size() != 1)
 	throw runtime_error(f.filename + ": expected index_map.time.ndim == 1");
@@ -87,8 +84,7 @@ static void _init_times(intensity_hdf5_file &f, hdf5_group &g)
     if (f.nt_file < 2)
 	throw runtime_error(f.filename + ": expected nt >= 2");
 
-    f.times.resize(f.nt_file);
-    g.read_dataset("time", &f.times[0], time_shape);
+    f.times = hdf5_read_dataset<double> (g, "time", time_shape);
 
     // provisional dt_sample = min_i(dt[i+1]-dt[i])
     double dt_p = f.times[1] - f.times[0];
@@ -129,24 +125,16 @@ static void _init_times(intensity_hdf5_file &f, hdf5_group &g)
 intensity_hdf5_file::intensity_hdf5_file(const string &filename_, bool noisy) :
     filename(filename_)
 {
-    hdf5_file f(filename);
-    hdf5_group g_root(f, ".");
-    hdf5_group g_im(f, "index_map");
+    H5::H5File f = hdf5_open(filename);
+    H5::Group g_im = hdf5_open_group(f, "index_map");
 
     _init_frequencies(*this, g_im);
     _init_polarizations(*this, g_im);
     _init_times(*this, g_im);
 
-    vector<hsize_t> data_shape(3);
-    data_shape[0] = nfreq;
-    data_shape[1] = npol;
-    data_shape[2] = nt_file;
-
-    this->intensity.resize(nfreq * npol * nt_file);
-    this->weights.resize(nfreq * npol * nt_file);
-
-    g_root.read_dataset("intensity", &intensity[0], data_shape);
-    g_root.read_dataset("weight", &weights[0], data_shape);
+    vector<hsize_t> data_shape = { hsize_t(nfreq), hsize_t(npol), hsize_t(nt_file) };
+    this->intensity = hdf5_read_dataset<float> (f, "intensity", data_shape);
+    this->weights = hdf5_read_dataset<float> (f, "weight", data_shape);
 
     // Note: these need to be double-precision
     double wsum = 0.0;

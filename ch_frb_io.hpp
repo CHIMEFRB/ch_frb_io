@@ -21,7 +21,7 @@
 #include <mutex>
 #include <condition_variable>
 
-#include <hdf5.h>
+#include <sp_hdf5.hpp>
 
 #include <arpa/inet.h>
 
@@ -30,7 +30,6 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
-template<typename T> struct hdf5_extendable_dataset;
 
 struct noncopyable
 {
@@ -200,9 +199,9 @@ struct intensity_hdf5_ofile {
     double wsum;
     double wmax;
 
-    std::unique_ptr<hdf5_extendable_dataset<double> > time_dataset;
-    std::unique_ptr<hdf5_extendable_dataset<float> > intensity_dataset;
-    std::unique_ptr<hdf5_extendable_dataset<float> > weights_dataset;
+    std::unique_ptr<sp_hdf5::hdf5_extendable_dataset<double>> time_dataset;
+    std::unique_ptr<sp_hdf5::hdf5_extendable_dataset<float>> intensity_dataset;
+    std::unique_ptr<sp_hdf5::hdf5_extendable_dataset<float>> weights_dataset;
 
     //
     // The 'pol' argument is typically { "XX", "YY" }.  Note that pol.size() determines intensity_hdf5_file::npol,

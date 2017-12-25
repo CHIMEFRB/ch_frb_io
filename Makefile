@@ -29,12 +29,11 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5 -llz4 -lzmq
+LIBS = -lhdf5_cpp -lhdf5 -llz4 -lzmq
 
 OFILES = assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
 	avx2_kernels.o \
-	hdf5.o \
 	intensity_hdf5_file.o \
 	intensity_hdf5_ofile.o \
 	intensity_network_stream.o \
@@ -100,29 +99,29 @@ libch_frb_io.so: $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)
 
 ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 test-assembled-chunk: test-assembled-chunk.cpp $(INCFILES) $(OFILES)
-	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5 -lzmq
+	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) $(LIBS)
 
 test-weakptr: test-weakptr.cpp $(INCFILES) $(OFILES)
-	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5 -lzmq
+	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) $(LIBS)
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 time-assembled-chunk-write: time-assembled-chunk-write.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 time-kernels: time-kernels.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 
 test-log: test-log.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lzmq
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io $(LIBS)
 

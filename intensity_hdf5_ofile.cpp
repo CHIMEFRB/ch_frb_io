@@ -2,6 +2,7 @@
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
+using namespace sp_hdf5;
 
 namespace ch_frb_io {
 #if 0
@@ -45,40 +46,32 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
 		throw runtime_error(filename + ": duplicate polarizations in intensity_hdf5_ofile constructor");
     }
 
-    bool write = true;
-    bool clobber = true;
-    hdf5_file f(filename, write, clobber);
-
-    bool create = true;
-    hdf5_group g_index_map(f, "index_map", create);
-    hdf5_group g_root(f, ".");
+    H5::H5File f = hdf5_open_trunc(filename);
+    H5::Group g_index_map = hdf5_create_group(f, "index_map");
 
     vector<double> freq(nfreq);
     for (int ifreq = 0; ifreq < nfreq; ifreq++)
 	// The 1.0e6 converts MHz -> Hz
 	freq[ifreq] = 1.0e6 * (ifreq*freq1_MHz + (nfreq-ifreq)*freq0_MHz) / (double)nfreq;
 
-    vector<hsize_t> freq_shape = { (hsize_t)nfreq };
-    g_index_map.write_dataset("freq", &freq[0], freq_shape);
-    
-    vector<hsize_t> pol_shape = { pol.size() };
-    g_index_map.write_string_dataset("pol", pol, pol_shape);
-    
-    // The index_map.time dataset doesn't get bitshuffle compressed.
-    vector<hsize_t> tchunk_shape = { 16384 };
-    this->time_dataset = make_unique<hdf5_extendable_dataset<double> >(g_index_map, "time", tchunk_shape, 0);
+    hdf5_write_dataset(g_index_map, "freq", freq, { hsize_t(nfreq) });
+    hdf5_write_dataset(g_index_map, "pol", pol, { hsize_t(pol.size()) });
 
-    vector<hsize_t> chunk_shape = { (hsize_t)nfreq, (hsize_t)npol, (hsize_t)nt_chunk };
-    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "intensity", chunk_shape, 2, bitshuffle);
-    this->weights_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "weight", chunk_shape, 2, bitshuffle);
+    // The index_map.time dataset doesn't get bitshuffle compressed.
+    vector<hsize_t> time_shape = { hsize_t(16384) };
+    this->time_dataset = make_unique<hdf5_extendable_dataset<double>> (g_index_map, "time", time_shape, 0);
+
+    vector<hsize_t> chunk_shape = { hsize_t(nfreq), hsize_t(npol), hsize_t(nt_chunk) };
+    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float>> (f, "intensity", chunk_shape, 2);
+    this->weights_dataset = make_unique<hdf5_extendable_dataset<float>>  (f, "weight", chunk_shape, 2);
 }
 
 
 intensity_hdf5_ofile::~intensity_hdf5_ofile()
 {
-    time_dataset = unique_ptr<hdf5_extendable_dataset<double> > ();
-    intensity_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
-    weights_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
+    time_dataset.reset();
+    intensity_dataset.reset();
+    weights_dataset.reset();
 
     stringstream ss;
     ss << "wrote " << filename;
