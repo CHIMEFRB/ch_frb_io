@@ -108,6 +108,13 @@ void memory_slab_pool::put_slab(unique_ptr<uint8_t[]> &p)
 	cout << "ch_frb_io::memory_slab_pool::put_slab(): " << loc_size << "/" << nslabs << endl;
 }
 
+int memory_slab_pool::count_slabs_available() {
+    unique_lock<std::mutex> ulock(this->lock);
+    int rtn = curr_size;
+    ulock.unlock();
+    return rtn;
+}
+
 
 // Called as separate thread!
 void memory_slab_pool::allocate(const vector<int> &allocation_cores)
