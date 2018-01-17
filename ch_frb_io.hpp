@@ -768,6 +768,8 @@ public:
     // Note: 'p' will be set to a null pointer after put_slab() returns.
     void put_slab(std::unique_ptr<uint8_t[]> &p);
 
+    int count_slabs_available();
+
     const ssize_t nbytes_per_slab;
     const ssize_t nslabs;
     const int verbosity;
@@ -855,7 +857,10 @@ public:
     // Can be called by either the assembler thread, or an RPC thread.
     // Returns 'false' if request could not be queued (because end_stream() was called)
     bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
-    
+
+    // Counts the number of queued write request chunks
+    int count_queued_write_requests();
+
     // If 'wait' is true, then end_stream() blocks until pending writes are complete.
     // If 'wait' is false, then end_stream() cancels all pending writes.
     void end_stream(bool wait);
