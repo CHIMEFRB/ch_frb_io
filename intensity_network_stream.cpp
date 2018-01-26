@@ -446,7 +446,19 @@ intensity_network_stream::get_packet_rates(double start, double period) {
     // FIXME -- if *period* is specified, we could sum over the requested period...
     if (counts.size() == 0)
         return shared_ptr<packet_counts>();
-    return counts[0];
+    if (counts.size() == 1)
+        return counts[0];
+    shared_ptr<packet_counts> avg = make_shared<packet_counts>();
+    // Just sum the samples, ignoring the possibly imperfect overlap between desired start+period and samples.
+    avg->tv = counts[0]->tv;
+    avg->period = 0.;
+    for (auto it = counts.begin(); it != counts.end(); it++) {
+        avg->period += (*it)->period;
+        for (auto it2 = (*it)->counts.begin(); it2 != (*it)->counts.end(); it2++) {
+            avg->counts[it2->first] += it2->second;
+        }
+    }
+    return avg;
 }
 
 vector<shared_ptr<packet_counts> >
