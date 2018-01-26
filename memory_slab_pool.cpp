@@ -49,10 +49,10 @@ memory_slab_pool::~memory_slab_pool()
 }
 
 
-unique_ptr<uint8_t[]> memory_slab_pool::get_slab(bool zero, bool wait)
+memory_slab_t memory_slab_pool::get_slab(bool zero, bool wait)
 {
     ssize_t loc_size = 0;
-    unique_ptr<uint8_t[]> ret;
+    memory_slab_t ret;
     unique_lock<std::mutex> ulock(this->lock);
 
     for (;;) {
@@ -86,7 +86,7 @@ unique_ptr<uint8_t[]> memory_slab_pool::get_slab(bool zero, bool wait)
 }
 
 
-void memory_slab_pool::put_slab(unique_ptr<uint8_t[]> &p)
+void memory_slab_pool::put_slab(memory_slab_t &p)
 {
     if (!p)
 	throw runtime_error("ch_frb_io: internal error: unexpected null pointer 'p' in memory_slab_pool::put_slab()");
@@ -114,11 +114,11 @@ void memory_slab_pool::allocate(const vector<int> &allocation_cores)
 {
     pin_thread_to_cores(allocation_cores);
 
-    this->slabs.resize(nslabs);
+    this->slabs.reserve(nslabs);
 
     for (ssize_t i = 0; i < nslabs; i++) {
 	uint8_t *p = aligned_alloc<uint8_t> (nbytes_per_slab);
-	this->slabs[i] = unique_ptr<uint8_t[]> (p);
+	this->slabs.push_back(memory_slab_t(p));
     }
 
     this->curr_size = nslabs;
