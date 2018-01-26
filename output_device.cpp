@@ -145,6 +145,12 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     return true;
 }
 
+int output_device::count_queued_write_requests() {
+    unique_lock<std::mutex> ulock(_lock);
+    int rtn = _write_reqs.size();
+    ulock.unlock();
+    return rtn;
+}
 
 // Called internally by I/O thread.
 shared_ptr<write_chunk_request> output_device::pop_write_request()

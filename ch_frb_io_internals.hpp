@@ -307,12 +307,18 @@ public:
     //  *ringbuf_nelements* counts the number of valid chunks, including old chunks that have already been consumed by get_assembled_chunk.
     //  *ringbuf_fpga_min* is the smallest FPGA-counts number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().)
     //  *ringbuf_fpga_max* is the largest FPGA-counts number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().).  This includes the number of FPGA samples in the chunks.
+    //
+    // If *level* is specified, then returns *capacity*, *nelements*,
+    // *fpga_min* and *fpga_max* for one level of the ringbuffer;
+    // level=1 is the original intensity data, level=2 is
+    // downsampled-by-2, level=3 is downsampled x 4, etc.
     void get_ringbuf_size(uint64_t* ringbuf_fpga_next,
                           uint64_t* ringbuf_n_ready,
                           uint64_t* ringbuf_capacity,
                           uint64_t* ringbuf_nelements,
                           uint64_t* ringbuf_fpga_min,
-                          uint64_t* ringbuf_fpga_max);
+                          uint64_t* ringbuf_fpga_max,
+                          int level=0);
 
 protected:
     const intensity_network_stream::initializer ini_params;
