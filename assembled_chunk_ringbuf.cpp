@@ -127,11 +127,12 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
                                                uint64_t *ringbuf_total_capacity,
                                                uint64_t *ringbuf_nelements,
                                                uint64_t *ringbuf_fpga_min,
-                                               uint64_t *ringbuf_fpga_max) 
+                                               uint64_t *ringbuf_fpga_max,
+                                               int level) 
 {
     pthread_mutex_lock(&this->lock);
 
-    if (ringbuf_fpga_next) {
+    if (ringbuf_fpga_next && (level == 0)) {
 	*ringbuf_fpga_next = 0;
 
 	if (downstream_pos < ringbuf_pos[0] + ringbuf_size[0]) {
@@ -146,37 +147,65 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 	}
     }
 
-    if (ringbuf_n_ready) {
+    if (ringbuf_n_ready && (level == 0)) {
 	// Number of chunks which have been assembled, but not yet processed by "downstream" thread.
         *ringbuf_n_ready = ringbuf_pos[0] + ringbuf_size[0] - downstream_pos;
     }
 
-    if (ringbuf_total_capacity)
-        *ringbuf_total_capacity = sum(ringbuf_capacity);
-
-    if (ringbuf_nelements)
-        *ringbuf_nelements = sum(ringbuf_size);
+    if (ringbuf_total_capacity) {
+        if (level == 0) {
+            *ringbuf_total_capacity = sum(ringbuf_capacity);
+        } else if (level > num_downsampling_levels) {
+            *ringbuf_total_capacity = 0;
+        } else {
+            *ringbuf_total_capacity = ringbuf_capacity[level-1];
+        }
+    }
+    
+    if (ringbuf_nelements) {
+        if (level == 0) {
+            *ringbuf_nelements = sum(ringbuf_size);
+        } else if (level > num_downsampling_levels) {
+            *ringbuf_nelements = 0;
+        } else {
+            *ringbuf_nelements = ringbuf_size[level-1];
+        }
+    }
 
     if (ringbuf_fpga_min) {
 	*ringbuf_fpga_min = 0;
-	for (int ids = num_downsampling_levels-1; ids >= 0; ids--) {
-	    if (ringbuf_size[ids] > 0) {
-		int ipos = ringbuf_pos[ids];
-		*ringbuf_fpga_min = this->ringbuf_entry(ids,ipos)->fpga_begin;
-		break;
-	    }
-	}
+        if (level == 0) {
+            for (int lev = num_downsampling_levels-1; lev >= 0; lev--) {
+                if (ringbuf_size[lev] > 0) {
+                    int ipos = ringbuf_pos[lev];
+                    *ringbuf_fpga_min = this->ringbuf_entry(lev,ipos)->fpga_begin;
+                    break;
+                }
+            }
+        } else if (level <= num_downsampling_levels) {
+            if (ringbuf_size[level-1] > 0) {
+                int ipos = ringbuf_pos[level-1];
+                *ringbuf_fpga_min = this->ringbuf_entry(level-1,ipos)->fpga_begin;
+            }
+        }
     }
 
     if (ringbuf_fpga_max) {
 	*ringbuf_fpga_max = 0;
-	for (int ids = 0; ids < num_downsampling_levels; ids++) {
-	    if (ringbuf_size[ids] > 0) {
-		int ipos = ringbuf_pos[ids] + ringbuf_size[ids] - 1;
-		*ringbuf_fpga_max = this->ringbuf_entry(ids,ipos)->fpga_end;
-		break;
-	    }
-	}
+        if (level == 0) {
+            for (int ids = 0; ids < num_downsampling_levels; ids++) {
+                if (ringbuf_size[ids] > 0) {
+                    int ipos = ringbuf_pos[ids] + ringbuf_size[ids] - 1;
+                    *ringbuf_fpga_max = this->ringbuf_entry(ids,ipos)->fpga_end;
+                    break;
+                }
+            }
+        } else if (level <= num_downsampling_levels) {
+            if (ringbuf_size[level-1] > 0) {
+                int ipos = ringbuf_pos[level-1];
+                *ringbuf_fpga_max = this->ringbuf_entry(level-1,ipos)->fpga_end;
+            }
+        }
     }
 
     pthread_mutex_unlock(&this->lock);

@@ -50,6 +50,18 @@ struct udp_packet_list;
 struct udp_packet_ringbuf;
 class assembled_chunk_ringbuf;
 
+// "uptr" is a unique_ptr for memory that is allocated by
+// malloc()-like calls and should therefore be freed by free().
+// It uses this little custom deleter class (that is
+// default-constructable, so doesn't need to specified when creating a
+// uptr).  This was copy-pasted from rf_pipelines.
+struct uptr_deleter {
+    inline void operator()(const void *p) { std::free(const_cast<void *> (p)); }
+};
+template<typename T>
+using uptr = std::unique_ptr<T[], uptr_deleter>;
+// And we use it for blocks of memory used for assembled_chunks.
+typedef uptr<uint8_t> memory_slab_t;
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -626,7 +638,7 @@ public:
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
-	mutable std::unique_ptr<uint8_t[]> slab;
+        mutable memory_slab_t slab;
     };
 
     // Parameters specified at construction.
@@ -710,7 +722,7 @@ public:
 protected:
     // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
     std::shared_ptr<memory_slab_pool> memory_pool;
-    std::unique_ptr<uint8_t[]> memory_slab;
+    memory_slab_t memory_slab;
 
     void _check_downsample(const assembled_chunk *src1, const assembled_chunk *src2);
 
@@ -762,11 +774,13 @@ public:
     //
     // If zero=true, then the new slab is zeroed.
 
-    std::unique_ptr<uint8_t[]> get_slab(bool zero=true, bool wait=false);
+    memory_slab_t get_slab(bool zero=true, bool wait=false);
     
     // Puts a slab back in the pool.
     // Note: 'p' will be set to a null pointer after put_slab() returns.
-    void put_slab(std::unique_ptr<uint8_t[]> &p);
+    void put_slab(memory_slab_t &p);
+
+    int count_slabs_available();
 
     const ssize_t nbytes_per_slab;
     const ssize_t nslabs;
@@ -776,7 +790,7 @@ protected:
     std::mutex lock;
     std::condition_variable cv;
 
-    std::vector<std::unique_ptr<uint8_t[]>> slabs;
+    std::vector<memory_slab_t> slabs;
     ssize_t curr_size = 0;
     ssize_t low_water_mark = 0;
 
@@ -855,7 +869,10 @@ public:
     // Can be called by either the assembler thread, or an RPC thread.
     // Returns 'false' if request could not be queued (because end_stream() was called)
     bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
-    
+
+    // Counts the number of queued write request chunks
+    int count_queued_write_requests();
+
     // If 'wait' is true, then end_stream() blocks until pending writes are complete.
     // If 'wait' is false, then end_stream() cancels all pending writes.
     void end_stream(bool wait);
