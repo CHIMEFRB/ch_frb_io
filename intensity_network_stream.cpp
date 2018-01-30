@@ -446,7 +446,19 @@ intensity_network_stream::get_packet_rates(double start, double period) {
     // FIXME -- if *period* is specified, we could sum over the requested period...
     if (counts.size() == 0)
         return shared_ptr<packet_counts>();
-    return counts[0];
+    if (counts.size() == 1)
+        return counts[0];
+    shared_ptr<packet_counts> avg = make_shared<packet_counts>();
+    // Just sum the samples, ignoring the possibly imperfect overlap between desired start+period and samples.
+    avg->tv = counts[0]->tv;
+    avg->period = 0.;
+    for (auto it = counts.begin(); it != counts.end(); it++) {
+        avg->period += (*it)->period;
+        for (auto it2 = (*it)->counts.begin(); it2 != (*it)->counts.end(); it2++) {
+            avg->counts[it2->first] += it2->second;
+        }
+    }
+    return avg;
 }
 
 vector<shared_ptr<packet_counts> >
@@ -519,11 +531,60 @@ intensity_network_stream::get_statistics() {
     // Report per-host packet counts
     R.push_back(this->get_perhost_packets());
 
+    // output_device status
+    int nqueued = 0;
+    for (int i=0; i<this->ini_params.output_devices.size(); i++) {
+        string name = this->ini_params.output_devices[i]->ini_params.device_name;
+        int chunks = this->ini_params.output_devices[i]->count_queued_write_requests();
+        nqueued += chunks;
+        chlog("Output device " << name << " has " << chunks << " queued write requests");
+        for (int j=0; j<name.size(); j++)
+            if ((name[j] == '/') || (name[j] == '-'))
+                name[j] = '_';
+        m["output_chunks_queued_" + name] = chunks;
+    }
+    m["output_chunks_queued"] = nqueued;
+    
+    // memory pool stats
+    if (this->ini_params.memory_pool) {
+        m["memory_pool_slab_nbytes"] = this->ini_params.memory_pool->nbytes_per_slab;
+        m["memory_pool_slab_size"] = this->ini_params.memory_pool->nslabs;
+        m["memory_pool_slab_avail"] = this->ini_params.memory_pool->count_slabs_available();
+    } else {
+        m["memory_pool_slab_nbytes"] = 0;
+        m["memory_pool_slab_size"] = 0;
+        m["memory_pool_slab_avail"] = 0;
+    }
+    
+    // Streaming data to disk status
+    {
+        std::string streaming_filename_pattern;
+        std::vector<int> streaming_beam_ids;
+        int streaming_priority;
+        int streaming_chunks_written;
+        size_t streaming_bytes_written;
+        this->get_streaming_status(streaming_filename_pattern, streaming_beam_ids,
+                                   streaming_priority, streaming_chunks_written,
+                                   streaming_bytes_written);
+        m["streaming_n_beams"] = this->stream_beam_ids.size();
+        for (int i=0; i<this->stream_beam_ids.size(); i++)
+            m[stringprintf("streaming_beam_%i", i)] = this->stream_beam_ids[i];
+        m["streaming_priority"] = this->stream_priority;
+        m["streaming_bytes_written"] = this->stream_chunks_written;
+        m["streaming_chunks_written"] = this->stream_bytes_written;
+    }
+    
     // Collect statistics per beam:
     for (int b=0; b<nbeams; b++) {
         m.clear();
         m["beam_id"] = this->ini_params.beam_ids[b];
 
+        int streamed_chunks = 0;
+        size_t streamed_bytes = 0;
+        this->assemblers[b]->get_streamed_chunks(streamed_chunks, streamed_bytes);
+        m["streaming_chunks_written"] = streamed_chunks;
+        m["streaming_bytes_written"] = streamed_bytes;
+        
 	// Grab the ring buffer to find the min & max chunk numbers and size.
 	uint64_t fpgacounts_next=0, n_ready=0, capacity=0, nelements=0, fpgacounts_min=0, fpgacounts_max=0;
 	this->assemblers[b]->get_ringbuf_size(&fpgacounts_next, &n_ready, &capacity, &nelements, &fpgacounts_min, &fpgacounts_max);
@@ -541,6 +602,18 @@ intensity_network_stream::get_statistics() {
 	    m["ringbuf_fpga_max"] = fpgacounts_max;
 	}
 
+        int lev;
+        for (lev=1;; lev++) {
+            this->assemblers[b]->get_ringbuf_size(NULL, NULL, &capacity, &nelements, &fpgacounts_min, &fpgacounts_max, lev);
+            if (capacity == 0)
+                break;
+            m[stringprintf("ringbuf_capacity_level%i", lev)] = capacity;
+            m[stringprintf("ringbuf_ntotal_level%i",   lev)] = nelements;
+            m[stringprintf("ringbuf_fpga_min_level%i", lev)] = fpgacounts_min;
+            m[stringprintf("ringbuf_fpga_max_level%i", lev)] = fpgacounts_max;
+        }
+        m["ringbuf_nlevels"] = lev;
+        
         R.push_back(m);
     }
 

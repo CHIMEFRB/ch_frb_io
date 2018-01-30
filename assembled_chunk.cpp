@@ -143,7 +143,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 	    throw runtime_error("assembled_chunk constructor: 'pool' is an empty pointer, but 'slab' is nonempty");
 
 	uint8_t *p = aligned_alloc<uint8_t> (mc.slab_size);
-	this->memory_slab = unique_ptr<uint8_t[]> (p);
+	this->memory_slab = memory_slab_t(p);
     }
 
     this->data = memory_slab.get() + mc.ib_data;
