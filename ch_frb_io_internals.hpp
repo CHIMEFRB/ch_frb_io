@@ -203,9 +203,9 @@ struct udp_packet_ringbuf : noncopyable {
     const int max_npackets_per_list;
     const int max_nbytes_per_list;
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond_packets_added;
-    pthread_cond_t cond_packets_removed;
+    std::mutex mutx;
+    std::condition_variable cond_packets_added;
+    std::condition_variable cond_packets_removed;
     bool stream_ended = false;
 
     int ringbuf_size = 0;
@@ -213,7 +213,6 @@ struct udp_packet_ringbuf : noncopyable {
     std::vector<std::unique_ptr<udp_packet_list> > ringbuf;
 
     udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list);
-    ~udp_packet_ringbuf();
     
     // Note!  The pointer 'p' is _swapped_ with an empty udp_packet_list from the ring buffer.
     // In other words, when put_packet_list() returns, the argument 'p' points to an empty udp_packet_list.
