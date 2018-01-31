@@ -551,11 +551,11 @@ protected:
     bool threads_joined = false;             // set when both threads (network + assembler) are joined
     char _pad4[constants::cache_line_size];
 
-    pthread_mutex_t event_lock;
+    std::mutex event_mutex;
     std::vector<int64_t> cumulative_event_counts;
     std::shared_ptr<packet_counts> perhost_packets;
 
-    pthread_mutex_t packet_history_lock;
+    std::mutex packet_history_mutex;
     std::map<double, std::shared_ptr<packet_counts> > packet_history;
     
     // Streaming-related data (arguments to stream_to_files()).
