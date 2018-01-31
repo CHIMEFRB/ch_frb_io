@@ -542,9 +542,9 @@ protected:
     // but doesn't mean that it has actually shut down yet, it may still be reading packets.
     // So far it hasn't been necessary to include a 'stream_ended' flag in the state model.
 
-    pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;       // threads wait here for state to change
-
+    std::mutex state_mutex;
+    std::condition_variable cond_state_changed;
+    
     bool stream_started = false;             // set asynchonously by calling start_stream()
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()

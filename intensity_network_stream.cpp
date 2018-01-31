@@ -22,6 +22,11 @@ namespace ch_frb_io {
 //
 // class intensity_network_stream
 
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
+
 
 // Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const initializer &x)
@@ -122,17 +127,13 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_perhost_packets = make_shared<packet_counts>();
     perhost_packets = make_shared<packet_counts>();
 
-    pthread_mutex_init(&state_lock, NULL);
     pthread_mutex_init(&event_lock, NULL);
     pthread_mutex_init(&packet_history_lock, NULL);
-    pthread_cond_init(&cond_state_changed, NULL);
 }
 
 
 intensity_network_stream::~intensity_network_stream()
 {
-    pthread_cond_destroy(&cond_state_changed);
-    pthread_mutex_destroy(&state_lock);
     pthread_mutex_destroy(&packet_history_lock);
     pthread_mutex_destroy(&event_lock);
 
@@ -192,17 +193,14 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
 
 void intensity_network_stream::start_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
-    if (stream_end_requested || join_called) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (stream_end_requested || join_called)
 	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on completed or cancelled stream");
-    }
 
     // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -215,41 +213,36 @@ void intensity_network_stream::start_stream()
 
 void intensity_network_stream::end_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     this->stream_started = true;
     this->stream_end_requested = true;    
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
 void intensity_network_stream::join_threads()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     
-    if (!stream_started) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (!stream_started)
 	throw runtime_error("ch_frb_io: intensity_network_stream::join_threads() was called with no prior call to start_stream()");
-    }
 
     if (join_called) {
 	while (!threads_joined)
-	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
-	pthread_mutex_unlock(&this->state_lock);
+            this->cond_state_changed.wait(lock);
 	return;
     }
 
     this->join_called = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
+    lock.unlock();
 
     network_thread.join();
     assembler_thread.join();
 
-    pthread_mutex_lock(&this->state_lock);
+    lock.lock();
     this->threads_joined = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);    
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -686,21 +679,20 @@ void intensity_network_stream::network_thread_main()
 void intensity_network_stream::_network_thread_body()
 {
     pin_thread_to_cores(ini_params.network_thread_cores);
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
     // Wait for "stream_started"
     for (;;) {
-	if (this->stream_end_requested) {
+	if (this->stream_end_requested)
 	    // This case can arise if end_stream() is called early
-	    pthread_mutex_unlock(&this->state_lock);
 	    return;
-	}
 	if (this->stream_started) {
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 	    break;
 	}
-	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+	this->cond_state_changed.wait(lock);
     }
+    // unlocked at this point.
 
     // Sleep hack (a temporary kludge that will go away soon)
 
@@ -773,15 +765,14 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
-	    pthread_mutex_lock(&this->state_lock);
 
+            lock.lock();
 	    if (this->stream_end_requested) {
-		pthread_mutex_unlock(&this->state_lock);    
+                lock.unlock();
                 _network_flush_packets();
 		return;
 	    }
-
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 
 	    // We call _add_event_counts() in a few different places in this routine, to ensure that
 	    // the network thread's event counts are always regularly accumulated.
