@@ -249,8 +249,6 @@ class assembled_chunk_ringbuf : noncopyable,
 public:
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
-    ~assembled_chunk_ringbuf();
-
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
     // in the appropriate indices.
@@ -356,10 +354,10 @@ protected:
     char pad[constants::cache_line_size];
 
     // All fields below are protected by the lock
-    pthread_mutex_t lock;
+    std::mutex mutx;
 
     // Processing thread waits here if the ring buffer is empty.
-    pthread_cond_t cond_assembled_chunks_added;
+    std::condition_variable cond_assembled_chunks_added;
     
     // Telescoping ring buffer.
     // All ringbuf* vectors have length num_downsampling_levels.
