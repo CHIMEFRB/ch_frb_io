@@ -440,8 +440,12 @@ public:
     get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    // Returns the packet rate with timestamp closest to *start*.
-    // If *start* is zero, grabs the most recent rate.
+    // If period = 0, returns the packet rate with timestamp closest
+    // to *start*.  If *start* is zero or negative, it is interpreted
+    // as seconds relative to now; otherwise as gettimeofday()
+    // seconds.  Zero grabs the most recent rate.  If *period* is
+    // given, the rate samples overlapping [start, start+period] are
+    // summed.
     std::shared_ptr<packet_counts> get_packet_rates(double start, double period);
 
     // Returns the set of packet rates with timestamps overlapping *start* to *end*.

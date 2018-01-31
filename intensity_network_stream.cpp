@@ -526,21 +526,18 @@ intensity_network_stream::get_statistics() {
 
     int nbeams = this->ini_params.beam_ids.size();
     m["nbeams"] = nbeams;
-    R.push_back(m);
-
-    // Report per-host packet counts
-    R.push_back(this->get_perhost_packets());
 
     // output_device status
     int nqueued = 0;
+    chlog(this->ini_params.output_devices.size() << " output devices");
     for (int i=0; i<this->ini_params.output_devices.size(); i++) {
         string name = this->ini_params.output_devices[i]->ini_params.device_name;
         int chunks = this->ini_params.output_devices[i]->count_queued_write_requests();
         nqueued += chunks;
-        chlog("Output device " << name << " has " << chunks << " queued write requests");
         for (int j=0; j<name.size(); j++)
             if ((name[j] == '/') || (name[j] == '-'))
                 name[j] = '_';
+        chlog("  dev " << name << ": " << chunks);
         m["output_chunks_queued_" + name] = chunks;
     }
     m["output_chunks_queued"] = nqueued;
@@ -574,6 +571,11 @@ intensity_network_stream::get_statistics() {
         m["streaming_chunks_written"] = this->stream_bytes_written;
     }
     
+    R.push_back(m);
+
+    // Report per-host packet counts
+    R.push_back(this->get_perhost_packets());
+
     // Collect statistics per beam:
     for (int b=0; b<nbeams; b++) {
         m.clear();
