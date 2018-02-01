@@ -1068,7 +1068,7 @@ protected:
     int64_t nbytes_sent = 0;
 
     // State model.
-    pthread_t network_thread;
+    std::thread network_thread;
     std::mutex state_lock;
     std::condition_variable cond_state_changed;
     bool network_thread_started = false;
@@ -1084,8 +1084,8 @@ protected:
     // for intensity_network_ostream::make(), but can't be called otherwise.
     intensity_network_ostream(const initializer &ini_params);
 
-    static void *network_pthread_main(void *opaque_args);
-
+    void _network_thread_main();
+    
     void _network_thread_body();
 
     // For testing purposes (eg, can create a subclass that randomly drops packets), a wrapper on the underlying packet send() function.
