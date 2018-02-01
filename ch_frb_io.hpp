@@ -1062,15 +1062,15 @@ protected:
     std::string hostname;
     uint16_t udp_port = constants::default_udp_port;
     
-    pthread_mutex_t statistics_lock;
+    std::mutex statistics_lock;
     int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
     int64_t npackets_sent = 0;
     int64_t nbytes_sent = 0;
 
     // State model.
     pthread_t network_thread;
-    pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;
+    std::mutex state_lock;
+    std::condition_variable cond_state_changed;
     bool network_thread_started = false;
     bool network_thread_joined = false;
 

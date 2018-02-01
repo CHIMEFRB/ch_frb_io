@@ -21,6 +21,10 @@ namespace ch_frb_io {
 #endif
 
 
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -44,10 +48,9 @@ shared_ptr<intensity_network_ostream> intensity_network_ostream::make(const init
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_ostream constructor: ") + strerror(errno));
 
-    pthread_mutex_lock(&ret->state_lock);
+    ulock_t lock(ret->state_lock);
     while (!ret->network_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);
+	ret->cond_state_changed.wait(lock);
 
     return ret;
 }
@@ -159,10 +162,6 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     for (int i = 0; i < nfreq_coarse_per_chunk; i++)
 	coarse_freq_ids_16bit[i] = uint16_t(ini_params.coarse_freq_ids[i]);
     
-    pthread_mutex_init(&this->state_lock, NULL);
-    pthread_mutex_init(&this->statistics_lock, NULL);
-    pthread_cond_init(&this->cond_state_changed, NULL);
-
     int capacity = constants::output_ringbuf_capacity;
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk);
     this->tmp_packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
@@ -175,10 +174,6 @@ intensity_network_ostream::~intensity_network_ostream()
 	close(sockfd);
 	sockfd = -1;
     }
-
-    pthread_cond_destroy(&cond_state_changed);
-    pthread_mutex_destroy(&state_lock);
-    pthread_mutex_destroy(&statistics_lock);
 }
 
 
@@ -324,14 +319,12 @@ void intensity_network_ostream::end_stream(bool join_network_thread)
     if (!join_network_thread)
 	return;
 
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_lock);
 
-    if (network_thread_joined) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (network_thread_joined)
 	throw runtime_error("ch_frb_io: attempt to join ostream output thread twice");
-    }
-    
-    pthread_mutex_unlock(&this->state_lock);
+
+    lock.unlock();
 
     if (pthread_join(network_thread, NULL))
 	throw runtime_error("ch_frb_io: couldn't join network thread [output]");
@@ -371,10 +364,11 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 
 void intensity_network_ostream::_network_thread_body()
 {
-    pthread_mutex_lock(&state_lock);
-    network_thread_started = true;
-    pthread_cond_broadcast(&cond_state_changed);
-    pthread_mutex_unlock(&state_lock);
+    {
+        ulock_t lock(state_lock);
+        network_thread_started = true;
+        cond_state_changed.notify_all();
+    }
 
     auto packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
     
@@ -449,11 +443,12 @@ void intensity_network_ostream::_network_thread_body()
 	    npackets_tot++;
 
 	    // Keep thread-shared variables in sync with thread-locals, as described above.
-            pthread_mutex_lock(&statistics_lock);
-	    this->curr_timestamp = tstamp;
-	    this->nbytes_sent = nbytes_tot;
-	    this->npackets_sent = npackets_tot;
-            pthread_mutex_unlock(&statistics_lock);
+            {
+                guard_t lock(statistics_lock);
+                this->curr_timestamp = tstamp;
+                this->nbytes_sent = nbytes_tot;
+                this->npackets_sent = npackets_tot;
+            }
 	}
     }
 
@@ -471,11 +466,10 @@ ssize_t intensity_network_ostream::_send(int socket, const uint8_t* packet, int 
 void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,
                                                int64_t& npackets_sent,
                                                int64_t& nbytes_sent) {
-    pthread_mutex_lock(&statistics_lock);
+    guard_t lock(statistics_lock);
     curr_timestamp = this->curr_timestamp;
     npackets_sent  = this->npackets_sent;
     nbytes_sent    = this->nbytes_sent;
-    pthread_mutex_unlock(&statistics_lock);
 }
 
 
