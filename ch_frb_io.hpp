@@ -559,7 +559,7 @@ protected:
     std::map<double, std::shared_ptr<packet_counts> > packet_history;
     
     // Streaming-related data (arguments to stream_to_files()).
-    std::mutex stream_lock;  // FIXME need to convert pthread_mutex to std::mutex everywhere
+    std::mutex stream_lock;
     std::string stream_filename_pattern;
     std::vector<int> stream_beam_ids;
     int stream_priority;
