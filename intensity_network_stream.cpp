@@ -529,7 +529,6 @@ intensity_network_stream::get_statistics() {
 
     // output_device status
     int nqueued = 0;
-    chlog(this->ini_params.output_devices.size() << " output devices");
     for (int i=0; i<this->ini_params.output_devices.size(); i++) {
         string name = this->ini_params.output_devices[i]->ini_params.device_name;
         int chunks = this->ini_params.output_devices[i]->count_queued_write_requests();
@@ -537,7 +536,6 @@ intensity_network_stream::get_statistics() {
         for (int j=0; j<name.size(); j++)
             if ((name[j] == '/') || (name[j] == '-'))
                 name[j] = '_';
-        chlog("  dev " << name << ": " << chunks);
         m["output_chunks_queued_" + name] = chunks;
     }
     m["output_chunks_queued"] = nqueued;
