@@ -25,7 +25,7 @@ void pin_thread_to_cores(const vector<int> &core_list)
 
     for (int core_id: core_list) {
 	if ((core_id < 0) || (core_id >= hwcores))
-	    throw runtime_error("pin_thread_to_cores: core_id=" + to_string(core_id) + " is out of range (hwcores=" + to_string(hwcores) + ")");
+	    throw runtime_error("ch_frb_io: pin_thread_to_cores: core_id=" + to_string(core_id) + " is out of range (hwcores=" + to_string(hwcores) + ")");
 	CPU_SET(core_id, &cs);
     }
 
