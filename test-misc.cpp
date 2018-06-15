@@ -43,6 +43,7 @@ static void test_encode_decode(std::mt19937 &rng)
 	int dst_wstride = randint(rng, nt_per_chunk, 2*nt_per_chunk);
 	int ichunk = randint(rng, 0, 1024);
 	int fpga_counts_per_sample = randint(rng, 1, 1024);
+	float prescale = uniform_rand(rng, 0.8, 1.2);
 
 	vector<int> send_freq_ids = vrange(constants::nfreq_coarse_tot);
 	std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
@@ -134,7 +135,7 @@ static void test_encode_decode(std::mt19937 &rng)
 	vector<float> dst_weights(nfreq_coarse_tot * nupfreq * dst_wstride, 1.0e30);
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-	    assembled_chunks[ibeam]->decode(&dst_intensity[0], &dst_weights[0], dst_istride, dst_wstride);
+	    assembled_chunks[ibeam]->decode(&dst_intensity[0], &dst_weights[0], dst_istride, dst_wstride, prescale);
 
 	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse_tot; ifreq_coarse++) {
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
@@ -148,7 +149,7 @@ static void test_encode_decode(std::mt19937 &rng)
 			    assert(src_weights[sw+it] <= 1.00001 * wt_cutoff);
 			else if (dst_weights[dw+it] == 1.0) {
 			    assert(src_weights[sw+it] >= 0.99999 * wt_cutoff);
-			    assert(fabs(dst_intensity[di+it] - src_intensity[si+it]) < 0.02);
+			    assert(fabs(dst_intensity[di+it] - prescale * src_intensity[si+it]) < 0.02);
 			}
 			else
 			    throw runtime_error("dst_weights not equal to 0 or 1?!");

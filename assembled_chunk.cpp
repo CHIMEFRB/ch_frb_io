@@ -320,7 +320,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 
 
 // virtual member function; any changes made here should be reflected in override fast_assembled_chunk::decode().
-void assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride) const
+void assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride, float prescale) const
 {
     if (!intensity || !weights)
 	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::decode()");	
@@ -339,8 +339,8 @@ void assembled_chunk::decode(float *intensity, float *weights, int istride, int 
 	    float *wt_f = weights + if_fine * wstride;
 
 	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
-		float scale = scales_f[it_coarse];
-		float offset = offsets_f[it_coarse];
+		float scale = scales_f[it_coarse] * prescale;
+		float offset = offsets_f[it_coarse] * prescale;
 		
 		for (int it_fine = it_coarse*nt_per_packet; it_fine < (it_coarse+1)*nt_per_packet; it_fine++) {
 		    float x = float(src_f[it_fine]);
