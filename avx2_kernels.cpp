@@ -349,10 +349,10 @@ struct decoder {
 	decode8(intensity+24, weights+24, d32, m32, sca0, off0);
     }
     
-    inline void decode128(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets)
+    inline void decode128(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets, float prescale)
     {
-	incremental_upsample8 sca(scales);
-	incremental_upsample8 off(offsets);
+	incremental_upsample8 sca(scales, prescale);
+	incremental_upsample8 off(offsets, prescale);
     
 	decode32<0> (intensity, weights, data, sca, off);
 	decode32<1> (intensity+32, weights+32, data+32, sca, off);
@@ -360,14 +360,14 @@ struct decoder {
 	decode32<3> (intensity+96, weights+96, data+96, sca, off);
     }
 
-    inline void decode_row(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets)
+    inline void decode_row(float *intensity, float *weights, const uint8_t *data, const float *scales, const float *offsets, float prescale)
     {
 	static_assert(constants::nt_per_assembled_chunk % 128 == 0, "_decode_kernel() assumes nt_per_assembled_chunk divisible by 128");
 
 	constexpr int n = constants::nt_per_assembled_chunk / 128;
 	
 	for (int i = 0; i < n; i++)
-	    decode128(intensity + i*128, weights + i*128, data + i*128, scales + i*8, offsets + i*8);
+	    decode128(intensity + i*128, weights + i*128, data + i*128, scales + i*8, offsets + i*8, prescale);
     }
 };
 
@@ -878,7 +878,7 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 
 
 // virtual override
-void fast_assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride) const
+void fast_assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride, float prescale) const
 {
     if (!intensity || !weights)
 	throw runtime_error("ch_frb_io: null pointer passed to fast_assembled_chunk::decode()");
@@ -898,7 +898,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int istride,
 	    float *int_f = intensity + if_fine * istride;
 	    float *wt_f = weights + if_fine * wstride;
 
-	    d.decode_row(int_f, wt_f, src_f, scales_f, offsets_f);
+	    d.decode_row(int_f, wt_f, src_f, scales_f, offsets_f, prescale);
 	}
     }    
 }

@@ -671,9 +671,14 @@ public:
     // which are overridden by the subclass 'fast_assembled_chunk' to be faster
     // on a CPU with the AVX2 instruction set, if certain conditions are met
     // (currently nt_per_packet==16 and nupfreq even).
+    //
+    // If 'prescale' is specified, then the intensity array written by decode()
+    // will be multiplied by its value.  This is a temporary workaround for some
+    // 16-bit overflow issues in bonsai.  (We currently don't need prescaling
+    // in decode_subset(), but this could be added easily.)
 
     virtual void add_packet(const intensity_packet &p);
-    virtual void decode(float *intensity, float *weights, int istride, int wstride) const;
+    virtual void decode(float *intensity, float *weights, int istride, int wstride, float prescale=1.0) const;
     virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int istride, int wstride) const;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
 
@@ -750,7 +755,7 @@ public:
 
     // Override viruals with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
-    virtual void decode(float *intensity, float *weights, int istride, int wstride) const override;
+    virtual void decode(float *intensity, float *weights, int istride, int wstride, float prescale=1.0) const override;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2) override;
 
 };
