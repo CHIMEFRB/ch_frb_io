@@ -546,6 +546,7 @@ void assembled_chunk::write_msgpack_file(const string &filename, bool compress, 
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
     msgpack::packer<msgpack::fbuffer> packer(fb);
+    // The real deal: in assembled_chunk_msgpack.hpp
     pack_assembled_chunk(packer, shthis, compress, buffer);
 
     if (fclose(f))
