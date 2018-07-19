@@ -639,6 +639,9 @@ public:
 	bool force_reference = false;
 	bool force_fast = false;
 
+        // "ctime" in nanoseconds of FGPAcount zero
+        uint64_t frame0_nano = 0;
+
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
@@ -653,7 +656,10 @@ public:
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
     const uint64_t ichunk = 0;
-    
+
+    // "ctime" in nanoseconds of FGPAcount zero
+    uint64_t frame0_nano = 0;
+
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
@@ -666,6 +672,10 @@ public:
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
     virtual ~assembled_chunk();
+
+    // Returns C time() (seconds since the epoch, 1970.0) of the first/last sample in this chunk.
+    double time_begin() const;
+    double time_end() const;
 
     // The following virtual member functions have default implementations,
     // which are overridden by the subclass 'fast_assembled_chunk' to be faster
