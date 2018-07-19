@@ -326,6 +326,8 @@ public:
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
+        uint64_t frame0_nano = 0; // nanosecond time() value for fgpacount zero.
+        
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
