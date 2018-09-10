@@ -327,6 +327,7 @@ public:
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
         uint64_t frame0_nano = 0; // nanosecond time() value for fgpacount zero.
+        std::string frame0_url = "";
         
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
@@ -515,6 +516,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
+    uint64_t frame0_nano;
+
     char _pad1b[constants::cache_line_size];
 
     // Used only by the network thread (not protected by lock)
@@ -587,6 +590,8 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
+
+    bool _fetch_frame0();
 };
 
 
