@@ -14,6 +14,7 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),
+    frame0_nano(ini_params_.frame0_nano),
     output_devices(ini_params.output_devices)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
@@ -63,6 +64,10 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     pthread_mutex_destroy(&this->lock);
 }
 
+
+void assembled_chunk_ringbuf::set_frame0(uint64_t f0) {
+    frame0_nano = f0;
+}
 
 void assembled_chunk_ringbuf::print_state() 
 {
@@ -629,6 +634,7 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     chunk_params.nupfreq = this->ini_params.nupfreq;
     chunk_params.nt_per_packet = this->ini_params.nt_per_packet;
     chunk_params.fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
+    chunk_params.frame0_nano = this->frame0_nano;
     chunk_params.force_reference = this->ini_params.force_reference_kernels;
     chunk_params.force_fast = this->ini_params.force_fast_kernels;
     chunk_params.stream_id = this->stream_id;

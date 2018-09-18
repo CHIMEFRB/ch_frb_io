@@ -97,6 +97,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     binning(ini_params.binning),
     stream_id(ini_params.stream_id),
     ichunk(ini_params.ichunk),
+    frame0_nano(ini_params.frame0_nano),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
@@ -193,6 +194,15 @@ ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet)
 
 // -------------------------------------------------------------------------------------------------
 
+// Nanoseconds per FPGA count
+static const uint64_t fpga_nano = 2560;
+
+double assembled_chunk::time_begin() const {
+    return (frame0_nano + fpga_counts_per_sample * fpga_nano * fpga_begin) * 1e-9;
+}
+
+double assembled_chunk::time_end() const {
+    return (frame0_nano + fpga_counts_per_sample * fpga_nano * fpga_end) * 1e-9;}
 
 static string 
 __attribute__ ((format(printf,1,2)))
@@ -536,6 +546,7 @@ void assembled_chunk::write_msgpack_file(const string &filename, bool compress, 
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
     msgpack::packer<msgpack::fbuffer> packer(fb);
+    // The real deal: in assembled_chunk_msgpack.hpp
     pack_assembled_chunk(packer, shthis, compress, buffer);
 
     if (fclose(f))
