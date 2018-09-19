@@ -731,7 +731,7 @@ public:
     float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
-    uint8_t *mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (ndownfreq x constants::nt_per_assembled_chunk / 8 bits)
+    uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (ndownfreq x constants::nt_per_assembled_chunk / 8 bits)
 
     bool has_rfi_mask = false;
 

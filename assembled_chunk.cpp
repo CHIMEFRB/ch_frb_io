@@ -155,9 +155,9 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     this->scales = reinterpret_cast<float *> (memory_slab.get() + mc.ib_scales);
     this->offsets = reinterpret_cast<float *> (memory_slab.get() + mc.ib_offsets);
     if (this->ndownfreq)
-        this->mask = reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_mask);
+        this->rfi_mask = reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_mask);
     else
-        this->mask = nullptr;
+        this->rfi_mask = nullptr;
     this->ds_data = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_data);
     this->ds_mask = reinterpret_cast<int *> (memory_slab.get() + mc.ib_ds_mask);
     this->ds_w2 = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_w2);
@@ -182,7 +182,7 @@ void assembled_chunk::_deallocate()
     this->scales = nullptr;
     this->offsets = nullptr;
     this->data = nullptr;
-    this->mask = nullptr;
+    this->rfi_mask = nullptr;
     this->ds_w2 = nullptr;
     this->ds_data = nullptr;
     this->ds_mask = nullptr;
@@ -275,7 +275,7 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
     memcpy(this->data, x->data, ndata);
     memcpy(this->scales, x->scales, nscales * sizeof(float));
     memcpy(this->offsets, x->offsets, nscales * sizeof(float));
-    memcpy(this->mask, x->mask, nmaskbytes);
+    memcpy(this->rfi_mask, x->rfi_mask, nmaskbytes);
 }
 
 
