@@ -297,6 +297,11 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
 
+    // Find an assembled_chunk with the given fpgacounts start time, if it
+    // exists in the ring buffer
+    std::shared_ptr<assembled_chunk> find_assembled_chunk(uint64_t fpga_counts,
+                                                          bool top_level_only=false);
+
     // The return value is a vector of (chunk, where) pairs, where 'where' is of type enum l1_ringbuf_level (defined in ch_frb_io.hpp)
     std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t>> get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 

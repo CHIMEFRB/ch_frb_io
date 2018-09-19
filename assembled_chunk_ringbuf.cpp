@@ -88,6 +88,27 @@ void assembled_chunk_ringbuf::print_state()
     pthread_mutex_unlock(&this->lock);
 }
 
+shared_ptr<assembled_chunk>
+assembled_chunk_ringbuf::find_assembled_chunk(uint64_t fpga_counts,
+                                              bool top_level_only) {
+    shared_ptr<assembled_chunk> chunk;
+    pthread_mutex_lock(&this->lock);
+    // Scan telescoping ring buffer
+    int start_level = (top_level_only ? 0 : num_downsampling_levels-1);
+    for (int lev = start_level; lev >= 0; lev--) {
+	for (int ipos = ringbuf_pos[lev]; ipos < ringbuf_pos[lev] + ringbuf_size[lev]; ipos++) {
+	    auto ch = this->ringbuf_entry(lev, ipos);
+	    if (ch->fpga_begin == fpga_counts) {
+                chunk = ch;
+                break;
+            }
+	}
+        if (chunk)
+            break;
+    }
+    pthread_mutex_unlock(&this->lock);
+    return chunk;
+}
 
 vector<pair<shared_ptr<assembled_chunk>, uint64_t>>
 assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts, uint64_t max_fpga_counts)

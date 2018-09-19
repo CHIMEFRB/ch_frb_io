@@ -620,6 +620,21 @@ intensity_network_stream::get_statistics() {
     return R;
 }
 
+std::shared_ptr<assembled_chunk>
+intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts)
+{
+    std::shared_ptr<assembled_chunk> chunk;
+    // Which of my assemblers (if any) is handling the requested beam?
+    int nbeams = this->ini_params.beam_ids.size();
+    for (int i=0; i<nbeams; i++) {
+        if (this->ini_params.beam_ids[i] != beam)
+            continue;
+        chunk = this->assemblers[i]->find_assembled_chunk(fpga_counts, true);
+        break;
+    }
+    return chunk;
+}
+
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
 intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
                                                 uint64_t min_fpga_counts,

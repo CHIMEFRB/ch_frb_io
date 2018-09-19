@@ -440,6 +440,10 @@ public:
     get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
+    // Searches for the top-level chunk for the given beam and fpgacounts start.
+    std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam,
+                                                          uint64_t fpga_counts);
+
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
     // as seconds relative to now; otherwise as gettimeofday()
