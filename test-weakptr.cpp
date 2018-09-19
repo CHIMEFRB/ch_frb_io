@@ -9,13 +9,14 @@ int main() {
     int nupfreq = 4;
     int nt_per_packet = 16;
     int fpgacounts = 400;
+    int ndownfreq = 1024;
     
     output_device::initializer out_ini;
     //memset(&out_ini, 0, sizeof(output_device::initializer));
     out_ini.device_name = "/tmp";
     out_ini.verbosity = 3;
 
-    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet);
+    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet, ndownfreq);
     shared_ptr<memory_slab_pool> pool = make_shared<memory_slab_pool>(nbytes_per_memory_slab, 10, vector<int>(), 1);
 
     intensity_network_stream::initializer ini_params;

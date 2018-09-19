@@ -322,6 +322,7 @@ public:
 	std::vector<std::shared_ptr<output_device>> output_devices;
 
 	int nupfreq = 0;
+	int ndownfreq = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
@@ -639,6 +640,7 @@ public:
     struct initializer {
 	int beam_id = 0;
 	int nupfreq = 0;
+        int ndownfreq = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	int binning = 1;
@@ -656,6 +658,7 @@ public:
     // Parameters specified at construction.
     const int beam_id = 0;
     const int nupfreq = 0;
+    const int ndownfreq = 0;
     const int nt_per_packet = 0;
     const int fpga_counts_per_sample = 0;    // no binning factor applied here
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
@@ -666,6 +669,7 @@ public:
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
+    const int nmaskbytes = 0;
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
@@ -717,14 +721,19 @@ public:
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);
 
-    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet);
+    // ndownfreq: number of frequencies in downsampled RFI chain processing
+    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet,
+                                        int ndownfreq);
 
     // I wanted to make the following fields protected, but msgpack doesn't like it...
 
     // Primary buffers.
     float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
-    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
+    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
+    uint8_t *mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (ndownfreq x constants::nt_per_assembled_chunk / 8 bits)
+
+    bool has_rfi_mask = false;
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
