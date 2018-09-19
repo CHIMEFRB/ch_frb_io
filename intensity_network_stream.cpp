@@ -44,6 +44,8 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
+    first_ichunk(0),
+    got_first_packet(false),
     network_thread_waiting_usec(0),
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
@@ -1062,7 +1064,16 @@ void intensity_network_stream::_assembler_thread_body()
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
 	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
-    
+
+            if (_unlikely(!got_first_packet)) {
+                // This assumes (reasonably) that the FPGA counts for the different beams are identical.
+                got_first_packet = true;
+                uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
+                first_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
+                cout << "Got first packet.  FPGA count " << packet.fpga_count
+                     << " -> first ichunk " << first_ichunk << endl;
+            }
+
 	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
 	    // length fields.  The new packet corresponds to a subset of the original packet containing
 	    // only beam index zero.  This scheme avoids the overhead of copying the packet.
