@@ -52,7 +52,7 @@ struct memory_slab_layout {
     const int nb_data;
     const int nb_scales;
     const int nb_offsets;
-    const int nb_mask;
+    const int nb_rfimask;
     const int nb_ds_data;
     const int nb_ds_mask;
     const int nb_ds_w2;
@@ -61,7 +61,7 @@ struct memory_slab_layout {
     const int ib_data;
     const int ib_scales;
     const int ib_offsets;
-    const int ib_mask;
+    const int ib_rfimask;
     const int ib_ds_data;
     const int ib_ds_mask;
     const int ib_ds_w2;
@@ -69,7 +69,7 @@ struct memory_slab_layout {
 
     static int align(int nbytes) { return ((nbytes+63)/64) * 64; }
 
-    memory_slab_layout(int nupfreq, int nt_per_packet, int ndownfreq) :
+    memory_slab_layout(int nupfreq, int nt_per_packet, int nrfifreq) :
 	nfreq_c(constants::nfreq_coarse_tot),
 	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
 	nt_f(constants::nt_per_assembled_chunk),
@@ -77,15 +77,15 @@ struct memory_slab_layout {
 	nb_data(nfreq_f * nt_f),
 	nb_scales(nfreq_c * nt_c * sizeof(float)),
 	nb_offsets(nfreq_c * nt_c * sizeof(float)),
-        nb_mask(ndownfreq * nt_f / 8 * sizeof(uint8_t)),
+        nb_rfimask(nrfifreq * nt_f / 8 * sizeof(uint8_t)),
 	nb_ds_data(nupfreq * (nt_f/2) * sizeof(float)),
 	nb_ds_mask(nupfreq * (nt_f/2) * sizeof(int)),
 	nb_ds_w2((nt_c/2) * sizeof(float)),
 	ib_data(0),
 	ib_scales(align(ib_data + nb_data)),
 	ib_offsets(align(ib_scales + nb_scales)),
-        ib_mask(align(ib_offsets + nb_offsets)),
-	ib_ds_data(align(ib_mask + nb_mask)),
+        ib_rfimask(align(ib_offsets + nb_offsets)),
+	ib_ds_data(align(ib_rfimask + nb_rfimask)),
 	ib_ds_mask(align(ib_ds_data + nb_ds_data)),
 	ib_ds_w2(align(ib_ds_mask + nb_ds_mask)),
 	slab_size(align(ib_ds_w2 + nb_ds_w2))
@@ -96,7 +96,7 @@ struct memory_slab_layout {
 assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params) :
     beam_id(ini_params.beam_id), 
     nupfreq(ini_params.nupfreq),
-    ndownfreq(ini_params.ndownfreq),
+    nrfifreq(ini_params.nrfifreq),
     nt_per_packet(ini_params.nt_per_packet),
     fpga_counts_per_sample(ini_params.fpga_counts_per_sample), 
     binning(ini_params.binning),
@@ -105,7 +105,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
-    nmaskbytes(ndownfreq * constants::nt_per_assembled_chunk / 8),
+    nrfimaskbytes(nrfifreq * constants::nt_per_assembled_chunk / 8),
     isample(ichunk * constants::nt_per_assembled_chunk),
     fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
     fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample)
@@ -127,7 +127,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     if (ichunk > ichunk_max)
 	throw runtime_error("assembled_chunk constructor: bad 'ichunk' argument");
 
-    memory_slab_layout mc(nupfreq, nt_per_packet, ndownfreq);
+    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
 
     if (ini_params.pool) {
 	if (!ini_params.slab)
@@ -154,8 +154,8 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     this->data = memory_slab.get() + mc.ib_data;
     this->scales = reinterpret_cast<float *> (memory_slab.get() + mc.ib_scales);
     this->offsets = reinterpret_cast<float *> (memory_slab.get() + mc.ib_offsets);
-    if (this->ndownfreq)
-        this->rfi_mask = reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_mask);
+    if (this->nrfifreq)
+        this->rfi_mask = reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_rfimask);
     else
         this->rfi_mask = nullptr;
     this->ds_data = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_data);
@@ -191,14 +191,14 @@ void assembled_chunk::_deallocate()
     
 // Static member function
 ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet,
-                                              int ndownfreq)
+                                              int nrfifreq)
 {
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nupfreq' argument");
     if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nt_per_packet' argument");
 
-    memory_slab_layout mc(nupfreq, nt_per_packet, ndownfreq);
+    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
     return mc.slab_size;
 }
 
@@ -266,8 +266,8 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
     if ((this->nupfreq != x->nupfreq) || (this->nt_per_packet != x->nt_per_packet))
 	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks");
 
-    if (this->ndownfreq != x->ndownfreq)
-	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks (ndownfreq)");
+    if (this->nrfifreq != x->nrfifreq)
+	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks (nrfifreq)");
 
     if (x.get() == this)
 	return;
@@ -275,7 +275,7 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
     memcpy(this->data, x->data, ndata);
     memcpy(this->scales, x->scales, nscales * sizeof(float));
     memcpy(this->offsets, x->offsets, nscales * sizeof(float));
-    memcpy(this->rfi_mask, x->rfi_mask, nmaskbytes);
+    memcpy(this->rfi_mask, x->rfi_mask, nrfimaskbytes);
 }
 
 

@@ -104,11 +104,11 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                     nscalebytes);
     o.pack_bin(data_size);
     o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
-    o.pack(ch->ndownfreq);
+    o.pack(ch->nrfifreq);
     o.pack(ch->has_rfi_mask);
     if (ch->rfi_mask) {
-        o.pack_bin(ch->nmaskbytes);
-        o.pack_bin_body(reinterpret_cast<const char*>(ch->rfi_mask), ch->nmaskbytes);
+        o.pack_bin(ch->nrfimaskbytes);
+        o.pack_bin_body(reinterpret_cast<const char*>(ch->rfi_mask), ch->nrfimaskbytes);
     } else {
         o.pack_bin(0);
     }
