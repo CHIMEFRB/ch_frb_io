@@ -31,8 +31,8 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     // pack member variables as an array.
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
     uint8_t version = 1;
-    // We are going to pack 17 items as a msgpack array (with mixed types)
-    o.pack_array(17);
+    // We are going to pack 20 items as a msgpack array (with mixed types)
+    o.pack_array(20);
     // Item 0: header string
     o.pack("assembled_chunk in msgpack format");
     // Item 1: version number
@@ -104,6 +104,14 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                     nscalebytes);
     o.pack_bin(data_size);
     o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
+    o.pack(ch->ndownfreq);
+    o.pack(ch->has_rfi_mask);
+    if (ch->mask) {
+        o.pack_bin(ch->nmaskbytes);
+        o.pack_bin_body(reinterpret_cast<const char*>(ch->mask), ch->nmaskbytes);
+    } else {
+        o.pack_bin(0);
+    }
 }
 
 namespace msgpack {
