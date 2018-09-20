@@ -845,6 +845,7 @@ struct write_chunk_request {
     std::shared_ptr<assembled_chunk> chunk;
     std::string filename;
     int priority = 0;
+    bool need_rfi_mask = false;
 
     virtual void write_callback(const std::string &error_message) { }
     virtual ~write_chunk_request() { }
@@ -906,6 +907,10 @@ public:
     // Blocks until i/o thread exits.  Call end_stream() first!
     void join_thread();
 
+    // Called (by RFI thread) to notify that the given chunk has had its
+    // RFI mask filled in.
+    void filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk);
+
 protected:
     std::thread output_thread;
 
@@ -918,6 +923,10 @@ protected:
     std::priority_queue<std::shared_ptr<write_chunk_request>,
 			std::vector<std::shared_ptr<write_chunk_request>>,
 			write_chunk_request::_less_than> _write_reqs;
+
+    // Write requests where need_rfi_mask is set and the rfi mask isn't
+    // yet available.
+    std::vector<std::shared_ptr<write_chunk_request> > _awaiting_rfi;
     
     // The state model and request queue are protected by this lock and condition variable.
     std::mutex _lock;

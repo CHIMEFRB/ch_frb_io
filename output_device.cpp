@@ -128,10 +128,15 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     if (end_stream_called)
 	return false;
 
-    _write_reqs.push(req);
-    _cond.notify_all();
+    if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
+        _awaiting_rfi.push_back(req);
+    } else {
+        _write_reqs.push(req);
+        _cond.notify_all();
+    }
 
     int n = _write_reqs.size();
+    int na = _awaiting_rfi.size();
     ulock.unlock();
     
     if (ini_params.verbosity >= 3) {
@@ -139,7 +144,8 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	      + ", beam " + to_string(req->chunk->beam_id) 
 	      + ", chunk " + to_string(req->chunk->ichunk) 
 	      + ", FPGA counts " + to_string(req->chunk->fpga_begin)
-	      + ", write_queue_size=" + to_string(n));
+	      + ", write_queue_size=" + to_string(n)
+              + ", awaiting_rfi_size=" + to_string(na));
     }
 
     return true;
@@ -152,12 +158,30 @@ int output_device::count_queued_write_requests() {
     return rtn;
 }
 
+void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
+    // FIXME -- simplest approach -- tell waiters that something (may
+    // have) happened!
+    unique_lock<std::mutex> ulock(_lock);
+    _cond.notify_all();
+    ulock.unlock();
+}
+
 // Called internally by I/O thread.
 shared_ptr<write_chunk_request> output_device::pop_write_request()
 {
     unique_lock<std::mutex> ulock(_lock);
 
     for (;;) {
+        // Check whether any chunks that were waiting for RFI masks to be
+        // filled in have been.
+        for (auto req=_awaiting_rfi.begin(); req!=_awaiting_rfi.end(); req++) {
+            if (req->chunk->has_rfi_mask) {
+                _write_reqs.push(req);
+                auto toerase = req;
+                req--;
+                _awaiting_rfi.erase(toerase);
+            }
+        }
 	if (!_write_reqs.empty())
 	    break;
 	if (end_stream_called)
