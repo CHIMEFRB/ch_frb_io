@@ -159,7 +159,7 @@ int output_device::count_queued_write_requests() {
 }
 
 void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
-    // FIXME -- simplest approach -- tell waiters that something (may
+    // FIXME? -- simplest approach -- tell waiters that something (may
     // have) happened!
     unique_lock<std::mutex> ulock(_lock);
     _cond.notify_all();
@@ -175,8 +175,9 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
         // Check whether any chunks that were waiting for RFI masks to be
         // filled in have been.
         for (auto req=_awaiting_rfi.begin(); req!=_awaiting_rfi.end(); req++) {
-            if (req->chunk->has_rfi_mask) {
-                _write_reqs.push(req);
+            if ((*req)->chunk->has_rfi_mask) {
+                cout << "Chunk " << (*req)->filename << " got its RFI mask!" << endl;
+                _write_reqs.push((*req));
                 auto toerase = req;
                 req--;
                 _awaiting_rfi.erase(toerase);
