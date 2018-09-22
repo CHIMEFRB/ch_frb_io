@@ -104,6 +104,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                     nscalebytes);
     o.pack_bin(data_size);
     o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
+
     o.pack(ch->nrfifreq);
     o.pack(ch->has_rfi_mask);
     if (ch->rfi_mask) {
@@ -125,7 +126,9 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                                       std::shared_ptr<ch_frb_io::assembled_chunk>& ch) const {
         if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
         //std::cout << "convert msgpack object to shared_ptr<assembled_chunk>..." << std::endl;
-        if (o.via.array.size != 17) throw msgpack::type_error();
+        bool v11 = (o.via.array.size == 17);
+        bool v12 = (o.via.array.size == 20);
+        if (!(v11 || v12)) throw msgpack::type_error();
         msgpack::object* arr = o.via.array.ptr;
 
         std::string header         = arr[0].as<std::string>();
@@ -159,6 +162,9 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.binning = binning;
 	ini_params.ichunk = ichunk;
 
+        if (v12)
+            ini_params.nrfifreq = arr[17].as<int>();
+        
         ch = ch_frb_io::assembled_chunk::make(ini_params);
 
         if (ch->nt_coarse != nt_coarse)
@@ -194,6 +200,16 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack bitshuffle decompression failure, code " + std::to_string(n));
         }
 
+        if (v12) {
+            ch->has_rfi_mask = arr[18].as<bool>();
+            if (ch->has_rfi_mask) {
+                uint nb = ch->nrfimaskbytes;
+                if (arr[19].via.bin.size != (uint)nb)
+                    throw msgpack::type_error();
+                memcpy(ch->rfi_mask, arr[19].via.bin.ptr, nb);
+            }
+        }
+        
         return o;
     }
 };
