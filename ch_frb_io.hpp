@@ -1085,6 +1085,8 @@ public:
 
     void print_status(std::ostream &os = std::cout);
 
+    bool is_sending();
+
 protected:
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;

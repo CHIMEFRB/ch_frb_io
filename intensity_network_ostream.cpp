@@ -510,6 +510,13 @@ void intensity_network_ostream::_send_end_of_stream_packets()
     }
 }
 
+bool intensity_network_ostream::is_sending() {
+    int currsize = 0;
+    int maxsize = 0;
+    ringbuf->get_size(&currsize, &maxsize);
+    cout << "intensity_network_ostream::is_sending: buffer size " << currsize << "/" << maxsize << endl;
+    return (currsize > 0);
+}
 
 void intensity_network_ostream::print_status(ostream &os)
 {
