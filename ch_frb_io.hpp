@@ -315,6 +315,11 @@ public:
     //     realtime search, but for testing we'd like to have a way of shutting down gracefully.  If the
     //     accept_end_of_stream_packets flag is set, then a special packet with nbeams=nupfreq=nt=0 is
     //     interpreted as an "end of stream" flag, and triggers shutdown of the network_stream.
+    //
+    //   - If 'nrfifreq' is initialized to a nonzero value, then memory will be allocated in each
+    //     assembled_chunk for the RFI bitmask.  The "downstream" pipeline must fill the mask in each
+    //     chunk.  If this does not happen quickly enough (more precisely, by the time the chunk
+    //     leaves the top level of the telescoping ring buffer) then an exception will be thrown.
 
     struct initializer {
 	std::vector<int> beam_ids;
@@ -442,8 +447,7 @@ public:
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
     // Searches for the top-level chunk for the given beam and fpgacounts start.
-    std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam,
-                                                          uint64_t fpga_counts);
+    std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts);
 
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
@@ -640,7 +644,7 @@ public:
     struct initializer {
 	int beam_id = 0;
 	int nupfreq = 0;
-        int nrfifreq = 0;
+        int nrfifreq = 0;    // number of frequencies in downsampled RFI chain processing
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	int binning = 1;
@@ -669,7 +673,7 @@ public:
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
-    const int nrfimaskbytes = 0;
+    const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
@@ -721,9 +725,7 @@ public:
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);
 
-    // nrfifreq: number of frequencies in downsampled RFI chain processing
-    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet,
-                                        int nrfifreq);
+    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
 
     // I wanted to make the following fields protected, but msgpack doesn't like it...
 

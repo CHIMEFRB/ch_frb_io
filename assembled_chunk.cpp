@@ -154,10 +154,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     this->data = memory_slab.get() + mc.ib_data;
     this->scales = reinterpret_cast<float *> (memory_slab.get() + mc.ib_scales);
     this->offsets = reinterpret_cast<float *> (memory_slab.get() + mc.ib_offsets);
-    if (this->nrfifreq)
-        this->rfi_mask = reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_rfimask);
-    else
-        this->rfi_mask = nullptr;
+    this->rfi_mask = nrfifreq ? reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_rfimask) : nullptr;
     this->ds_data = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_data);
     this->ds_mask = reinterpret_cast<int *> (memory_slab.get() + mc.ib_ds_mask);
     this->ds_w2 = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_w2);

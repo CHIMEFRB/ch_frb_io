@@ -531,11 +531,11 @@ intensity_network_stream::get_statistics() {
 
     // output_device status
     int nqueued = 0;
-    for (int i=0; i<this->ini_params.output_devices.size(); i++) {
+    for (size_t i=0; i<this->ini_params.output_devices.size(); i++) {
         string name = this->ini_params.output_devices[i]->ini_params.device_name;
         int chunks = this->ini_params.output_devices[i]->count_queued_write_requests();
         nqueued += chunks;
-        for (int j=0; j<name.size(); j++)
+        for (size_t j=0; j<name.size(); j++)
             if ((name[j] == '/') || (name[j] == '-'))
                 name[j] = '_';
         m["output_chunks_queued_" + name] = chunks;
@@ -564,7 +564,7 @@ intensity_network_stream::get_statistics() {
                                    streaming_priority, streaming_chunks_written,
                                    streaming_bytes_written);
         m["streaming_n_beams"] = this->stream_beam_ids.size();
-        for (int i=0; i<this->stream_beam_ids.size(); i++)
+        for (unsigned int i=0; i<this->stream_beam_ids.size(); i++)
             m[stringprintf("streaming_beam_%i", i)] = this->stream_beam_ids[i];
         m["streaming_priority"] = this->stream_priority;
         m["streaming_bytes_written"] = this->stream_chunks_written;
