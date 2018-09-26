@@ -500,16 +500,12 @@ public:
 
     ~intensity_network_stream();
 
-    int first_ichunk;
-
 protected:
     // Constant after construction, so not protected by lock
     std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
 
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
-
-    bool got_first_packet;
 
     // Written by network thread, read by outside thread
     // How much wall time do we spend waiting in recvfrom() vs processing?
