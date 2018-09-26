@@ -44,7 +44,7 @@ bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_requ
 	// or by checking this error condition in advance.)
     
 	throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_rfi_mask=true,"
-			    + " but this server instance is not saving the RFI mask");
+			    " but this server instance is not saving the RFI mask");
     }
 	  
     if (req->filename.size() == 0)
