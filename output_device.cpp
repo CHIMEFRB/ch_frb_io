@@ -196,7 +196,7 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
         }
 	if (!_write_reqs.empty())
 	    break;
-	if (end_stream_called)
+	if (end_stream_called && _awaiting_rfi.empty())
 	    return shared_ptr<write_chunk_request> ();
 	_cond.wait(ulock);
     }
@@ -231,12 +231,13 @@ void output_device::end_stream(bool wait)
     if (!wait) {
 	while (!_write_reqs.empty())
 	    _write_reqs.pop();
+	_awaiting_rfi.clear();
 	_cond.notify_all();
 	return;
     }
 
     // If 'wait' is true, wait for pending writes to complete before returning.
-    while (!_write_reqs.empty())
+    while (!_write_reqs.empty() || !_awaiting_rfi.empty())
 	_cond.wait(ulock);
 }
 
