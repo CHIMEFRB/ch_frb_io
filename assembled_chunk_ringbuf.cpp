@@ -382,6 +382,14 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 
 	if (ids == nds-1) {
 	    poplist[2*ids] = this->ringbuf_entry(ids, ringbuf_pos[ids]);
+
+	    // This assert and its counterpart below ensure that a chunk never leaves the telescoping
+	    // ring buffer before its RFI mask is filled.  (If this could happen, we might hang on to
+	    // the reference forever in output_device::_awaiting_rfi and get a memory leak.)
+
+	    if ((ini_params.nrfifreq > 0) && !poplist[2*ids]->has_rfi_mask)
+		throw runtime_error("ch_frb_io: _put_assembled_chunk(): rfimask not initialized as expected, maybe your ring buffer is too small?");
+
 	    break;
 	}
 

@@ -122,6 +122,17 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename is an empty string");
     if (!is_prefix(this->ini_params.device_name, req->filename))
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename, device_name mismatch");
+    
+    if (req->need_rfi_mask && (req->chunk->nrfifreq <= 0)) {
+
+	// I decided to throw an exception here, instead of returning false,
+	// so that we get a "verbose" error message instead of an undiagnosed failure.
+	// (The L1 server is responsible for not crashing, either by catching the exception
+	// or by checking this error condition in advance.)
+    
+	throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_rfi_mask=true,"
+			    + " but this server instance is not saving the RFI mask");
+    }
 
     unique_lock<std::mutex> ulock(_lock);
 

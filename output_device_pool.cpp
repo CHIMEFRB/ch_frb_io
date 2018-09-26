@@ -36,6 +36,17 @@ output_device_pool::output_device_pool(const vector<shared_ptr<output_device>> &
 
 bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
 {
+    if (req->need_rfi_mask && (req->chunk->nrfifreq <= 0)) {
+
+	// I decided to throw an exception here, instead of returning false,
+	// so that we get a "verbose" error message instead of an undiagnosed failure.
+	// (The L1 server is responsible for not crashing, either by catching the exception
+	// or by checking this error condition in advance.)
+    
+	throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_rfi_mask=true,"
+			    + " but this server instance is not saving the RFI mask");
+    }
+	  
     if (req->filename.size() == 0)
 	return false;
 
