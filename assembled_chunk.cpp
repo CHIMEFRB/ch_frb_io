@@ -283,7 +283,8 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
 }
 
 
-// Used in unit tests
+// Used in unit tests.
+// If nrfifreq > 0, also randomizes the RFI mask and sets the 'has_rfi_mask' flag.
 void assembled_chunk::randomize(std::mt19937 &rng)
 {
     for (int i = 0; i < ndata; i++) {
@@ -296,6 +297,12 @@ void assembled_chunk::randomize(std::mt19937 &rng)
 
     uniform_rand(rng, this->scales, nscales);
     uniform_rand(rng, this->offsets, nscales);
+
+    if (nrfifreq > 0) {
+	for (int i = 0; i < nrfimaskbytes; i++)
+	    this->rfi_mask[i] = randint(rng, 0, 256);
+	this->has_rfi_mask = true;
+    }
 }
 
 
@@ -420,6 +427,28 @@ static void ds_slow_kernel(uint8_t *out_data, float *out_offsets, float *out_sca
 }
 
 
+// Reads 'nbits_in' bits (not bytes!), writes (nbits_in/2) bits.
+// Assumes nbits_in is a multiple of 16.
+
+static void ds_slow_kernel_rfimask(uint8_t *dst, const uint8_t *src, int nbits_in)
+{
+    memset(dst, 0, nbits_in/16);
+
+    for (int i = 0; i < nbits_in/2; i++) {
+	int idst = i / 8;
+	int bdst = i % 8;
+	int isrc = (2*i) / 8;
+	int bsrc = (2*i) % 8;
+	
+	uint8_t x = src[isrc];
+	uint8_t y = (1 << bsrc) | (1 << (bsrc+1));
+	
+	if ((x & y) == y)
+	    dst[idst] |= (1 << bdst);
+    }
+}
+
+
 // Checks validity of call to assembled_chunk::downsample().
 void assembled_chunk::_check_downsample(const assembled_chunk *src1, const assembled_chunk *src2)
 {
@@ -440,8 +469,13 @@ void assembled_chunk::_check_downsample(const assembled_chunk *src1, const assem
 	throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched beam_id");
     if (!equal3(this->nupfreq, src1->nupfreq, src2->nupfreq))
         throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched nupfreq");
+    if (!equal3(this->nrfifreq, src1->nrfifreq, src2->nrfifreq))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched nrfifreq");
     if (!equal3(this->nt_per_packet, src1->nt_per_packet, src2->nt_per_packet))
         throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched nt_per_packet");
+
+    if ((nrfifreq > 0) && (!src1->rfi_mask || !src2->rfi_mask || !src1->has_rfi_mask || !src2->has_rfi_mask))
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample(): RFI masks were not initialized as expected, maybe your ring buffer is too small?");
 }
 
 // This is the slow, reference version of assembled_chunk::downsample().
@@ -477,6 +511,23 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 		       src2->scales + ifreq_c * nt_c,
 		       this->ds_data, this->ds_mask, this->ds_w2,
 		       nupfreq, nt_f, nt_per_packet);
+    }
+
+    if (nrfifreq <= 0)
+	return;
+
+    // Downsample RFI mask.
+    // Note: if we get here, then _check_downsample() has already checked that src1, src2
+    // have initialized RFI masks with the same value of 'nfreq'.
+
+    for (int ifreq = 0; ifreq < nrfifreq; ifreq++) {
+	ds_slow_kernel_rfimask(this->rfi_mask + ifreq * (nt_f/8),
+			       src1->rfi_mask + ifreq * (nt_f/8),
+			       nt_f);
+
+	ds_slow_kernel_rfimask(this->rfi_mask + ifreq * (nt_f/8) + (nt_f/16),
+			       src2->rfi_mask + ifreq * (nt_f/8),
+			       nt_f);
     }
 }
 

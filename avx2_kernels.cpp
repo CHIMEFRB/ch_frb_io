@@ -833,6 +833,68 @@ inline void _ds_kernel3(uint8_t *out, const float *data, const int *mask, const 
 }
 
 
+// Kernel for downsampling RFI mask.
+// Reads 'nbits_in' bits (not bytes!), writes (nbits_in/2) bits.
+// Assumes nbits_in is a multiple of 512.
+// Note that in the serer, nbits_in will equal nt_per_assembled_chunk.
+
+inline void _ds_kernel_rfimask(uint8_t *dst, const uint8_t *src, int nbits_in)
+{
+    for (int i = 0; i < nbits_in/512; i++) {
+	__m256i x = _mm256_loadu_si256((const __m256i *) (src + 64*i));
+	__m256i y = _mm256_loadu_si256((const __m256i *) (src + 64*i + 32));
+	__m256i t, z;
+
+	x = _mm256_and_si256(x, _mm256_srli_epi32(x, 1));  // x &= (x >> 1)
+	y = _mm256_and_si256(y, _mm256_srli_epi32(y, 1));  // y &= (y >> 1)
+	
+	t = _mm256_set1_epi8(0x55);
+	x = _mm256_and_si256(x, t);   // x &= t
+	y = _mm256_and_si256(y, t);   // y &= t
+
+	x = _mm256_or_si256(x, _mm256_srli_epi32(x, 1));  // x |= (x >> 1)
+	y = _mm256_or_si256(y, _mm256_srli_epi32(y, 1));  // y |= (y >> 1)
+
+	t = _mm256_set1_epi8(0x33);
+	x = _mm256_and_si256(x, t);   // x &= t
+	y = _mm256_and_si256(y, t);   // y &= t
+
+	x = _mm256_or_si256(x, _mm256_srli_epi32(x, 2));  // x |= (x >> 2)
+	y = _mm256_or_si256(y, _mm256_srli_epi32(y, 2));  // y |= (y >> 2)
+
+	t = _mm256_set1_epi8(0x0f);
+	x = _mm256_and_si256(x, t);   // x &= t
+	y = _mm256_and_si256(y, t);   // y &= t
+
+	x = _mm256_or_si256(x, _mm256_srli_epi32(x, 4));  // x |= (x >> 4)
+	y = _mm256_or_si256(y, _mm256_srli_epi32(y, 4));  // y |= (y >> 4)
+	
+	// At this point in the code, if we interpret x,y as uint8[32], then:
+	//   [ x0 - x1 - x2 - ... x15 - ]
+	//   [ y0 - y1 - y2 - ... y15 - ]
+	// where "-" denotes a junk uint8.
+	
+	t = _mm256_set_epi8(14, 12, 10, 8, 6, 4, 2, 0,
+			    14, 12, 10, 8, 6, 4, 2, 0,
+			    14, 12, 10, 8, 6, 4, 2, 0,
+			    14, 12, 10, 8, 6, 4, 2, 0);
+
+	x = _mm256_shuffle_epi8(x, t);
+	y = _mm256_shuffle_epi8(y, t);
+
+	// At this point in the code, if we interpret x,y as uint64[4], then:
+	//  [ x0 x0 x1 x1 ]
+	//  [ y0 y0 y1 y1 ]
+
+	z = _mm256_permute2x128_si256(x, y, 0x21);  // [ x1 x1 y0 y0 ]
+	z = _mm256_blend_epi32(z, x, 0x03);         // (00000011)_2 -> [ x0 x1 y0 y0 ]
+	z = _mm256_blend_epi32(z, y, 0xc0);         // (11000000)_2 -> [ x0 x1 y0 y1 ]
+
+	_mm256_storeu_si256((__m256i *) (dst + 32*i), z);
+    }
+}
+
+
 // -------------------------------------------------------------------------------------------------
 //
 // class fast_assembled_chunk
@@ -943,6 +1005,23 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 
 	_ds_kernel3(this->data + (ifreq_f * nt_f) + (nt_f/2),
 		    ds_data, ds_mask, out_offsets, ds_w2, nupfreq, nt_f);
+    }
+
+    if (nrfifreq <= 0)
+	return;
+
+    // Downsample RFI mask.
+    // Note: if we get here, then _check_downsample() has already checked that src1, src2
+    // have initialized RFI masks with the same value of 'nfreq'.
+
+    for (int ifreq = 0; ifreq < nrfifreq; ifreq++) {
+	_ds_kernel_rfimask(this->rfi_mask + ifreq * (nt_f/8),
+			   src1->rfi_mask + ifreq * (nt_f/8),
+			   nt_f);
+
+	_ds_kernel_rfimask(this->rfi_mask + ifreq * (nt_f/8) + (nt_f/16),
+			   src2->rfi_mask + ifreq * (nt_f/8),
+			   nt_f);
     }
 }
 
@@ -1274,6 +1353,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 
 	// Randomized in every iteration
 	const int nupfreq = 2 * randint(rng, 1, 9);
+	const int nrfifreq = randint(rng,0,4) ? (1 << randint(rng,8,12)) : 0;
 	const int nfreq_coarse_per_packet = 1 << randint(rng, 0, 6);
 	const int istride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
 	const int wstride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
@@ -1328,6 +1408,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 	assembled_chunk::initializer ini_params;
 	ini_params.beam_id = beam_id;
 	ini_params.nupfreq = nupfreq;
+	ini_params.nrfifreq = nrfifreq;
 	ini_params.nt_per_packet = nt_per_packet;
 	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 	ini_params.ichunk = ichunk;
@@ -1460,7 +1541,16 @@ void test_avx2_kernels(std::mt19937 &rng)
 		uint8_t y = chunk1->data[ifreq*constants::nt_per_assembled_chunk + it];
 
 		if (!data8_almost_equal(x,y))
-		    throw runtime_error("test_avx2_kernels: downsample test failed");
+		    throw runtime_error("test_avx2_kernels: downsample test failed (data)");
+	    }
+	}
+
+	if (nrfifreq > 0) {
+	    const int nrfi = nrfifreq * constants::nt_per_assembled_chunk / 8;
+
+	    for (int i = 0; i < nrfi; i++) {
+		if (chunk0->rfi_mask[i] != chunk1->rfi_mask[i])
+		    throw runtime_error("test_avx2_kernels: downsample test failed (rfi)");
 	    }
 	}
     }

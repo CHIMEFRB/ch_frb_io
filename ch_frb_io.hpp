@@ -703,7 +703,7 @@ public:
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int istride, int wstride, float prescale=1.0) const;
     virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int istride, int wstride) const;
-    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
+    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);   // downsamples data and RFI mask
 
     // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.
     static std::unique_ptr<assembled_chunk> make(const initializer &ini_params);
@@ -730,7 +730,7 @@ public:
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
-    void randomize(std::mt19937 &rng);
+    void randomize(std::mt19937 &rng);   // also randomizes rfi_mask (if it exists)
 
     static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
 
