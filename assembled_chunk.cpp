@@ -108,12 +108,17 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     nrfimaskbytes(nrfifreq * constants::nt_per_assembled_chunk / 8),
     isample(ichunk * constants::nt_per_assembled_chunk),
     fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
-    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample)
+    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
+    has_rfi_mask(false)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad 'beam_id' argument");
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("assembled_chunk constructor: bad 'nupfreq' argument");
+    if (nrfifreq < 0)
+	throw runtime_error("assembled_chunk constructor: bad 'nrfifreq' argument");
+    if ((nrfifreq > 0) && ((constants::nfreq_coarse_tot * nupfreq) % nrfifreq))
+	throw runtime_error("assembled_chunk constructor: bad 'nrfifreq' argument");
     if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
 	throw runtime_error("assembled_chunk constructor: bad 'nt_per_packet' argument");
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
@@ -187,13 +192,16 @@ void assembled_chunk::_deallocate()
 
     
 // Static member function
-ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet,
-                                              int nrfifreq)
+ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq)
 {
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nupfreq' argument");
     if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nt_per_packet' argument");
+    if (nrfifreq < 0)
+	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nrfifreq' argument");
+    if ((nrfifreq > 0) && ((constants::nfreq_coarse_tot * nupfreq) % nrfifreq))
+	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nrfifreq' argument");
 
     memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
     return mc.slab_size;
@@ -262,7 +270,6 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
 	throw runtime_error("assembled_chunk::fill_with_copy() called with empty pointer");
     if ((this->nupfreq != x->nupfreq) || (this->nt_per_packet != x->nt_per_packet))
 	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks");
-
     if (this->nrfifreq != x->nrfifreq)
 	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks (nrfifreq)");
 
@@ -333,6 +340,8 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 
 
 // virtual member function; any changes made here should be reflected in override fast_assembled_chunk::decode().
+// Note: decode() and decode_subset() do not apply the RFI mask in assembled_chunk::rfi_mask (if this exists).
+
 void assembled_chunk::decode(float *intensity, float *weights, int istride, int wstride, float prescale) const
 {
     if (!intensity || !weights)
@@ -495,6 +504,9 @@ unique_ptr<assembled_chunk> assembled_chunk::make(const assembled_chunk::initial
 
 void assembled_chunk::write_hdf5_file(const string &filename)
 {
+    if (this->rfi_mask != nullptr)
+	throw runtime_error("ch_frb_io: assembled_chunk hdf5 format does not implement RFI mask yet");
+    
     bool write = true;
     bool clobber = true;
     hdf5_file f(filename, write, clobber);
@@ -536,6 +548,9 @@ void assembled_chunk::write_hdf5_file(const string &filename)
 
 void assembled_chunk::write_msgpack_file(const string &filename, bool compress, uint8_t *buffer)
 {
+    if ((this->rfi_mask != nullptr) && (!this->has_rfi_mask))
+	throw runtime_error("ch_frb_io::assembled_chunk::write_msgpack_file() called on chunk whose RFI mask has not been initialized yet");
+    
     char tempfilename[filename.size() + 10];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
     int fd = mkstemp(tempfilename);

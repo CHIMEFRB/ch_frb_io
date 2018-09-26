@@ -89,25 +89,24 @@ void assembled_chunk_ringbuf::print_state()
 }
 
 shared_ptr<assembled_chunk>
-assembled_chunk_ringbuf::find_assembled_chunk(uint64_t fpga_counts,
-                                              bool top_level_only) {
-    shared_ptr<assembled_chunk> chunk;
+assembled_chunk_ringbuf::find_assembled_chunk(uint64_t fpga_counts, bool top_level_only)
+{                                              
     pthread_mutex_lock(&this->lock);
+    
     // Scan telescoping ring buffer
     int start_level = (top_level_only ? 0 : num_downsampling_levels-1);
     for (int lev = start_level; lev >= 0; lev--) {
 	for (int ipos = ringbuf_pos[lev]; ipos < ringbuf_pos[lev] + ringbuf_size[lev]; ipos++) {
 	    auto ch = this->ringbuf_entry(lev, ipos);
 	    if (ch->fpga_begin == fpga_counts) {
-                chunk = ch;
-                break;
+		pthread_mutex_unlock(&this->lock);
+		return ch;
             }
 	}
-        if (chunk)
-            break;
     }
+
     pthread_mutex_unlock(&this->lock);
-    return chunk;
+    throw runtime_error("ch_frb_io::assembled_chunk::find_assembled_chunk(): couldn't find chunk, maybe your ring buffer is too small?");
 }
 
 vector<pair<shared_ptr<assembled_chunk>, uint64_t>>
@@ -350,6 +349,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
+    if (chunk->has_rfi_mask)
+	throw runtime_error("ch_frb_io: internal error: chunk passed to assembled_chunk_ringbuf::_put_unassembled_packet() has rfi_mask flag set");
 
     // Step 1: prepare all data needed to modify the ring buffer.  In this step, we do all of our
     // buffer allocation and downsampling, without the lock held.  In step 2, we will acquire the
@@ -388,7 +389,10 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	// to the next level of the telescoping ring buffer.
 
 	poplist[2*ids] = this->ringbuf_entry(ids, ringbuf_pos[ids]);
-	poplist[2*ids+1] = this->ringbuf_entry(ids, ringbuf_pos[ids]+1);	
+	poplist[2*ids+1] = this->ringbuf_entry(ids, ringbuf_pos[ids]+1);
+	
+	if ((ini_params.nrfifreq > 0) && (!poplist[2*ids]->has_rfi_mask || !poplist[2*ids+1]->has_rfi_mask))
+	    throw runtime_error("ch_frb_io: _put_assembled_chunk(): rfimask not initialized as expected, maybe your ring buffer is too small?");
 
 	pushlist[ids+1] = _make_assembled_chunk(poplist[2*ids]->ichunk, 1 << (ids+1));
 
@@ -536,6 +540,9 @@ void assembled_chunk_ringbuf::_check_invariants()
 	    ch_assert(chunk->fpga_counts_per_sample == this->ini_params.fpga_counts_per_sample);
 	    ch_assert(chunk->binning == (1 << ids));
 	    ch_assert(chunk->isample == chunk->ichunk * constants::nt_per_assembled_chunk);
+
+	    if ((ini_params.nrfifreq > 0) && (ids > 0))
+		ch_assert(chunk->has_rfi_mask);
 
 	    // Now check logical contiguousness of the telescoping ring buffer, by
 	    // checking that 'chunk' is contiguous with the next chunk in the buffer.

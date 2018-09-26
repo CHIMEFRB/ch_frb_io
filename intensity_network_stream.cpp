@@ -75,6 +75,12 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     if ((ini_params.nupfreq <= 0) || (ini_params.nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("ch_frb_io: bad value of 'nupfreq'");
+    
+    if (ini_params.nrfifreq < 0)
+	throw runtime_error("ch_frb_io: bad value of 'nrfifreq'");
+    
+    if ((ini_params.nrfifreq > 0) && ((constants::nfreq_coarse_tot * ini_params.nupfreq) % ini_params.nrfifreq))
+	throw runtime_error("ch_frb_io: bad value of 'nrfifreq'");
 
     if ((ini_params.nt_per_packet <= 0) || (ini_params.nt_per_packet > constants::max_allowed_nt_per_packet))
 	throw runtime_error("ch_frb_io: bad value of 'nt_per_packet'");
@@ -625,16 +631,13 @@ intensity_network_stream::get_statistics() {
 std::shared_ptr<assembled_chunk>
 intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts)
 {
-    std::shared_ptr<assembled_chunk> chunk;
     // Which of my assemblers (if any) is handling the requested beam?
     int nbeams = this->ini_params.beam_ids.size();
-    for (int i=0; i<nbeams; i++) {
-        if (this->ini_params.beam_ids[i] != beam)
-            continue;
-        chunk = this->assemblers[i]->find_assembled_chunk(fpga_counts, true);
-        break;
-    }
-    return chunk;
+    for (int i=0; i<nbeams; i++)
+        if (this->ini_params.beam_ids[i] == beam)
+	    return this->assemblers[i]->find_assembled_chunk(fpga_counts, true);
+
+    throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
 }
 
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
