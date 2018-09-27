@@ -627,13 +627,13 @@ intensity_network_stream::get_statistics() {
 }
 
 std::shared_ptr<assembled_chunk>
-intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts)
+intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel)
 {
     // Which of my assemblers (if any) is handling the requested beam?
     int nbeams = this->ini_params.beam_ids.size();
     for (int i=0; i<nbeams; i++)
         if (this->ini_params.beam_ids[i] == beam)
-	    return this->assemblers[i]->find_assembled_chunk(fpga_counts, true);
+	    return this->assemblers[i]->find_assembled_chunk(fpga_counts, toplevel);
 
     throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
 }
