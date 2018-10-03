@@ -27,7 +27,7 @@ int main() {
     ini_params.fpga_counts_per_sample = fpgacounts;
 
     shared_ptr<assembled_chunk_ringbuf> assembler = make_shared<assembled_chunk_ringbuf>(ini_params, 1, 2);
-    assembler->stream_to_files("/tmp/(CHUNK).msgpack", -1000);
+    assembler->stream_to_files("/tmp/(CHUNK).msgpack", -1000, false);
 
     assembled_chunk::initializer chunk_ini;
     chunk_ini.pool = pool;

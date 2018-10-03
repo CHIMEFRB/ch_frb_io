@@ -232,11 +232,12 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 }
 
 
-void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority)
+void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority, bool need_rfi)
 {
     pthread_mutex_lock(&this->lock);
     this->stream_pattern = filename_pattern;
     this->stream_priority = priority;
+    this->stream_rfi_mask = need_rfi;
     this->stream_chunks_written = 0;
     this->stream_bytes_written = 0;
     pthread_mutex_unlock(&this->lock);
@@ -301,18 +302,20 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 struct streaming_write_chunk_request : public write_chunk_request {
     weak_ptr<assembled_chunk_ringbuf> assembler;
     int udelay;
-    virtual void write_callback(const std::string &error_message) {
+    virtual void status_changed(bool finished, bool success,
+                                const std::string &state,
+                                const std::string &error_message) override {
         if (udelay) {
             usleep(udelay);
         }
-        if (error_message.size() == 0) {
+        if (finished && success) {
             // "lock" our weak pointer to the assembler; this fails if
             // it has been deleted already (in which case we do nothing).
             shared_ptr<assembled_chunk_ringbuf> realpointer = assembler.lock();
             if (realpointer)
                 realpointer->chunk_streamed(filename);
 	    else
-	      cout << "Assembled_chunk_ringbuffer: write chunk finished, but assembler has been deleted. No problem!" << endl;
+                cout << "Assembled_chunk_ringbuffer: write chunk finished, but assembler has been deleted. No problem!" << endl;
         }
     }
     virtual ~streaming_write_chunk_request() { }
@@ -465,7 +468,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // Make thread-local copies with lock held.
     string loc_stream_pattern = this->stream_pattern;
     int loc_stream_priority = this->stream_priority;
-
+    bool loc_stream_rfi_mask = this->stream_rfi_mask;
+    
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
 
@@ -477,12 +481,13 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	shared_ptr<streaming_write_chunk_request> wreq = make_shared<streaming_write_chunk_request> ();
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
 	wreq->priority = loc_stream_priority;
+        wreq->need_rfi_mask = loc_stream_rfi_mask;
 	// DEBUG
 	if (wreq->priority == -1000)
             wreq->udelay = 1000000;
 	wreq->chunk = pushlist[0];	
         wreq->assembler = shared_from_this();
-
+        
 	// return value from enqueue_write_request() is ignored.
 	output_devices.enqueue_write_request(wreq);
     }

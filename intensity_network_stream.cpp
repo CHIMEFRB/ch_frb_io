@@ -259,7 +259,7 @@ void intensity_network_stream::join_threads()
 }
 
 
-void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &beam_ids, int priority)
+void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &beam_ids, int priority, bool need_rfi)
 {
     // Throw exception if 'beam_ids' argument contains a beam_id which is not
     // actually processed by this stream.
@@ -277,14 +277,15 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     this->stream_filename_pattern = filename_pattern;
     this->stream_beam_ids = beam_ids;
     this->stream_priority = priority;
+    this->stream_rfi_mask = need_rfi;
     this->stream_chunks_written = 0;
     this->stream_bytes_written = 0;
     
     for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
 	if (vcontains(beam_ids, ini_params.beam_ids[ibeam]))
-	    assemblers[ibeam]->stream_to_files(filename_pattern, priority);
+	    assemblers[ibeam]->stream_to_files(filename_pattern, priority, need_rfi);
 	else
-	    assemblers[ibeam]->stream_to_files("", 0);
+	    assemblers[ibeam]->stream_to_files("", 0, false);
     }
 }
 

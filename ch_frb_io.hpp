@@ -489,7 +489,7 @@ public:
     // Throws an exception if anything goes wrong!  When called from an RPC thread, caller will want to
     // wrap in try..except, and use exception::what() to get the error message.
 
-    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority);
+    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_rfi);
 
     void get_streaming_status(std::string &filename_pattern,
                               std::vector<int> &beam_ids,
@@ -574,6 +574,7 @@ protected:
     std::string stream_filename_pattern;
     std::vector<int> stream_beam_ids;
     int stream_priority;
+    bool stream_rfi_mask;
     int stream_chunks_written;
     size_t stream_bytes_written;
 
