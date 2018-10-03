@@ -63,7 +63,7 @@ void output_device::io_thread_main()
 	    if (ini_params.verbosity >= 3)
 		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
 
-	    w->write_callback("");
+	    w->status_changed(true, true, "Duplicate filename " + w->filename + " already written");
 	    continue;
 	}
 	
@@ -76,10 +76,10 @@ void output_device::io_thread_main()
 	    link_src = p->second;
 
 	ulock.unlock();
-
+        bool success = true;
 	try {
 	    if (file_exists(w->filename))
-		throw runtime_error("file already exists");
+		throw runtime_error("Assembled chunk msgpack file to be written already exists: " + w->filename);
 	    else if (link_src.size() == 0)
 		chunk->write_msgpack_file(w->filename, false, this->_buffer.get());  // compress=false
 	    else {
@@ -89,21 +89,23 @@ void output_device::io_thread_main()
 	    }
 	} catch (exception &e) {
 	    // Note: we now include the exception text in the error_message.
+            success = false;
 	    error_message = "Write msgpack file '" + w->filename + "' failed: " + e.what();
 	}
-	
-	// Success!
-	ulock.lock();
-	chunk->filename_set.insert(w->filename);
-	chunk->filename_map[ini_params.device_name] = w->filename;
-	ulock.unlock();
-	    
+
+        if (success) {
+            ulock.lock();
+            chunk->filename_set.insert(w->filename);
+            chunk->filename_map[ini_params.device_name] = w->filename;
+            ulock.unlock();
+        }
+
 	if (error_message.size() > 0 && ini_params.verbosity >= 1)
 	    chlog(error_message);
 	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
 
-	w->write_callback(error_message);
+	w->status_changed(true, success, error_message);
     }
 
     if (ini_params.verbosity >= 2)
@@ -169,9 +171,11 @@ int output_device::count_queued_write_requests() {
     return rtn;
 }
 
+// This gets called by the chime_mask_counter class in rf_pipelines
+// to tell us that a chunk's RFI mask has been filled in.
 void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
-    // FIXME? -- simplest approach -- tell waiters that something (may
-    // have) happened!
+    // FIXME? -- simplest approach -- tell i/o thread(s) waiting on the
+    // queue not being empty that something may have happened!
     unique_lock<std::mutex> ulock(_lock);
     _cond.notify_all();
     ulock.unlock();

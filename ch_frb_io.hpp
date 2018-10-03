@@ -852,7 +852,10 @@ struct write_chunk_request {
     int priority = 0;
     bool need_rfi_mask = false;
 
-    virtual void write_callback(const std::string &error_message) { }
+    // Called when the status of this chunk has changed --
+    // due to an error, successful completion, or, eg, RFI mask added.
+    virtual void status_changed(bool finished, bool success,
+                                const std::string &error_message) { }
     virtual ~write_chunk_request() { }
 
     // This comparator class is used below, to make an STL priority queue.
