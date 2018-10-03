@@ -80,9 +80,10 @@ void output_device::io_thread_main()
 	try {
 	    if (file_exists(w->filename))
 		throw runtime_error("Assembled chunk msgpack file to be written already exists: " + w->filename);
-	    else if (link_src.size() == 0)
+	    else if (link_src.size() == 0) {
+                //sleep(3);
 		chunk->write_msgpack_file(w->filename, false, this->_buffer.get());  // compress=false
-	    else {
+            } else {
 		if (ini_params.verbosity >= 3)
 		    chlog("write request '" + w->filename + "' is a pseudo-duplicate, will hard-link from '" + link_src + "' instead of writing new copy");
 		hard_link(link_src, w->filename);
@@ -197,10 +198,10 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
             if ((*req)->chunk->has_rfi_mask) {
                 cout << "Chunk " << (*req)->filename << " got its RFI mask!" << endl;
                 _write_reqs.push((*req));
+                (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
                 auto toerase = req;
                 req--;
                 _awaiting_rfi.erase(toerase);
-                (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
             }
         }
 	if (!_write_reqs.empty())
