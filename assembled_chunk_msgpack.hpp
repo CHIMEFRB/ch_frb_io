@@ -31,8 +31,8 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     // pack member variables as an array.
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
     uint8_t version = 1;
-    // We are going to pack 17 items as a msgpack array (with mixed types)
-    o.pack_array(17);
+    // We are going to pack 18 items as a msgpack array (with mixed types)
+    o.pack_array(18);
     // Item 0: header string
     o.pack("assembled_chunk in msgpack format");
     // Item 1: version number
@@ -104,6 +104,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                     nscalebytes);
     o.pack_bin(data_size);
     o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
+    o.pack(ch->frame0_nano);
 }
 
 namespace msgpack {
@@ -117,7 +118,8 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                                       std::shared_ptr<ch_frb_io::assembled_chunk>& ch) const {
         if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
         //std::cout << "convert msgpack object to shared_ptr<assembled_chunk>..." << std::endl;
-        if (o.via.array.size != 17) throw msgpack::type_error();
+        if (!((o.via.array.size == 17) ||
+              (o.via.array.size == 18))) throw msgpack::type_error();
         msgpack::object* arr = o.via.array.ptr;
 
         std::string header         = arr[0].as<std::string>();
@@ -143,6 +145,10 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint64_t isample = fpga0 / (uint64_t)fpga_counts_per_sample;
         uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
+        uint64_t frame0_nano = 0;
+        if (o.via.array.size == 18)
+            frame0_nano = arr[17].as<uint64_t>();
+
 	ch_frb_io::assembled_chunk::initializer ini_params;
 	ini_params.beam_id = beam_id;
 	ini_params.nupfreq = nupfreq;
@@ -150,6 +156,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 	ini_params.binning = binning;
 	ini_params.ichunk = ichunk;
+        ini_params.frame0_nano = frame0_nano;
 
         ch = ch_frb_io::assembled_chunk::make(ini_params);
 

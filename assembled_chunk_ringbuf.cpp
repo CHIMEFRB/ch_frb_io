@@ -629,6 +629,7 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     chunk_params.nupfreq = this->ini_params.nupfreq;
     chunk_params.nt_per_packet = this->ini_params.nt_per_packet;
     chunk_params.fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
+    chunk_params.frame0_nano = this->ini_params.frame0_nano;
     chunk_params.force_reference = this->ini_params.force_reference_kernels;
     chunk_params.force_fast = this->ini_params.force_fast_kernels;
     chunk_params.stream_id = this->stream_id;
