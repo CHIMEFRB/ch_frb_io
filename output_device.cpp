@@ -63,7 +63,7 @@ void output_device::io_thread_main()
 	    if (ini_params.verbosity >= 3)
 		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
 
-	    w->status_changed(true, true, "Duplicate filename " + w->filename + " already written");
+	    w->status_changed(true, true, "SUCCEEDED", "Duplicate filename " + w->filename + " already written");
 	    continue;
 	}
 	
@@ -105,7 +105,7 @@ void output_device::io_thread_main()
 	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
 
-	w->status_changed(true, success, error_message);
+	w->status_changed(true, success, success ? "SUCCEEDED" : "FAILED", error_message);
     }
 
     if (ini_params.verbosity >= 2)
@@ -143,8 +143,10 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 
     if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
         _awaiting_rfi.push_back(req);
+        req->status_changed(false, true, "AWAITING_RFI", "Waiting for RFI mask to be computed");
     } else {
         _write_reqs.push(req);
+        req->status_changed(false, true, "QUEUED", "Queued for writing");
         _cond.notify_all();
     }
 
@@ -196,6 +198,7 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
                 auto toerase = req;
                 req--;
                 _awaiting_rfi.erase(toerase);
+                (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
             }
         }
 	if (!_write_reqs.empty())

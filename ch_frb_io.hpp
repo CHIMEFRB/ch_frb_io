@@ -855,6 +855,7 @@ struct write_chunk_request {
     // Called when the status of this chunk has changed --
     // due to an error, successful completion, or, eg, RFI mask added.
     virtual void status_changed(bool finished, bool success,
+                                const std::string &state,
                                 const std::string &error_message) { }
     virtual ~write_chunk_request() { }
 
