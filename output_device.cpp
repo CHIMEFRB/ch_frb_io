@@ -138,8 +138,10 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 
     unique_lock<std::mutex> ulock(_lock);
 
-    if (end_stream_called)
+    if (end_stream_called) {
+        req->status_changed(true, false, "FAILED", "stream ending");
 	return false;
+    }
 
     if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
         _awaiting_rfi.push_back(req);
