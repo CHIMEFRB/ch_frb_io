@@ -332,6 +332,8 @@ public:
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
+        std::string frame0_url = "";
+        
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
@@ -524,6 +526,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
+    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero.
+
     char _pad1b[constants::cache_line_size];
 
     // Used only by the network thread (not protected by lock)
@@ -597,6 +601,8 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
+
+    bool _fetch_frame0();
 };
 
 
@@ -652,6 +658,9 @@ public:
 	bool force_reference = false;
 	bool force_fast = false;
 
+        // "ctime" in nanoseconds of FGPAcount zero
+        uint64_t frame0_nano = 0;
+
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
@@ -667,7 +676,10 @@ public:
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
     const uint64_t ichunk = 0;
-    
+
+    // "ctime" in nanoseconds of FGPAcount zero
+    uint64_t frame0_nano = 0;
+
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
@@ -685,6 +697,10 @@ public:
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
     virtual ~assembled_chunk();
+
+    // Returns C time() (seconds since the epoch, 1970.0) of the first/last sample in this chunk.
+    double time_begin() const;
+    double time_end() const;
 
     // The following virtual member functions have default implementations,
     // which are overridden by the subclass 'fast_assembled_chunk' to be faster

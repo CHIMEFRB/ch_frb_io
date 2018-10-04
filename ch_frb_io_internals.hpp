@@ -275,6 +275,8 @@ public:
     // Moves any remaining active chunks into the ring buffer and sets 'doneflag'.
     void end_stream(int64_t *event_counts);
 
+    void set_frame0(uint64_t frame0_nano);
+    
     // Debugging: inject the given chunk
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
@@ -331,6 +333,8 @@ protected:
     const int beam_id;
     const int stream_id;   // only used in assembled_chunk::format_filename().
 
+    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
+    
     output_device_pool output_devices;
 
     // Set to 'true' in the first call to put_unassembled_packet().

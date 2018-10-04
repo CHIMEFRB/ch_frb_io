@@ -31,8 +31,8 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     // pack member variables as an array.
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
     uint8_t version = 1;
-    // We are going to pack 20 items as a msgpack array (with mixed types)
-    o.pack_array(20);
+    // We are going to pack N items as a msgpack array (with mixed types)
+    o.pack_array(21);
     // Item 0: header string
     o.pack("assembled_chunk in msgpack format");
     // Item 1: version number
@@ -81,9 +81,12 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
             std::cout << "Bitshuffle compressed to " << n << std::endl;
         }
     }
+    // Item[2]
     o.pack(compression);
+    // Item[3]
     o.pack(data_size);
 
+    // Item[4]...
     o.pack(ch->beam_id);
     o.pack(ch->nupfreq);
     o.pack(ch->nt_per_packet);
@@ -96,21 +99,29 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     o.pack(ch->binning);
     // PACK FLOATS AS BINARY
     int nscalebytes = ch->nscales * sizeof(float);
+    // Item[14]
     o.pack_bin(nscalebytes);
     o.pack_bin_body(reinterpret_cast<const char*>(ch->scales),
                     nscalebytes);
+    // Item[15]
     o.pack_bin(nscalebytes);
     o.pack_bin_body(reinterpret_cast<const char*>(ch->offsets),
                     nscalebytes);
+    // Item[16]
     o.pack_bin(data_size);
     o.pack_bin_body(reinterpret_cast<const char*>(data.get()), data_size);
 
+    // Item[17]
+    o.pack(ch->frame0_nano);
+    // Item[18]
     o.pack(ch->nrfifreq);
     o.pack(ch->has_rfi_mask);
     if (ch->rfi_mask) {
+        // Item[20]
         o.pack_bin(ch->nrfimaskbytes);
         o.pack_bin_body(reinterpret_cast<const char*>(ch->rfi_mask), ch->nrfimaskbytes);
     } else {
+        // Item[20]
         o.pack_bin(0);
     }
 }
@@ -126,9 +137,11 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                                       std::shared_ptr<ch_frb_io::assembled_chunk>& ch) const {
         if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
         //std::cout << "convert msgpack object to shared_ptr<assembled_chunk>..." << std::endl;
-        bool v11 = (o.via.array.size == 17);
-        bool v12 = (o.via.array.size == 20);
-        if (!(v11 || v12)) throw msgpack::type_error();
+        // version 1.0?
+        bool v10 = (o.via.array.size == 17);
+        // version 1.1?
+        bool v11 = (o.via.array.size == 21);
+        if (!(v10 || v11)) throw msgpack::type_error();
         msgpack::object* arr = o.via.array.ptr;
 
         std::string header         = arr[0].as<std::string>();
@@ -154,6 +167,10 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint64_t isample = fpga0 / (uint64_t)fpga_counts_per_sample;
         uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
+        uint64_t frame0_nano = 0;
+        if (v11)
+            frame0_nano = arr[17].as<uint64_t>();
+
 	ch_frb_io::assembled_chunk::initializer ini_params;
 	ini_params.beam_id = beam_id;
 	ini_params.nupfreq = nupfreq;
@@ -161,10 +178,11 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 	ini_params.binning = binning;
 	ini_params.ichunk = ichunk;
+        ini_params.frame0_nano = frame0_nano;
 
-        if (v12)
-            ini_params.nrfifreq = arr[17].as<int>();
-        
+        if (v11)
+            ini_params.nrfifreq = arr[18].as<int>();
+
         ch = ch_frb_io::assembled_chunk::make(ini_params);
 
         if (ch->nt_coarse != nt_coarse)
@@ -200,16 +218,16 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack bitshuffle decompression failure, code " + std::to_string(n));
         }
 
-        if (v12) {
-            ch->has_rfi_mask = arr[18].as<bool>();
+        if (v11) {
+            ch->has_rfi_mask = arr[19].as<bool>();
             if (ch->has_rfi_mask) {
                 uint nb = ch->nrfimaskbytes;
-                if (arr[19].via.bin.size != (uint)nb)
+                if (arr[20].via.bin.size != (uint)nb)
                     throw msgpack::type_error();
-                memcpy(ch->rfi_mask, arr[19].via.bin.ptr, nb);
+                memcpy(ch->rfi_mask, arr[20].via.bin.ptr, nb);
             }
         }
-        
+
         return o;
     }
 };

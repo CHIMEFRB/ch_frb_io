@@ -7,6 +7,9 @@
 #include <functional>
 #include <iostream>
 
+#include <curl/curl.h>
+#include <json/json.h>
+
 #include "ch_frb_io_internals.hpp"
 #include "chlog.hpp"
 
@@ -48,6 +51,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
+    frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
     stream_bytes_written(0)
@@ -988,6 +992,77 @@ void intensity_network_stream::assembler_thread_main() {
     _assembler_thread_exit();
 }
 
+class CurlStringHolder {
+public:
+    string thestring;
+};
+
+static size_t
+CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    CurlStringHolder* h = (CurlStringHolder*)userp;
+    h->thestring += string((char*)contents, realsize);
+    return realsize;
+}
+
+bool intensity_network_stream::_fetch_frame0() {
+    if (ini_params.frame0_url.size() == 0) {
+        cout << "No 'frame0_url' set; skipping." << endl;
+        return false;
+    }
+    CURL *curl_handle;
+    CURLcode res;
+    CurlStringHolder holder;
+    // init the curl session
+    curl_handle = curl_easy_init();
+    // specify URL to get
+    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
+    // set timeout
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, 3000);
+    // set received-data callback
+    //frame0_txt = "";
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
+                     CurlWriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
+    // curl!
+    cout << "Fetching frame0_time from " << ini_params.frame0_url << endl;
+    res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK) {
+        cout << "Fetch_frame0 failed: " << string(curl_easy_strerror(res)) << endl;
+        return false;
+    }
+    curl_easy_cleanup(curl_handle);
+
+    string frame0_txt = holder.thestring;
+    
+    cout << "Received frame0 text: " << frame0_txt << endl;
+    Json::Reader frame0_reader;
+    Json::Value frame0_json;
+    if (!frame0_reader.parse(frame0_txt, frame0_json)) {
+        cout << "ch-frb-io: failed to parse 'frame0' string: '"
+             << frame0_txt << "'" << endl;
+        return false;
+    }
+    cout << "Parsed: " << frame0_json << endl;
+    if (!frame0_json.isObject()) {
+        cout << "ch-frb-io: 'frame0' was not a JSON 'Object' as expected" << endl;
+        return false;
+    }
+    string key = "frame0_nano";
+    if (!frame0_json.isMember(key)) {
+        cout << "ch-frb-io: 'frame0' did not contain key '" << key << "'" << endl;
+        return false;
+    }
+    const Json::Value v = frame0_json[key];
+    if (!v.isIntegral()) {
+        cout << "ch-frb-io: expected 'frame0[frame0_nano]' to be integral." << endl;
+        return false;
+    }
+    frame0_nano = v.asUInt64();
+    cout << "Found frame0_nano: " << frame0_nano << endl;
+    return true;
+}
 
 void intensity_network_stream::_assembler_thread_body()
 {
@@ -1005,6 +1080,32 @@ void intensity_network_stream::_assembler_thread_body()
     struct timeval tva, tvb;
     tva = xgettimeofday();
 
+    // After we receive our first packet, we will go fetch the frame0_ctime
+    // via curl.  This is usually fast, so we'll do it in blocking mode.
+    if (this->ini_params.frame0_url.size()) {
+        while (1) {
+            // Wait for first packet
+            cout << "Waiting for packets..." << endl;
+            if (!unassembled_ringbuf->get_packet_list(packet_list))
+                continue;
+            break;
+        }
+        cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
+
+        if (!_fetch_frame0()) {
+            // FIXME --- fetch failed.... now what?!
+            throw runtime_error("Failed to retrieve frame0_ctime");
+        }
+
+        for (unsigned int i = 0; i < assemblers.size(); i++) {
+            if (assemblers[i])
+                assemblers[i]->set_frame0(frame0_nano);
+        }
+        
+        // Just discard packet_list ?
+        cout << "Discarding " << packet_list->curr_npackets << " packets" << endl;
+    }
+    
     // Main packet loop
 
     while (1) {
