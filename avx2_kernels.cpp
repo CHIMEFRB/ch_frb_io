@@ -1023,6 +1023,7 @@ void fast_assembled_chunk::downsample(const assembled_chunk *src1, const assembl
 			   src2->rfi_mask + ifreq * (nt_f/8),
 			   nt_f);
     }
+    this->has_rfi_mask = true;
 }
 
 
