@@ -1072,6 +1072,7 @@ void intensity_network_stream::_assembler_thread_body()
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     int nbeams = this->ini_params.beam_ids.size();
+    bool first_packet_received = false;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
 
@@ -1079,32 +1080,6 @@ void intensity_network_stream::_assembler_thread_body()
 
     struct timeval tva, tvb;
     tva = xgettimeofday();
-
-    // After we receive our first packet, we will go fetch the frame0_ctime
-    // via curl.  This is usually fast, so we'll do it in blocking mode.
-    if (this->ini_params.frame0_url.size()) {
-        while (1) {
-            // Wait for first packet
-            cout << "Waiting for packets..." << endl;
-            if (!unassembled_ringbuf->get_packet_list(packet_list))
-                continue;
-            break;
-        }
-        cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
-
-        if (!_fetch_frame0()) {
-            // FIXME --- fetch failed.... now what?!
-            throw runtime_error("Failed to retrieve frame0_ctime");
-        }
-
-        for (unsigned int i = 0; i < assemblers.size(); i++) {
-            if (assemblers[i])
-                assemblers[i]->set_frame0(frame0_nano);
-        }
-        
-        // Just discard packet_list ?
-        cout << "Discarding " << packet_list->curr_npackets << " packets" << endl;
-    }
     
     // Main packet loop
 
@@ -1114,6 +1089,23 @@ void intensity_network_stream::_assembler_thread_body()
 
         if (!unassembled_ringbuf->get_packet_list(packet_list))
             break;
+
+	if (!first_packet_received && this->ini_params.frame0_url.size()) {
+	    // After we receive our first packet, we will go fetch the frame0_ctime
+	    // via curl.  This is usually fast, so we'll do it in blocking mode.
+
+	    cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
+
+	    if (!_fetch_frame0())
+		throw runtime_error("Failed to retrieve frame0_ctime");
+
+	    for (unsigned int i = 0; i < assemblers.size(); i++) {
+		if (assemblers[i])
+		    assemblers[i]->set_frame0(frame0_nano);
+	    }
+	}
+
+	first_packet_received = true;
 
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);

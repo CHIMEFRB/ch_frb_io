@@ -332,6 +332,7 @@ public:
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
+	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
         std::string frame0_url = "";
         
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
@@ -526,7 +527,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
-    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero.
+    // Initialized by assembler thread when first packet is received, constant thereafter.
+    uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
@@ -601,8 +603,7 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
-
-    bool _fetch_frame0();
+    bool _fetch_frame0();  // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received
 };
 
 
