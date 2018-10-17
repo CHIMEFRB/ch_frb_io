@@ -334,7 +334,8 @@ public:
 
 	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
         std::string frame0_url = "";
-        
+        int frame0_timeout = 3000;
+
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
@@ -603,7 +604,9 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
-    bool _fetch_frame0();  // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received
+    // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received.
+    // NOTE that one must call curl_global_init() before, and curl_global_cleanup() after; in chime-frb-l1 we do this in the top-level main() method.
+    void _fetch_frame0();
 };
 
 
