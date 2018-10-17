@@ -30,7 +30,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                           uint8_t* buffer=NULL) {
     // pack member variables as an array.
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
-    uint8_t version = 1;
+    uint8_t version = 2;
     // We are going to pack N items as a msgpack array (with mixed types)
     o.pack_array(21);
     // Item 0: header string
@@ -137,17 +137,23 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                                       std::shared_ptr<ch_frb_io::assembled_chunk>& ch) const {
         if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
         //std::cout << "convert msgpack object to shared_ptr<assembled_chunk>..." << std::endl;
-        // version 1.0?
-        bool v10 = (o.via.array.size == 17);
-        // version 1.1?
-        bool v11 = (o.via.array.size == 21);
-        if (!(v10 || v11)) throw msgpack::type_error();
+        // Make sure array is big enough to check header, version
+        if (o.via.array.size < 2)
+            throw msgpack::type_error();
         msgpack::object* arr = o.via.array.ptr;
-
         std::string header         = arr[0].as<std::string>();
         uint8_t version            = arr[1].as<uint8_t>();
-        if (version != 1)
-            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack version " + std::to_string(version) + ", expected 1");
+
+        if (version == 1) {
+            if (o.via.array.size != 17)
+                throw std::runtime_error("ch_frb_io: assembled_chunk msgpack version 1: expected 17 items, got " + std::to_string(o.via.array.size));
+        } else if (version == 2) {
+            if (o.via.array.size != 21)
+                throw std::runtime_error("ch_frb_io: assembled_chunk msgpack version 2: expected 21 items, got " + std::to_string(o.via.array.size));
+        } else {
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: expected version = 1 or 2, got " + std::to_string(version));
+        }
+
         enum compression_type comp = (enum compression_type)arr[2].as<uint8_t>();
         if (!((comp == comp_none) || (comp == comp_bitshuffle)))
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack compression " + std::to_string(comp) + ", expected 0 or 1");
@@ -168,7 +174,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
         uint64_t frame0_nano = 0;
-        if (v11)
+        if (version == 2)
             frame0_nano = arr[17].as<uint64_t>();
 
 	ch_frb_io::assembled_chunk::initializer ini_params;
@@ -180,7 +186,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.ichunk = ichunk;
         ini_params.frame0_nano = frame0_nano;
 
-        if (v11)
+        if (version == 2)
             ini_params.nrfifreq = arr[18].as<int>();
 
         ch = ch_frb_io::assembled_chunk::make(ini_params);
@@ -218,7 +224,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack bitshuffle decompression failure, code " + std::to_string(n));
         }
 
-        if (v11) {
+        if (version == 2) {
             ch->has_rfi_mask = arr[19].as<bool>();
             if (ch->has_rfi_mask) {
                 uint nb = ch->nrfimaskbytes;
