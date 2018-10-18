@@ -464,6 +464,8 @@ void assembled_chunk::_check_downsample(const assembled_chunk *src1, const assem
 {
     if (!src1 || !src2)
 	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::downsample()");
+    if (this->has_rfi_mask)
+	throw runtime_error("ch_frb_io: assembled_chunk::downsample() called, and has_rfi_mask=true in destination chunk");
 
     if (src1->binning != src2->binning)
         throw runtime_error("ch_frb_io: assembled_chunk::downsample(): mismatched binning");
