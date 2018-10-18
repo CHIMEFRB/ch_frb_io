@@ -115,7 +115,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     o.pack(ch->frame0_nano);
     // Item[18]
     o.pack(ch->nrfifreq);
-    o.pack(ch->has_rfi_mask);
+    o.pack(ch->has_rfi_mask.load());
     if (ch->rfi_mask) {
         // Item[20]
         o.pack_bin(ch->nrfimaskbytes);

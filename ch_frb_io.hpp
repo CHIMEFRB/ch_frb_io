@@ -695,7 +695,7 @@ public:
 
     // False on initialization.
     // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
-    bool has_rfi_mask = false;
+    std::atomic<bool> has_rfi_mask;
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
