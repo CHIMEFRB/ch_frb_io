@@ -452,7 +452,8 @@ public:
 
     // Searches the telescoping ring buffer for the given beam and fpgacounts start.
     // If 'toplevel' is true, then only the top level of the ring buffer is searched.
-    // If no chunk is found, then an exception will be thrown (i.e. empty pointer is never returned).
+    // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
 
     // If period = 0, returns the packet rate with timestamp closest

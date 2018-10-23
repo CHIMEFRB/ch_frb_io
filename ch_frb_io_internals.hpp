@@ -271,8 +271,8 @@ public:
 
     void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
     
-    // Called when the assembler thread exits.  
-    // Moves any remaining active chunks into the ring buffer and sets 'doneflag'.
+    // Called by the assembler thread, when it exits.
+    // Moves any remaining active chunks into the ring buffer, sets 'doneflag', initializes 'final_fpga'.
     void end_stream(int64_t *event_counts);
 
     void set_frame0(uint64_t frame0_nano);
@@ -302,6 +302,8 @@ public:
 
     // Find an assembled_chunk with the given fpgacounts start time, if it exists in the ring buffer.
     // Called by processing threads, in order to fill the RFI mask.
+    // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(uint64_t fpga_counts, bool top_level_only=false);
                                                           
 
@@ -397,6 +399,7 @@ protected:
     size_t stream_bytes_written = 0;
 
     bool doneflag = false;
+    uint64_t final_fpga = 0;   // last fpga count which has an assembled_chunk, only initialized when 'doneflag' is set to true.
 };
 
 
