@@ -44,8 +44,8 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
   1. HDF5, including C++ support.
   
-     **Currently, ch_frb_io requires HDF5 version 1.8.12 or later,
-     but does not work with version 1.10.x.  This will be fixed eventually!**
+     **Currently, ch_frb_io requires HDF5 version range 1.8.12-20.  It does not work with 1.8.21+
+       or 1.10.x.  This will be fixed soon!**
 
      For instructions on installing a version of HDF5 which is neither too old nor too new, see
      [kmsmith137/sp_hdf5/README.md](https://github.com/kmsmith137/sp_hdf5/blob/master/README.md).
