@@ -7,6 +7,9 @@
 #include <functional>
 #include <iostream>
 
+#include <curl/curl.h>
+#include <json/json.h>
+
 #include "ch_frb_io_internals.hpp"
 #include "chlog.hpp"
 
@@ -48,6 +51,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
+    frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
     stream_bytes_written(0)
@@ -73,6 +77,12 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     if ((ini_params.nupfreq <= 0) || (ini_params.nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("ch_frb_io: bad value of 'nupfreq'");
+    
+    if (ini_params.nrfifreq < 0)
+	throw runtime_error("ch_frb_io: bad value of 'nrfifreq'");
+    
+    if ((ini_params.nrfifreq > 0) && ((constants::nfreq_coarse_tot * ini_params.nupfreq) % ini_params.nrfifreq))
+	throw runtime_error("ch_frb_io: bad value of 'nrfifreq'");
 
     if ((ini_params.nt_per_packet <= 0) || (ini_params.nt_per_packet > constants::max_allowed_nt_per_packet))
 	throw runtime_error("ch_frb_io: bad value of 'nt_per_packet'");
@@ -253,7 +263,7 @@ void intensity_network_stream::join_threads()
 }
 
 
-void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &beam_ids, int priority)
+void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &beam_ids, int priority, bool need_rfi)
 {
     // Throw exception if 'beam_ids' argument contains a beam_id which is not
     // actually processed by this stream.
@@ -271,14 +281,15 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     this->stream_filename_pattern = filename_pattern;
     this->stream_beam_ids = beam_ids;
     this->stream_priority = priority;
+    this->stream_rfi_mask = need_rfi;
     this->stream_chunks_written = 0;
     this->stream_bytes_written = 0;
     
     for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
 	if (vcontains(beam_ids, ini_params.beam_ids[ibeam]))
-	    assemblers[ibeam]->stream_to_files(filename_pattern, priority);
+	    assemblers[ibeam]->stream_to_files(filename_pattern, priority, need_rfi);
 	else
-	    assemblers[ibeam]->stream_to_files("", 0);
+	    assemblers[ibeam]->stream_to_files("", 0, false);
     }
 }
 
@@ -529,11 +540,11 @@ intensity_network_stream::get_statistics() {
 
     // output_device status
     int nqueued = 0;
-    for (int i=0; i<this->ini_params.output_devices.size(); i++) {
+    for (size_t i=0; i<this->ini_params.output_devices.size(); i++) {
         string name = this->ini_params.output_devices[i]->ini_params.device_name;
         int chunks = this->ini_params.output_devices[i]->count_queued_write_requests();
         nqueued += chunks;
-        for (int j=0; j<name.size(); j++)
+        for (size_t j=0; j<name.size(); j++)
             if ((name[j] == '/') || (name[j] == '-'))
                 name[j] = '_';
         m["output_chunks_queued_" + name] = chunks;
@@ -562,7 +573,7 @@ intensity_network_stream::get_statistics() {
                                    streaming_priority, streaming_chunks_written,
                                    streaming_bytes_written);
         m["streaming_n_beams"] = this->stream_beam_ids.size();
-        for (int i=0; i<this->stream_beam_ids.size(); i++)
+        for (unsigned int i=0; i<this->stream_beam_ids.size(); i++)
             m[stringprintf("streaming_beam_%i", i)] = this->stream_beam_ids[i];
         m["streaming_priority"] = this->stream_priority;
         m["streaming_bytes_written"] = this->stream_chunks_written;
@@ -618,6 +629,18 @@ intensity_network_stream::get_statistics() {
     }
 
     return R;
+}
+
+std::shared_ptr<assembled_chunk>
+intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel)
+{
+    // Which of my assemblers (if any) is handling the requested beam?
+    int nbeams = this->ini_params.beam_ids.size();
+    for (int i=0; i<nbeams; i++)
+        if (this->ini_params.beam_ids[i] == beam)
+	    return this->assemblers[i]->find_assembled_chunk(fpga_counts, toplevel);
+
+    throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
 }
 
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
@@ -969,6 +992,66 @@ void intensity_network_stream::assembler_thread_main() {
     _assembler_thread_exit();
 }
 
+class CurlStringHolder {
+public:
+    string thestring;
+};
+
+static size_t
+CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    CurlStringHolder* h = (CurlStringHolder*)userp;
+    h->thestring += string((char*)contents, realsize);
+    return realsize;
+}
+
+void intensity_network_stream::_fetch_frame0() {
+    if (ini_params.frame0_url.size() == 0) {
+        cout << "No 'frame0_url' set; skipping." << endl;
+        return;
+    }
+    CURL *curl_handle;
+    CURLcode res;
+    CurlStringHolder holder;
+    // init the curl session
+    curl_handle = curl_easy_init();
+    // specify URL to get
+    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
+    // set timeout
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
+    // set received-data callback
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
+                     CurlWriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
+    // curl!
+    cout << "Fetching frame0_time from " << ini_params.frame0_url << endl;
+    res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK)
+        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
+    curl_easy_cleanup(curl_handle);
+
+    string frame0_txt = holder.thestring;
+    cout << "Received frame0 text: " << frame0_txt << endl;
+    Json::Reader frame0_reader;
+    Json::Value frame0_json;
+    if (!frame0_reader.parse(frame0_txt, frame0_json))
+        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
+
+    cout << "Parsed: " << frame0_json << endl;
+    if (!frame0_json.isObject())
+        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
+
+    string key = "frame0_nano";
+    if (!frame0_json.isMember(key))
+        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
+
+    const Json::Value v = frame0_json[key];
+    if (!v.isIntegral())
+        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
+    frame0_nano = v.asUInt64();
+    cout << "Found frame0_nano: " << frame0_nano << endl;
+}
 
 void intensity_network_stream::_assembler_thread_body()
 {
@@ -978,6 +1061,7 @@ void intensity_network_stream::_assembler_thread_body()
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     int nbeams = this->ini_params.beam_ids.size();
+    bool first_packet_received = false;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
 
@@ -985,7 +1069,7 @@ void intensity_network_stream::_assembler_thread_body()
 
     struct timeval tva, tvb;
     tva = xgettimeofday();
-
+    
     // Main packet loop
 
     while (1) {
@@ -994,6 +1078,23 @@ void intensity_network_stream::_assembler_thread_body()
 
         if (!unassembled_ringbuf->get_packet_list(packet_list))
             break;
+
+	if (!first_packet_received && this->ini_params.frame0_url.size()) {
+	    // After we receive our first packet, we will go fetch the frame0_ctime
+	    // via curl.  This is usually fast, so we'll do it in blocking mode.
+
+	    cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
+
+	    _fetch_frame0();
+            // raises runtime_error on failure
+
+	    for (unsigned int i = 0; i < assemblers.size(); i++) {
+		if (assemblers[i])
+		    assemblers[i]->set_frame0(frame0_nano);
+	    }
+	}
+
+	first_packet_received = true;
 
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
@@ -1047,7 +1148,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
 	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
-    
+
 	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
 	    // length fields.  The new packet corresponds to a subset of the original packet containing
 	    // only beam index zero.  This scheme avoids the overhead of copying the packet.

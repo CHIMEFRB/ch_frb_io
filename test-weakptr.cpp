@@ -9,13 +9,14 @@ int main() {
     int nupfreq = 4;
     int nt_per_packet = 16;
     int fpgacounts = 400;
+    int nrfifreq = 1024;
     
     output_device::initializer out_ini;
     //memset(&out_ini, 0, sizeof(output_device::initializer));
     out_ini.device_name = "/tmp";
     out_ini.verbosity = 3;
 
-    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet);
+    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet, nrfifreq);
     shared_ptr<memory_slab_pool> pool = make_shared<memory_slab_pool>(nbytes_per_memory_slab, 10, vector<int>(), 1);
 
     intensity_network_stream::initializer ini_params;
@@ -26,7 +27,7 @@ int main() {
     ini_params.fpga_counts_per_sample = fpgacounts;
 
     shared_ptr<assembled_chunk_ringbuf> assembler = make_shared<assembled_chunk_ringbuf>(ini_params, 1, 2);
-    assembler->stream_to_files("/tmp/(CHUNK).msgpack", -1000);
+    assembler->stream_to_files("/tmp/(CHUNK).msgpack", -1000, false);
 
     assembled_chunk::initializer chunk_ini;
     chunk_ini.pool = pool;

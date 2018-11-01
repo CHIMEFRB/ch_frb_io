@@ -1,13 +1,13 @@
 # Makefile.local for frb1.physics.mcgill.ca
 
 # Directory where C++ libraries will be installed
-LIBDIR=$(HOME)/lib
+LIBDIR ?= $(HOME)/lib
 
 # Directory where C++ header files will be installed
-INCDIR=$(HOME)/include
+INCDIR ?= $(HOME)/include
 
 # Directory where executables will be installed
-BINDIR=$(HOME)/bin
+BINDIR ?= $(HOME)/bin
 
 #
 # C++ command line
@@ -25,3 +25,6 @@ else
 endif
 
 CPP_LFLAGS=-L. -L$(LIBDIR)
+
+CPP += $(shell pkg-config --cflags jsoncpp)
+CPP_LFLAGS += $(shell pkg-config --libs jsoncpp)

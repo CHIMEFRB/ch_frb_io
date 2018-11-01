@@ -63,7 +63,7 @@ void output_device::io_thread_main()
 	    if (ini_params.verbosity >= 3)
 		chlog("write request '" + w->filename + "' is a duplicate, skipping...");
 
-	    w->write_callback("");
+	    w->status_changed(true, true, "SUCCEEDED", "Duplicate filename " + w->filename + " already written");
 	    continue;
 	}
 	
@@ -76,34 +76,37 @@ void output_device::io_thread_main()
 	    link_src = p->second;
 
 	ulock.unlock();
-
+        bool success = true;
 	try {
 	    if (file_exists(w->filename))
-		throw runtime_error("file already exists");
-	    else if (link_src.size() == 0)
+		throw runtime_error("Assembled chunk msgpack file to be written already exists: " + w->filename);
+	    else if (link_src.size() == 0) {
+                //sleep(3);
 		chunk->write_msgpack_file(w->filename, false, this->_buffer.get());  // compress=false
-	    else {
+            } else {
 		if (ini_params.verbosity >= 3)
 		    chlog("write request '" + w->filename + "' is a pseudo-duplicate, will hard-link from '" + link_src + "' instead of writing new copy");
 		hard_link(link_src, w->filename);
 	    }
 	} catch (exception &e) {
 	    // Note: we now include the exception text in the error_message.
+            success = false;
 	    error_message = "Write msgpack file '" + w->filename + "' failed: " + e.what();
 	}
-	
-	// Success!
-	ulock.lock();
-	chunk->filename_set.insert(w->filename);
-	chunk->filename_map[ini_params.device_name] = w->filename;
-	ulock.unlock();
-	    
+
+        if (success) {
+            ulock.lock();
+            chunk->filename_set.insert(w->filename);
+            chunk->filename_map[ini_params.device_name] = w->filename;
+            ulock.unlock();
+        }
+
 	if (error_message.size() > 0 && ini_params.verbosity >= 1)
 	    chlog(error_message);
 	else if (error_message.size() == 0 && ini_params.verbosity >= 3)
 	    chlog("wrote " + w->filename);
 
-	w->write_callback(error_message);
+	w->status_changed(true, success, success ? "SUCCEEDED" : "FAILED", error_message);
     }
 
     if (ini_params.verbosity >= 2)
@@ -122,16 +125,36 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename is an empty string");
     if (!is_prefix(this->ini_params.device_name, req->filename))
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename, device_name mismatch");
+    
+    if (req->need_rfi_mask && (req->chunk->nrfifreq <= 0)) {
+
+	// I decided to throw an exception here, instead of returning false,
+	// so that we get a "verbose" error message instead of an undiagnosed failure.
+	// (The L1 server is responsible for not crashing, either by catching the exception
+	// or by checking this error condition in advance.)
+    
+	throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_rfi_mask=true,"
+			    " but this server instance is not saving the RFI mask");
+    }
 
     unique_lock<std::mutex> ulock(_lock);
 
-    if (end_stream_called)
+    if (end_stream_called) {
+        req->status_changed(true, false, "FAILED", "stream ending");
 	return false;
+    }
 
-    _write_reqs.push(req);
-    _cond.notify_all();
+    if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
+        _awaiting_rfi.push_back(req);
+        req->status_changed(false, true, "AWAITING_RFI", "Waiting for RFI mask to be computed");
+    } else {
+        _write_reqs.push(req);
+        req->status_changed(false, true, "QUEUED", "Queued for writing");
+        _cond.notify_all();
+    }
 
     int n = _write_reqs.size();
+    int na = _awaiting_rfi.size();
     ulock.unlock();
     
     if (ini_params.verbosity >= 3) {
@@ -139,7 +162,8 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	      + ", beam " + to_string(req->chunk->beam_id) 
 	      + ", chunk " + to_string(req->chunk->ichunk) 
 	      + ", FPGA counts " + to_string(req->chunk->fpga_begin)
-	      + ", write_queue_size=" + to_string(n));
+	      + ", write_queue_size=" + to_string(n)
+              + ", awaiting_rfi_size=" + to_string(na));
     }
 
     return true;
@@ -152,15 +176,37 @@ int output_device::count_queued_write_requests() {
     return rtn;
 }
 
+// This gets called by the chime_mask_counter class in rf_pipelines
+// to tell us that a chunk's RFI mask has been filled in.
+void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
+    // FIXME? -- simplest approach -- tell i/o thread(s) waiting on the
+    // queue not being empty that something may have happened!
+    unique_lock<std::mutex> ulock(_lock);
+    _cond.notify_all();
+    ulock.unlock();
+}
+
 // Called internally by I/O thread.
 shared_ptr<write_chunk_request> output_device::pop_write_request()
 {
     unique_lock<std::mutex> ulock(_lock);
 
     for (;;) {
+        // Check whether any chunks that were waiting for RFI masks to be
+        // filled in have been.
+        for (auto req=_awaiting_rfi.begin(); req!=_awaiting_rfi.end(); req++) {
+            if ((*req)->chunk->has_rfi_mask) {
+                cout << "Chunk " << (*req)->filename << " got its RFI mask!" << endl;
+                _write_reqs.push((*req));
+                (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
+                auto toerase = req;
+                req--;
+                _awaiting_rfi.erase(toerase);
+            }
+        }
 	if (!_write_reqs.empty())
 	    break;
-	if (end_stream_called)
+	if (end_stream_called && _awaiting_rfi.empty())
 	    return shared_ptr<write_chunk_request> ();
 	_cond.wait(ulock);
     }
@@ -195,12 +241,13 @@ void output_device::end_stream(bool wait)
     if (!wait) {
 	while (!_write_reqs.empty())
 	    _write_reqs.pop();
+	_awaiting_rfi.clear();
 	_cond.notify_all();
 	return;
     }
 
     // If 'wait' is true, wait for pending writes to complete before returning.
-    while (!_write_reqs.empty())
+    while (!_write_reqs.empty() || !_awaiting_rfi.empty())
 	_cond.wait(ulock);
 }
 

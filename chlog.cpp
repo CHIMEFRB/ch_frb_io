@@ -341,7 +341,7 @@ void chime_log_server::run() {
                 break;
             }
 
-            if (!pollitems[0].revents & ZMQ_POLLIN) {
+            if (!(pollitems[0].revents & ZMQ_POLLIN)) {
                 cout << "log server: no input ready" << endl;
                 continue;
             }

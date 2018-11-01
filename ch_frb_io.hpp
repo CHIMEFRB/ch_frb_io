@@ -315,6 +315,11 @@ public:
     //     realtime search, but for testing we'd like to have a way of shutting down gracefully.  If the
     //     accept_end_of_stream_packets flag is set, then a special packet with nbeams=nupfreq=nt=0 is
     //     interpreted as an "end of stream" flag, and triggers shutdown of the network_stream.
+    //
+    //   - If 'nrfifreq' is initialized to a nonzero value, then memory will be allocated in each
+    //     assembled_chunk for the RFI bitmask.  The "downstream" pipeline must fill the mask in each
+    //     chunk.  If this does not happen quickly enough (more precisely, by the time the chunk
+    //     leaves the top level of the telescoping ring buffer) then an exception will be thrown.
 
     struct initializer {
 	std::vector<int> beam_ids;
@@ -322,9 +327,14 @@ public:
 	std::vector<std::shared_ptr<output_device>> output_devices;
 
 	int nupfreq = 0;
+	int nrfifreq = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
+
+	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
+        std::string frame0_url = "";
+        int frame0_timeout = 3000;
 
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
@@ -440,6 +450,12 @@ public:
     get_ringbuf_snapshots(const std::vector<int> &beams = std::vector<int>(),
                           uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
+    // Searches the telescoping ring buffer for the given beam and fpgacounts start.
+    // If 'toplevel' is true, then only the top level of the ring buffer is searched.
+    // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // If anything else goes wrong, an exception will be thrown.
+    std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
+
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
     // as seconds relative to now; otherwise as gettimeofday()
@@ -478,7 +494,7 @@ public:
     // Throws an exception if anything goes wrong!  When called from an RPC thread, caller will want to
     // wrap in try..except, and use exception::what() to get the error message.
 
-    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority);
+    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_rfi);
 
     void get_streaming_status(std::string &filename_pattern,
                               std::vector<int> &beam_ids,
@@ -512,6 +528,9 @@ protected:
     // Written by assembler thread, read by outside thread
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
+
+    // Initialized by assembler thread when first packet is received, constant thereafter.
+    uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
@@ -563,6 +582,7 @@ protected:
     std::string stream_filename_pattern;
     std::vector<int> stream_beam_ids;
     int stream_priority;
+    bool stream_rfi_mask;
     int stream_chunks_written;
     size_t stream_bytes_written;
 
@@ -585,6 +605,9 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
+    // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received.
+    // NOTE that one must call curl_global_init() before, and curl_global_cleanup() after; in chime-frb-l1 we do this in the top-level main() method.
+    void _fetch_frame0();
 };
 
 
@@ -631,6 +654,7 @@ public:
     struct initializer {
 	int beam_id = 0;
 	int nupfreq = 0;
+        int nrfifreq = 0;    // number of frequencies in downsampled RFI chain processing
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	int binning = 1;
@@ -638,6 +662,9 @@ public:
 	uint64_t ichunk = 0;
 	bool force_reference = false;
 	bool force_fast = false;
+
+        // "ctime" in nanoseconds of FGPAcount zero
+        uint64_t frame0_nano = 0;
 
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
@@ -648,24 +675,37 @@ public:
     // Parameters specified at construction.
     const int beam_id = 0;
     const int nupfreq = 0;
+    const int nrfifreq = 0;
     const int nt_per_packet = 0;
     const int fpga_counts_per_sample = 0;    // no binning factor applied here
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
     const uint64_t ichunk = 0;
-    
+
+    // "ctime" in nanoseconds of FGPAcount zero
+    uint64_t frame0_nano = 0;
+
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
+    const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+
+    // False on initialization.
+    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
+    std::atomic<bool> has_rfi_mask;
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
     virtual ~assembled_chunk();
+
+    // Returns C time() (seconds since the epoch, 1970.0) of the first/last sample in this chunk.
+    double time_begin() const;
+    double time_end() const;
 
     // The following virtual member functions have default implementations,
     // which are overridden by the subclass 'fast_assembled_chunk' to be faster
@@ -676,11 +716,14 @@ public:
     // will be multiplied by its value.  This is a temporary workaround for some
     // 16-bit overflow issues in bonsai.  (We currently don't need prescaling
     // in decode_subset(), but this could be added easily.)
+    //
+    // Warning (FIXME?): decode() and decode_subset() do not apply the RFI mask
+    // in assembled_chunk::rfi_mask (if this exists).
 
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int istride, int wstride, float prescale=1.0) const;
     virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int istride, int wstride) const;
-    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);
+    virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);   // downsamples data and RFI mask
 
     // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.
     static std::unique_ptr<assembled_chunk> make(const initializer &ini_params);
@@ -707,16 +750,17 @@ public:
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
-    void randomize(std::mt19937 &rng);
+    void randomize(std::mt19937 &rng);   // also randomizes rfi_mask (if it exists)
 
-    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet);
+    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
 
     // I wanted to make the following fields protected, but msgpack doesn't like it...
 
     // Primary buffers.
     float *scales = nullptr;   // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
-    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
+    uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
+    uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (nrfifreq x constants::nt_per_assembled_chunk / 8 bits)
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
@@ -828,8 +872,13 @@ struct write_chunk_request {
     std::shared_ptr<assembled_chunk> chunk;
     std::string filename;
     int priority = 0;
+    bool need_rfi_mask = false;
 
-    virtual void write_callback(const std::string &error_message) { }
+    // Called when the status of this chunk has changed --
+    // due to an error, successful completion, or, eg, RFI mask added.
+    virtual void status_changed(bool finished, bool success,
+                                const std::string &state,
+                                const std::string &error_message) { }
     virtual ~write_chunk_request() { }
 
     // This comparator class is used below, to make an STL priority queue.
@@ -889,6 +938,10 @@ public:
     // Blocks until i/o thread exits.  Call end_stream() first!
     void join_thread();
 
+    // Called (by RFI thread) to notify that the given chunk has had its
+    // RFI mask filled in.
+    void filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk);
+
 protected:
     std::thread output_thread;
 
@@ -901,6 +954,10 @@ protected:
     std::priority_queue<std::shared_ptr<write_chunk_request>,
 			std::vector<std::shared_ptr<write_chunk_request>>,
 			write_chunk_request::_less_than> _write_reqs;
+
+    // Write requests where need_rfi_mask is set and the rfi mask isn't
+    // yet available.
+    std::vector<std::shared_ptr<write_chunk_request> > _awaiting_rfi;
     
     // The state model and request queue are protected by this lock and condition variable.
     std::mutex _lock;
@@ -1058,6 +1115,8 @@ public:
     void _encode_chunk(const float *intensity, int istride, const float *weights, int wstride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
 
     void print_status(std::ostream &os = std::cout);
+
+    bool is_sending();
 
 protected:
     std::vector<uint16_t> beam_ids_16bit;

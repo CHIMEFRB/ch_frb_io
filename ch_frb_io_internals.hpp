@@ -271,17 +271,20 @@ public:
 
     void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
     
-    // Called when the assembler thread exits.  
-    // Moves any remaining active chunks into the ring buffer and sets 'doneflag'.
+    // Called by the assembler thread, when it exits.
+    // Moves any remaining active chunks into the ring buffer, sets 'doneflag', initializes 'final_fpga'.
     void end_stream(int64_t *event_counts);
 
+    void set_frame0(uint64_t frame0_nano);
+    
     // Debugging: inject the given chunk
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
     // For debugging/testing: stream data to disk.  
     //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
     //   'priority': see write_chunk_request::priority
-    void stream_to_files(const std::string &filename_pattern, int priority);
+    void stream_to_files(const std::string &filename_pattern, int priority,
+                         bool need_rfi);
 
     // Callback from the write thread when a stream_to_files() write finishes
     void chunk_streamed(const std::string &filename);
@@ -296,6 +299,13 @@ public:
     // If the ring buffer is empty and end_stream() has been called, it returns an empty pointer
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
+
+    // Find an assembled_chunk with the given fpgacounts start time, if it exists in the ring buffer.
+    // Called by processing threads, in order to fill the RFI mask.
+    // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // If anything else goes wrong, an exception will be thrown.
+    std::shared_ptr<assembled_chunk> find_assembled_chunk(uint64_t fpga_counts, bool top_level_only=false);
+                                                          
 
     // The return value is a vector of (chunk, where) pairs, where 'where' is of type enum l1_ringbuf_level (defined in ch_frb_io.hpp)
     std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t>> get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
@@ -325,6 +335,8 @@ protected:
     const int beam_id;
     const int stream_id;   // only used in assembled_chunk::format_filename().
 
+    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
+    
     output_device_pool output_devices;
 
     // Set to 'true' in the first call to put_unassembled_packet().
@@ -382,10 +394,12 @@ protected:
     // Are we streaming data to disk?  (Note: these fields require the lock for either read or write access.)
     std::string stream_pattern;
     int stream_priority = 0;
+    bool stream_rfi_mask = false;
     int stream_chunks_written = 0;
     size_t stream_bytes_written = 0;
 
     bool doneflag = false;
+    uint64_t final_fpga = 0;   // last fpga count which has an assembled_chunk, only initialized when 'doneflag' is set to true.
 };
 
 
