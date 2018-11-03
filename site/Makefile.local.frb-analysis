@@ -25,3 +25,6 @@ else
 endif
 
 CPP_LFLAGS=-L. -L$(LIBDIR)
+
+CPP_LFLAGS += $(shell pkg-config --libs jsoncpp)
+CPP += $(shell pkg-config --cflags jsoncpp)
