@@ -332,6 +332,13 @@ public:
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
+	// If 'nt_align' is set to a nonzero value, then the time sample index of the first
+	// assembled_chunk in the stream must be a multiple of nt_align.  This is used in the
+	// real-time server, to align all beams to the RFI and dedispersion block sizes.  Note
+	// that if nt_align is enabled, then some packets may be dropped, and these will be
+	// treated as assembler misses.
+	int nt_align = 0;
+
 	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
         std::string frame0_url = "";
         int frame0_timeout = 3000;

@@ -93,6 +93,9 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     if ((ini_params.stream_id < 0) || (ini_params.stream_id > 9))
 	throw runtime_error("ch_frb_io: bad value of 'stream_id'");
 
+    if ((ini_params.nt_align < 0) || (ini_params.nt_align % constants::nt_per_assembled_chunk))
+	throw runtime_error("ch_frb_io: 'nt_align' must be a multiple of nt_per_assembled_chunk(=" + to_string(constants::nt_per_assembled_chunk) + ")");
+	 
     if ((ini_params.udp_port <= 0) || (ini_params.udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(ini_params.udp_port));
 

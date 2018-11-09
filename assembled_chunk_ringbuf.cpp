@@ -19,8 +19,12 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
+    
     if (ini_params.assembled_ringbuf_capacity <= 0)
 	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: assembled_ringbuf_capacity must be > 0");
+
+    if ((ini_params.nt_align < 0) || (ini_params.nt_align % constants::nt_per_assembled_chunk))
+	throw runtime_error("ch_frb_io: 'nt_align' must be a multiple of nt_per_assembled_chunk(=" + to_string(constants::nt_per_assembled_chunk) + ")");
 
     for (int n: ini_params.telescoping_ringbuf_capacity) {
 	if (n < 2)
@@ -267,8 +271,15 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
     if (!first_packet_received) {
-	this->active_chunk0 = this->_make_assembled_chunk(packet_ichunk, 1);
-	this->active_chunk1 = this->_make_assembled_chunk(packet_ichunk+1, 1);
+	uint64_t first_ichunk = packet_ichunk;
+
+	if (ini_params.nt_align > 0) {
+	    uint64_t chunk_align = ini_params.nt_align / constants::nt_per_assembled_chunk;
+	    first_ichunk = ((first_ichunk + chunk_align - 1) / chunk_align) * chunk_align;
+	}
+	
+	this->active_chunk0 = this->_make_assembled_chunk(first_ichunk, 1);
+	this->active_chunk1 = this->_make_assembled_chunk(first_ichunk+1, 1);
 	this->first_packet_received = true;
     }
 
