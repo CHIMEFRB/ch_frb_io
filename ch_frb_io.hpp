@@ -684,7 +684,6 @@ public:
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
     const uint64_t ichunk = 0;
-
     // "ctime" in nanoseconds of FGPAcount zero
     const uint64_t frame0_nano = 0;
 
@@ -696,10 +695,6 @@ public:
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-
-    // False on initialization.
-    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
-    std::atomic<bool> has_rfi_mask;
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
@@ -764,6 +759,10 @@ public:
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
     uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (nrfifreq x constants::nt_per_assembled_chunk / 8 bits)
+
+    // False on initialization.
+    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
+    std::atomic<bool> has_rfi_mask;
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
