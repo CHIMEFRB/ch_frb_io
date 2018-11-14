@@ -1020,16 +1020,11 @@ void intensity_network_stream::_assembler_thread_body()
 	if (!first_packet_received && this->ini_params.frame0_url.size()) {
 	    // After we receive our first packet, we will go fetch the frame0_ctime
 	    // via curl.  This is usually fast, so we'll do it in blocking mode.
-
-	    cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
-
-	    _fetch_frame0();
-            // raises runtime_error on failure
-
-	    for (unsigned int i = 0; i < assemblers.size(); i++) {
-		if (assemblers[i])
-		    assemblers[i]->set_frame0(frame0_nano);
-	    }
+	    chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
+	    _fetch_frame0();    // raises runtime_error on failure
+	    for (auto a : assemblers)
+                if (a)
+                    a->set_frame0(frame0_nano);
 	}
 
 	first_packet_received = true;
@@ -1202,7 +1197,7 @@ CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 
 void intensity_network_stream::_fetch_frame0() {
     if (ini_params.frame0_url.size() == 0) {
-        cout << "No 'frame0_url' set; skipping." << endl;
+        chlog("No 'frame0_url' set; skipping.");
         return;
     }
     CURL *curl_handle;
@@ -1219,20 +1214,20 @@ void intensity_network_stream::_fetch_frame0() {
                      CurlWriteMemoryCallback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
     // curl!
-    cout << "Fetching frame0_time from " << ini_params.frame0_url << endl;
+    chlog("Fetching frame0_time from " << ini_params.frame0_url);
     res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK)
         throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
     curl_easy_cleanup(curl_handle);
 
     string frame0_txt = holder.thestring;
-    cout << "Received frame0 text: " << frame0_txt << endl;
+    chlog("Received frame0 text: " << frame0_txt);
     Json::Reader frame0_reader;
     Json::Value frame0_json;
     if (!frame0_reader.parse(frame0_txt, frame0_json))
         throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
 
-    cout << "Parsed: " << frame0_json << endl;
+    chlog("Parsed: " << frame0_json);
     if (!frame0_json.isObject())
         throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
 
@@ -1244,7 +1239,7 @@ void intensity_network_stream::_fetch_frame0() {
     if (!v.isIntegral())
         throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
     frame0_nano = v.asUInt64();
-    cout << "Found frame0_nano: " << frame0_nano << endl;
+    chlog("Found frame0_nano: " << frame0_nano);
 }
 
 }  // namespace ch_frb_io
