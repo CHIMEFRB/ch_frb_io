@@ -529,6 +529,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
+    std::atomic<uint64_t> packet_max_fpga_seen;
+
     // Initialized by assembler thread when first packet is received, constant thereafter.
     uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
 

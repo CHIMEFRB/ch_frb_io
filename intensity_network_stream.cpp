@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 
 #include <functional>
+#include <algorithm>
 #include <iostream>
 
 #include <curl/curl.h>
@@ -1077,7 +1078,9 @@ void intensity_network_stream::_assembler_thread_body()
 	    // so it's important that they're done here!
 
 	    event_subcounts[event_type::packet_good]++;
-	    
+
+            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count);
+
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
 	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
