@@ -593,6 +593,7 @@ protected:
     void _open_socket();
     void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
+    void _update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts);
 
     void network_thread_main();
     void assembler_thread_main();

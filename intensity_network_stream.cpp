@@ -787,8 +787,6 @@ void intensity_network_stream::_network_thread_body()
     // the previous counts added to the history list
     last_packet_counts->tv = tv_ini;
 
-    std::shared_ptr<packet_counts> this_packet_counts;
-    
     for (;;) {
         uint64_t timestamp;
 
@@ -819,40 +817,7 @@ void intensity_network_stream::_network_thread_body()
 
         // Periodically store our per-sender packet counts
         if (curr_timestamp > packet_history_timestamp + ini_params.packet_count_period_usec) {
-            // Update the "perhost_packets" counter from "network_thread_perhost_packets"
-            pthread_mutex_lock(&this->event_lock);
-            perhost_packets->update(*network_thread_perhost_packets);
-            perhost_packets->tv = network_thread_perhost_packets->tv;
-            // deep copy
-            this_packet_counts = make_shared<packet_counts>(*perhost_packets);
-            pthread_mutex_unlock(&this->event_lock);
-
-            // Build new packet_counts structure with differences vs last_
-            shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
-            count_diff->tv = this_packet_counts->tv;
-            count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
-            for (auto it = this_packet_counts->counts.begin();
-                 it != this_packet_counts->counts.end(); it++) {
-                auto it2 = last_packet_counts->counts.find(it->first);
-                if (it2 == last_packet_counts->counts.end()) {
-                    // not found in last_packet_counts; new sender
-                    count_diff->counts[it->first] = it->second;
-                } else {
-                    count_diff->counts[it->first] = it->second - it2->second;
-                }
-            }
-            //chlog("Adding packet count history for t " << count_diff->start_time() << ", period " << count_diff->period);
-            // last_packet_count = this_packet_counts
-            last_packet_counts.reset();
-            last_packet_counts.swap(this_packet_counts);
-            
-            // Add *count_diff* to the packet history
-            pthread_mutex_lock(&this->packet_history_lock);
-            if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
-                packet_history.erase(--packet_history.end());
-            packet_history.insert(make_pair(count_diff->start_time(),
-                                            count_diff));
-            pthread_mutex_unlock(&this->packet_history_lock);
+            _update_packet_rates(last_packet_counts);
             packet_history_timestamp = curr_timestamp;
         }
         
@@ -927,6 +892,41 @@ void intensity_network_stream::_network_flush_packets()
     perhost_packets->update(*network_thread_perhost_packets);
     perhost_packets->tv = network_thread_perhost_packets->tv;
     pthread_mutex_unlock(&this->event_lock);
+}
+
+// This gets called from the network thread to update the "perhost_packets" counter from "network_thread_perhost_packets".
+void intensity_network_stream::_update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts)
+{
+    std::shared_ptr<packet_counts> this_packet_counts;
+    pthread_mutex_lock(&this->event_lock);
+    perhost_packets->update(*network_thread_perhost_packets);
+    perhost_packets->tv = network_thread_perhost_packets->tv;
+    // deep copy
+    this_packet_counts = make_shared<packet_counts>(*perhost_packets);
+    pthread_mutex_unlock(&this->event_lock);
+
+    // Build new packet_counts structure with differences vs last_
+    shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
+    count_diff->tv = this_packet_counts->tv;
+    count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
+    for (auto it : this_packet_counts->counts) {
+        auto it2 = last_packet_counts->counts.find(it.first);
+        if (it2 == last_packet_counts->counts.end())
+            // not found in last_packet_counts; new sender
+            count_diff->counts[it.first] = it.second;
+        else
+            count_diff->counts[it.first] = it.second - it2->second;
+    }
+    // last_packet_count = this_packet_counts
+    last_packet_counts.reset();
+    last_packet_counts.swap(this_packet_counts);
+
+    // Add *count_diff* to the packet history
+    pthread_mutex_lock(&this->packet_history_lock);
+    if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
+        packet_history.erase(--packet_history.end());
+    packet_history.insert(make_pair(count_diff->start_time(), count_diff));
+    pthread_mutex_unlock(&this->packet_history_lock);
 }
 
 // This gets called when the network thread exits (on all exit paths).
