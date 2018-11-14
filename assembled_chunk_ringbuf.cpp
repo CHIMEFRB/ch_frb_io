@@ -11,6 +11,8 @@ namespace ch_frb_io {
 
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
+    max_fpga_flushed(0),
+    max_fpga_retrieved(0),
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),
@@ -518,6 +520,9 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped] += num_assembled_chunks_dropped;
     }
 
+    assert(chunk->fpga_end > this->max_fpga_flushed);
+    this->max_fpga_flushed = chunk->fpga_end;
+
     if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	cout << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk" << endl;
     if (ini_params.throw_exception_on_buffer_drop && (num_assembled_chunks_dropped > 0))
@@ -644,6 +649,10 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
     }
 
     pthread_mutex_unlock(&this->lock);
+
+    assert(chunk->fpga_end > this->max_fpga_retrieved);
+    this->max_fpga_retrieved = chunk->fpga_end;
+
     return chunk;
 }
 

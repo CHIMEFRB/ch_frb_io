@@ -1080,7 +1080,7 @@ void intensity_network_stream::_assembler_thread_body()
 
 	    event_subcounts[event_type::packet_good]++;
 
-            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count);
+            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
 
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;

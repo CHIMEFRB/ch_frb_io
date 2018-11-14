@@ -764,6 +764,8 @@ public:
     // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
     std::atomic<bool> has_rfi_mask;
 
+    std::atomic<int> packets_received;
+
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
     float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
