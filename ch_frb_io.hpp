@@ -686,7 +686,7 @@ public:
     const uint64_t ichunk = 0;
 
     // "ctime" in nanoseconds of FGPAcount zero
-    uint64_t frame0_nano = 0;
+    const uint64_t frame0_nano = 0;
 
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)

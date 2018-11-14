@@ -52,6 +52,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
+    packet_max_fpga_seen(0),
     frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
