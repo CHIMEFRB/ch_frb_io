@@ -386,6 +386,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // List of chunks to be pushed and popped at each level of the ring buffer (in step 2!)
     vector<shared_ptr<assembled_chunk>> pushlist(nds);
     vector<shared_ptr<assembled_chunk>> poplist(2*nds);
+
+    uint64_t chunk_fpga_end = chunk->fpga_end;
     
     // Converts unique_ptr -> shared_ptr, and resets 'chunk' to a null pointer.
     pushlist[0] = shared_ptr<assembled_chunk> (chunk.release());
@@ -524,8 +526,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped] += num_assembled_chunks_dropped;
     }
 
-    assert(chunk->fpga_end > this->max_fpga_flushed);
-    this->max_fpga_flushed = chunk->fpga_end;
+    assert(chunk_fpga_end > this->max_fpga_flushed);
+    this->max_fpga_flushed = chunk_fpga_end;
 
     if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	cout << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk" << endl;
@@ -654,8 +656,10 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
 
     pthread_mutex_unlock(&this->lock);
 
-    assert(chunk->fpga_end > this->max_fpga_retrieved);
-    this->max_fpga_retrieved = chunk->fpga_end;
+    if (chunk) {
+        assert(chunk->fpga_end > this->max_fpga_retrieved);
+        this->max_fpga_retrieved = chunk->fpga_end;
+    }
 
     return chunk;
 }
