@@ -462,6 +462,13 @@ public:
     // Returns the first fpgacount of the first chunk sent downstream by
     // the given beam id.
     uint64_t get_first_fpga_count(int beam);
+
+    // Returns the last FPGA count processed by each of the assembler,
+    // (in the same order as the "beam_ids" array), flushed downstream,
+    // and retrieved by downstream callers.
+    void get_max_fpga_count_seen(std::vector<uint64_t> &flushed,
+                                 std::vector<uint64_t> &retrieved);
+    
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
     // as seconds relative to now; otherwise as gettimeofday()

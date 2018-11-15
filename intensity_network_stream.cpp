@@ -654,6 +654,15 @@ uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
     return 0;
 }
 
+void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
+                                                       vector<uint64_t> &retrieved) {
+    int nbeams = this->ini_params.beam_ids.size();
+    for (int i=0; i<nbeams; i++) {
+        flushed.push_back(this->assemblers[i]->max_fpga_flushed);
+        retrieved.push_back(this->assemblers[i]->max_fpga_retrieved);
+    }
+}
+
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
 intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
                                                 uint64_t min_fpga_counts,
