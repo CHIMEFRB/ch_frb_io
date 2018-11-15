@@ -456,6 +456,9 @@ public:
     // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
 
+    // Returns the first fpgacount of the first chunk sent downstream by
+    // the given beam id.
+    uint64_t get_first_fpga_count(int beam);
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
     // as seconds relative to now; otherwise as gettimeofday()

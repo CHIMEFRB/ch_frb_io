@@ -13,6 +13,7 @@ namespace ch_frb_io {
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
     max_fpga_flushed(0),
     max_fpga_retrieved(0),
+    first_fpgacount(0),
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),
@@ -272,6 +273,9 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	this->active_chunk0 = this->_make_assembled_chunk(packet_ichunk, 1);
 	this->active_chunk1 = this->_make_assembled_chunk(packet_ichunk+1, 1);
 	this->first_packet_received = true;
+        // This rounds down to the FPGA count of the beginning of this chunk
+        // (which may be before the first packet.fpga_count)
+        this->first_fpgacount = packet_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
     }
 
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.

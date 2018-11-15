@@ -252,6 +252,8 @@ public:
     // When an assembled_chunk is retrieved from the downstream ringbuf
     // by, eg, rf_pipelines::chime_network_stream
     std::atomic<uint64_t> max_fpga_retrieved;
+    // The fpgacount of the first chunk produced by this stream
+    std::atomic<uint64_t> first_fpgacount;
     
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
