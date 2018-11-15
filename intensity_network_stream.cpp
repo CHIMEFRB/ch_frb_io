@@ -48,11 +48,11 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
+    packet_max_fpga_seen(0),
     network_thread_waiting_usec(0),
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
-    packet_max_fpga_seen(0),
     frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),

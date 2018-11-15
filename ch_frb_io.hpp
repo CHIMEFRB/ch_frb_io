@@ -410,6 +410,9 @@ public:
     };
 
     const initializer ini_params;
+
+    // The largest FPGA count in a received packet.
+    std::atomic<uint64_t> packet_max_fpga_seen;
     
     // It's convenient to initialize intensity_network_streams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns network and assembler threads,
@@ -531,8 +534,6 @@ protected:
     // Written by assembler thread, read by outside thread
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
-
-    std::atomic<uint64_t> packet_max_fpga_seen;
 
     // Initialized by assembler thread when first packet is received, constant thereafter.
     uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
