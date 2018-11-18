@@ -9,6 +9,10 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
     ini_params(ini_params_),
@@ -32,9 +36,6 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: the 'force_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
-    pthread_mutex_init(&this->lock, NULL);
-    pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
-
     this->num_downsampling_levels = max(ini_params.telescoping_ringbuf_capacity.size(), 1UL);
     this->ringbuf_pos.resize(num_downsampling_levels, 0);
     this->ringbuf_size.resize(num_downsampling_levels, 0);
@@ -57,21 +58,13 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     this->_check_invariants();
 }
 
-
-assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
-{
-    pthread_cond_destroy(&this->cond_assembled_chunks_added);
-    pthread_mutex_destroy(&this->lock);
-}
-
-
 void assembled_chunk_ringbuf::set_frame0(uint64_t f0) {
     frame0_nano = f0;
 }
 
 void assembled_chunk_ringbuf::print_state() 
 {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
 
     cout << "Beam " << beam_id << "\n";
 
@@ -89,8 +82,6 @@ void assembled_chunk_ringbuf::print_state()
 	    cout << " " << this->ringbuf_entry(ids,ipos)->ichunk;
 	cout << " ]\n";
     }
-
-    pthread_mutex_unlock(&this->lock);
 }
 
 shared_ptr<assembled_chunk>
@@ -128,7 +119,7 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts, uint64_t
     vector<pair<shared_ptr<assembled_chunk>, uint64_t>> ret;
     ret.reserve(sum(ringbuf_capacity));
 
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
 
     // Scan telescoping ring buffer, in a time-ordered way.
     for (int ids = num_downsampling_levels-1; ids >= 0; ids--) {
@@ -147,8 +138,6 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts, uint64_t
 	    ret.push_back({ chunk, where });
 	}
     }
-
-    pthread_mutex_unlock(&this->lock);
     return ret;
 }
 
@@ -162,7 +151,7 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
                                                uint64_t *ringbuf_fpga_max,
                                                int level) 
 {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
 
     if (ringbuf_fpga_next && (level == 0)) {
 	*ringbuf_fpga_next = 0;
@@ -239,20 +228,17 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
             }
         }
     }
-
-    pthread_mutex_unlock(&this->lock);
 }
 
 
 void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority, bool need_rfi)
 {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
     this->stream_pattern = filename_pattern;
     this->stream_priority = priority;
     this->stream_rfi_mask = need_rfi;
     this->stream_chunks_written = 0;
     this->stream_bytes_written = 0;
-    pthread_mutex_unlock(&this->lock);
 }
 
 
@@ -344,17 +330,15 @@ void assembled_chunk_ringbuf::chunk_streamed(const std::string &filename) {
     }
 
     size_t len = st.st_size;
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
     this->stream_chunks_written ++;
     this->stream_bytes_written += len;
-    pthread_mutex_unlock(&this->lock);
 }
 
 void assembled_chunk_ringbuf::get_streamed_chunks(int &achunks, size_t &abytes) {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
     achunks = stream_chunks_written;
     abytes = stream_bytes_written;
-    pthread_mutex_unlock(&this->lock);
 }
 
 // Helper function called assembler thread, to add a new assembled_chunk to the ring buffer.
@@ -435,12 +419,10 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // be added/removed at each level (pushlist/poplist), so we don't malloc/free/downsample with
     // the lock held.
 
-    pthread_mutex_lock(&this->lock);
-
-    if (this->doneflag) {
-	pthread_mutex_unlock(&this->lock);
+    ulock_t lock(mutx);
+    
+    if (this->doneflag)
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
-    }
 
     for (int ids = 0; ids < nds; ids++) {
 	// Number of chunks to be removed from level 'ids' of the telescoping ring buffer.
@@ -482,8 +464,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     int loc_stream_priority = this->stream_priority;
     bool loc_stream_rfi_mask = this->stream_rfi_mask;
     
-    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
-    pthread_mutex_unlock(&this->lock);
+    this->cond_assembled_chunks_added.notify_all();
+    lock.unlock();
 
     // Stream new chunk to disk (if 'stream_pattern' is a nonempty string).
     // It's better to do this processing without the lock held, we just need to use
@@ -594,9 +576,11 @@ void assembled_chunk_ringbuf::_check_invariants()
     // We do need to acquire the lock to access 'downstream_pos', since it's modified
     // by the downstream thread.
 
-    pthread_mutex_lock(&lock);
-    int dpos = this->downstream_pos;
-    pthread_mutex_unlock(&lock);
+    int dpos;
+    {
+        guard_t lock(mutx);
+        dpos = this->downstream_pos;
+    }
 
     ch_assert(downstream_bufsize > 0);
     ch_assert(downstream_bufsize <= ringbuf_capacity[0]);
@@ -624,7 +608,7 @@ bool assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk)
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)
 {
     shared_ptr<assembled_chunk> chunk;
-    pthread_mutex_lock(&this->lock);
+    ulock_t lock(mutx);
 
     for (;;) {
 	if (downstream_pos < ringbuf_pos[0] + ringbuf_size[0]) {
@@ -640,10 +624,9 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
 	    break;   // Ring buffer is empty and end_stream() has been called
 
 	// Wait for chunks to be added to the ring buffer.
-	pthread_cond_wait(&this->cond_assembled_chunks_added, &this->lock);
+        this->cond_assembled_chunks_added.wait(lock);
     }
 
-    pthread_mutex_unlock(&this->lock);
     return chunk;
 }
 
@@ -661,21 +644,17 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
     this->_put_assembled_chunk(active_chunk0, event_counts);
     this->_put_assembled_chunk(active_chunk1, event_counts);
 
-    pthread_mutex_lock(&this->lock);
+    {
+        ulock_t lock(mutx);
+        if (doneflag)
+            throw runtime_error("ch_frb_io: internal error: doneflag already set in assembled_chunk_ringbuf::end_stream()");
 
-    if (doneflag) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: doneflag already set in assembled_chunk_ringbuf::end_stream()");
+        // With lock held
+        this->doneflag = true;
+        this->final_fpga = loc_final_fpga;
+        // Wake up processing thread, if it is waiting for data
+        this->cond_assembled_chunks_added.notify_all();
     }
-
-    // Wake up processing thread, if it is waiting for data
-    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
-
-    // With lock held
-    this->doneflag = true;
-    this->final_fpga = loc_final_fpga;
-    
-    pthread_mutex_unlock(&this->lock);
 }
 
 
