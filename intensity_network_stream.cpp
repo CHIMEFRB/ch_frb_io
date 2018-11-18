@@ -25,6 +25,11 @@ namespace ch_frb_io {
 //
 // class intensity_network_stream
 
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
+
 
 // Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const initializer &x)
@@ -131,21 +136,11 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     network_thread_perhost_packets = make_shared<packet_counts>();
     perhost_packets = make_shared<packet_counts>();
-
-    pthread_mutex_init(&state_lock, NULL);
-    pthread_mutex_init(&event_lock, NULL);
-    pthread_mutex_init(&packet_history_lock, NULL);
-    pthread_cond_init(&cond_state_changed, NULL);
 }
 
 
 intensity_network_stream::~intensity_network_stream()
 {
-    pthread_cond_destroy(&cond_state_changed);
-    pthread_mutex_destroy(&state_lock);
-    pthread_mutex_destroy(&packet_history_lock);
-    pthread_mutex_destroy(&event_lock);
-
     if (sockfd >= 0) {
 	close(sockfd);
 	sockfd = -1;
@@ -191,10 +186,11 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
     if (cumulative_event_counts.size() != event_subcounts.size())
 	throw runtime_error("ch_frb_io: internal error: vector length mismatch in intensity_network_stream::_add_event_counts()");
 
-    pthread_mutex_lock(&this->event_lock);
-    for (unsigned int i = 0; i < cumulative_event_counts.size(); i++)
-	this->cumulative_event_counts[i] += event_subcounts[i];
-    pthread_mutex_unlock(&this->event_lock);
+    {
+        guard_t lock(this->event_mutex);
+        for (unsigned int i = 0; i < cumulative_event_counts.size(); i++)
+            this->cumulative_event_counts[i] += event_subcounts[i];
+    }
 
     memset(&event_subcounts[0], 0, event_subcounts.size() * sizeof(event_subcounts[0]));
 }
@@ -202,17 +198,14 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
 
 void intensity_network_stream::start_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
-    if (stream_end_requested || join_called) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (stream_end_requested || join_called)
 	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on completed or cancelled stream");
-    }
 
     // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -225,41 +218,36 @@ void intensity_network_stream::start_stream()
 
 void intensity_network_stream::end_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     this->stream_started = true;
     this->stream_end_requested = true;    
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
 void intensity_network_stream::join_threads()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     
-    if (!stream_started) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (!stream_started)
 	throw runtime_error("ch_frb_io: intensity_network_stream::join_threads() was called with no prior call to start_stream()");
-    }
 
     if (join_called) {
 	while (!threads_joined)
-	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
-	pthread_mutex_unlock(&this->state_lock);
+            this->cond_state_changed.wait(lock);
 	return;
     }
 
     this->join_called = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
+    lock.unlock();
 
     network_thread.join();
     assembler_thread.join();
 
-    pthread_mutex_lock(&this->state_lock);
+    lock.lock();
     this->threads_joined = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);    
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -345,9 +333,8 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 {
     vector<int64_t> ret(event_type::num_types, 0);
 
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     memcpy(&ret[0], &this->cumulative_event_counts[0], ret.size() * sizeof(ret[0]));
-    pthread_mutex_unlock(&this->event_lock);    
 
     return ret;
 }
@@ -355,10 +342,9 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
     // Quickly grab a copy of perhost_packets
-    pthread_mutex_lock(&this->event_lock);
+    ulock_t lock(this->event_mutex);
     packet_counts pc(*perhost_packets);
-    pthread_mutex_unlock(&this->event_lock);
-
+    lock.unlock();
     return pc.to_string();
 }
 
@@ -451,9 +437,10 @@ shared_ptr<packet_counts>
 intensity_network_stream::get_packet_rates(double start, double period) {
     // This returns a single history entry.
     vector<shared_ptr<packet_counts> > counts;
-    pthread_mutex_lock(&this->packet_history_lock);
-    _get_history(start, start+period, packet_history, counts);
-    pthread_mutex_unlock(&this->packet_history_lock);
+    {
+        guard_t lock(this->packet_history_mutex);
+        _get_history(start, start+period, packet_history, counts);
+    }
     // FIXME -- if *period* is specified, we could sum over the requested period...
     if (counts.size() == 0)
         return shared_ptr<packet_counts>();
@@ -475,9 +462,8 @@ intensity_network_stream::get_packet_rates(double start, double period) {
 vector<shared_ptr<packet_counts> >
 intensity_network_stream::get_packet_rate_history(double start, double end, double period) {
     vector<shared_ptr<packet_counts> > counts;
-    pthread_mutex_lock(&this->packet_history_lock);
+    guard_t lock(this->packet_history_mutex);
     _get_history(start, end, packet_history, counts);
-    pthread_mutex_unlock(&this->packet_history_lock);
     return counts;
 }
 
@@ -486,15 +472,13 @@ void intensity_network_stream::fake_packet_from(const struct sockaddr_in& sender
     // network thread so is not lock-protected, but when updating the
     // history this is the lock used before reading the
     // network_thread_perhost_packets, so it should work...
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     network_thread_perhost_packets->increment(sender, nbytes);
     network_thread_perhost_packets->tv = xgettimeofday();
 
     cumulative_event_counts[event_type::packet_received] ++;
     cumulative_event_counts[event_type::packet_good] ++;
     cumulative_event_counts[event_type::byte_received] += nbytes;
-
-    pthread_mutex_unlock(&this->event_lock);
 }
 
 vector<unordered_map<string, uint64_t> >
@@ -707,21 +691,20 @@ void intensity_network_stream::network_thread_main()
 void intensity_network_stream::_network_thread_body()
 {
     pin_thread_to_cores(ini_params.network_thread_cores);
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
     // Wait for "stream_started"
     for (;;) {
-	if (this->stream_end_requested) {
+	if (this->stream_end_requested)
 	    // This case can arise if end_stream() is called early
-	    pthread_mutex_unlock(&this->state_lock);
 	    return;
-	}
 	if (this->stream_started) {
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 	    break;
 	}
-	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+	this->cond_state_changed.wait(lock);
     }
+    // unlocked at this point.
 
     // Sleep hack (a temporary kludge that will go away soon)
 
@@ -794,15 +777,14 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
-	    pthread_mutex_lock(&this->state_lock);
 
+            lock.lock();
 	    if (this->stream_end_requested) {
-		pthread_mutex_unlock(&this->state_lock);    
+                lock.unlock();
                 _network_flush_packets();
 		return;
 	    }
-
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 
 	    // We call _add_event_counts() in a few different places in this routine, to ensure that
 	    // the network thread's event counts are always regularly accumulated.
@@ -820,12 +802,13 @@ void intensity_network_stream::_network_thread_body()
         // Periodically store our per-sender packet counts
         if (curr_timestamp > packet_history_timestamp + ini_params.packet_count_period_usec) {
             // Update the "perhost_packets" counter from "network_thread_perhost_packets"
-            pthread_mutex_lock(&this->event_lock);
-            perhost_packets->update(*network_thread_perhost_packets);
-            perhost_packets->tv = network_thread_perhost_packets->tv;
-            // deep copy
-            this_packet_counts = make_shared<packet_counts>(*perhost_packets);
-            pthread_mutex_unlock(&this->event_lock);
+            {
+                guard_t lock(this->event_mutex);
+                perhost_packets->update(*network_thread_perhost_packets);
+                perhost_packets->tv = network_thread_perhost_packets->tv;
+                // deep copy
+                this_packet_counts = make_shared<packet_counts>(*perhost_packets);
+            }
 
             // Build new packet_counts structure with differences vs last_
             shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
@@ -847,12 +830,13 @@ void intensity_network_stream::_network_thread_body()
             last_packet_counts.swap(this_packet_counts);
             
             // Add *count_diff* to the packet history
-            pthread_mutex_lock(&this->packet_history_lock);
-            if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
-                packet_history.erase(--packet_history.end());
-            packet_history.insert(make_pair(count_diff->start_time(),
-                                            count_diff));
-            pthread_mutex_unlock(&this->packet_history_lock);
+            {
+                guard_t lock(this->packet_history_mutex);
+                if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
+                    packet_history.erase(--packet_history.end());
+                packet_history.insert(make_pair(count_diff->start_time(),
+                                                count_diff));
+            }
             packet_history_timestamp = curr_timestamp;
         }
         
@@ -923,10 +907,9 @@ void intensity_network_stream::_network_flush_packets()
     this->_add_event_counts(network_thread_event_subcounts);
 
     // Update the "perhost_packets" counter from "network_thread_perhost_packets"
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     perhost_packets->update(*network_thread_perhost_packets);
     perhost_packets->tv = network_thread_perhost_packets->tv;
-    pthread_mutex_unlock(&this->event_lock);
 }
 
 // This gets called when the network thread exits (on all exit paths).

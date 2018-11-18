@@ -203,9 +203,9 @@ struct udp_packet_ringbuf : noncopyable {
     const int max_npackets_per_list;
     const int max_nbytes_per_list;
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond_packets_added;
-    pthread_cond_t cond_packets_removed;
+    std::mutex mutx;
+    std::condition_variable cond_packets_added;
+    std::condition_variable cond_packets_removed;
     bool stream_ended = false;
 
     int ringbuf_size = 0;
@@ -213,7 +213,6 @@ struct udp_packet_ringbuf : noncopyable {
     std::vector<std::unique_ptr<udp_packet_list> > ringbuf;
 
     udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list);
-    ~udp_packet_ringbuf();
     
     // Note!  The pointer 'p' is _swapped_ with an empty udp_packet_list from the ring buffer.
     // In other words, when put_packet_list() returns, the argument 'p' points to an empty udp_packet_list.
@@ -248,8 +247,6 @@ class assembled_chunk_ringbuf : noncopyable,
                                 public std::enable_shared_from_this<assembled_chunk_ringbuf> {
 public:
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
-
-    ~assembled_chunk_ringbuf();
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -368,10 +365,10 @@ protected:
     char pad[constants::cache_line_size];
 
     // All fields below are protected by the lock
-    pthread_mutex_t lock;
+    std::mutex mutx;
 
     // Processing thread waits here if the ring buffer is empty.
-    pthread_cond_t cond_assembled_chunks_added;
+    std::condition_variable cond_assembled_chunks_added;
     
     // Telescoping ring buffer.
     // All ringbuf* vectors have length num_downsampling_levels.
