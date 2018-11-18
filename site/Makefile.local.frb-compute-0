@@ -9,6 +9,21 @@ INCDIR ?= $(HOME)/include
 # Directory where executables will be installed
 BINDIR ?= $(HOME)/bin
 
+HDF5_CFLAGS ?= $(shell pkg-config --cflags hdf5)
+HDF5_LFLAGS ?= $(shell pkg-config --libs   hdf5)
+
+MSGPACK_CFLAGS ?= $(shell pkg-config --cflags msgpack)
+MSGPACK_LFLAGS ?= $(shell pkg-config --libs   msgpack)
+
+ZMQ_CFLAGS ?= $(shell pkg-config --cflags libzmq)
+ZMQ_LFLAGS ?= $(shell pkg-config --libs   libzmq)
+
+JSON_CFLAGS ?= $(shell pkg-cnofig --cflags jsoncpp)
+JSON_LFLAGS ?= $(shell pkg-cnofig --libs   jsoncpp)
+
+CURL_CFLAGS ?= $(shell pkg-cnofig --cflags libcurl)
+CURL_LFLAGS ?= $(shell pkg-cnofig --libs   libcurl)
+
 #
 # C++ command line
 # Must support c++11
@@ -17,14 +32,22 @@ BINDIR ?= $(HOME)/bin
 # Don't forget -pthread and -fPIC
 #
 
+CXX ?= g++
+
 DEBUG ?= no
-ifeq ($(DEBUG),no)
-  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I.
+ifeq ($(DEBUG), yes)
+    OPT_FLAGS ?= -O0 -g
 else
-  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O0 -g -ffast-math -funroll-loops -I.
+    OPT_FLAGS ?= -O3 -funroll-loops
 endif
 
-CPP_LFLAGS=-L. -L$(LIBDIR)
+COVERAGE ?= no
+ifeq ($(COVERAGE), yes)
+    # Travis + Coverall: include coverage tracking code.  Also note that we turned off optimization!
+    OPT_FLAGS += -fprofile-arcs -ftest-coverage
+endif
 
-CPP += $(shell pkg-config --cflags jsoncpp)
-CPP_LFLAGS += $(shell pkg-config --libs jsoncpp)
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) $(HDF5_CFLAGS) $(MSGPACK_CFLAGS) $(ZMQ_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
+
+CPP_LFLAGS := -L. -L$(LIBDIR) $(HDF5_LFLAGS) $(MSGPACK_LFLAGS) $(ZMQ_LFLAGS) $(JSON_LFLAGS) $(CURL_LFLAGS)
+
