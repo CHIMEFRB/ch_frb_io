@@ -87,28 +87,23 @@ void assembled_chunk_ringbuf::print_state()
 shared_ptr<assembled_chunk>
 assembled_chunk_ringbuf::find_assembled_chunk(uint64_t fpga_counts, bool top_level_only)
 {
-    pthread_mutex_lock(&this->lock);
+    ulock_t lock(mutx);
 
     // Return an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
     // (If anything else goes wrong, an exception will be thrown.)
-    if (this->doneflag && (fpga_counts >= this->final_fpga)) {
-	pthread_mutex_unlock(&this->lock);
+    if (this->doneflag && (fpga_counts >= this->final_fpga))
 	return shared_ptr<assembled_chunk> ();
-    }
     
     // Scan telescoping ring buffer
     int start_level = (top_level_only ? 0 : num_downsampling_levels-1);
     for (int lev = start_level; lev >= 0; lev--) {
 	for (int ipos = ringbuf_pos[lev]; ipos < ringbuf_pos[lev] + ringbuf_size[lev]; ipos++) {
 	    auto ch = this->ringbuf_entry(lev, ipos);
-	    if (ch->fpga_begin == fpga_counts) {
-		pthread_mutex_unlock(&this->lock);
+	    if (ch->fpga_begin == fpga_counts)
 		return ch;
-            }
 	}
     }
 
-    pthread_mutex_unlock(&this->lock);
     throw runtime_error("ch_frb_io::assembled_chunk::find_assembled_chunk(): couldn't find chunk, maybe your ring buffer is too small?");
 }
 
