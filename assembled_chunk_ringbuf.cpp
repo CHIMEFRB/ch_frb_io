@@ -284,9 +284,13 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	this->active_chunk0 = this->_make_assembled_chunk(first_ichunk, 1);
 	this->active_chunk1 = this->_make_assembled_chunk(first_ichunk+1, 1);
 	this->first_packet_received = true;
-        // This rounds down to the FPGA count of the beginning of this chunk
-        // (which may be before the first packet.fpga_count)
-        this->first_fpgacount = packet_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
+
+	// We initialize 'first_fpgacount' to the FPGA count of the first assembled_chunk.
+	// (Note that this can be either earlier or later than the FPGA count of the packet.)
+	// This makes sense because 'first_fpgacount' is used to convert between FPGA counts and
+	// time sample indices in rf_pipelines/bonsai.
+	
+        this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
     }
 
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
