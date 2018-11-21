@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 
 #include <functional>
+#include <algorithm>
 #include <iostream>
 
 #include <curl/curl.h>
@@ -47,6 +48,7 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
     ini_params(ini_params_),
+    packet_max_fpga_seen(0),
     network_thread_waiting_usec(0),
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
@@ -646,6 +648,24 @@ intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts, b
     throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
 }
 
+uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
+    // Which of my assemblers (if any) is handling the requested beam?
+    int nbeams = this->ini_params.beam_ids.size();
+    for (int i=0; i<nbeams; i++)
+        if (this->ini_params.beam_ids[i] == beam)
+	    return this->assemblers[i]->first_fpgacount;
+    return 0;
+}
+
+void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
+                                                       vector<uint64_t> &retrieved) {
+    int nbeams = this->ini_params.beam_ids.size();
+    for (int i=0; i<nbeams; i++) {
+        flushed.push_back(this->assemblers[i]->max_fpga_flushed);
+        retrieved.push_back(this->assemblers[i]->max_fpga_retrieved);
+    }
+}
+
 vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > >
 intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
                                                 uint64_t min_fpga_counts,
@@ -790,8 +810,6 @@ void intensity_network_stream::_network_thread_body()
     // the previous counts added to the history list
     last_packet_counts->tv = tv_ini;
 
-    std::shared_ptr<packet_counts> this_packet_counts;
-    
     for (;;) {
         uint64_t timestamp;
 
@@ -822,40 +840,7 @@ void intensity_network_stream::_network_thread_body()
 
         // Periodically store our per-sender packet counts
         if (curr_timestamp > packet_history_timestamp + ini_params.packet_count_period_usec) {
-            // Update the "perhost_packets" counter from "network_thread_perhost_packets"
-            pthread_mutex_lock(&this->event_lock);
-            perhost_packets->update(*network_thread_perhost_packets);
-            perhost_packets->tv = network_thread_perhost_packets->tv;
-            // deep copy
-            this_packet_counts = make_shared<packet_counts>(*perhost_packets);
-            pthread_mutex_unlock(&this->event_lock);
-
-            // Build new packet_counts structure with differences vs last_
-            shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
-            count_diff->tv = this_packet_counts->tv;
-            count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
-            for (auto it = this_packet_counts->counts.begin();
-                 it != this_packet_counts->counts.end(); it++) {
-                auto it2 = last_packet_counts->counts.find(it->first);
-                if (it2 == last_packet_counts->counts.end()) {
-                    // not found in last_packet_counts; new sender
-                    count_diff->counts[it->first] = it->second;
-                } else {
-                    count_diff->counts[it->first] = it->second - it2->second;
-                }
-            }
-            //chlog("Adding packet count history for t " << count_diff->start_time() << ", period " << count_diff->period);
-            // last_packet_count = this_packet_counts
-            last_packet_counts.reset();
-            last_packet_counts.swap(this_packet_counts);
-            
-            // Add *count_diff* to the packet history
-            pthread_mutex_lock(&this->packet_history_lock);
-            if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
-                packet_history.erase(--packet_history.end());
-            packet_history.insert(make_pair(count_diff->start_time(),
-                                            count_diff));
-            pthread_mutex_unlock(&this->packet_history_lock);
+            _update_packet_rates(last_packet_counts);
             packet_history_timestamp = curr_timestamp;
         }
         
@@ -890,7 +875,6 @@ void intensity_network_stream::_network_thread_body()
                 cout << "Failed to call ioctl(FIONREAD)" << endl;
             }
             socket_queued_bytes = nqueued;
-            //cout << "recv: now " << nqueued << " bytes queued in UDP socket" << endl;
         }
 
         // Increment the number of packets we've received from this sender:
@@ -930,6 +914,41 @@ void intensity_network_stream::_network_flush_packets()
     perhost_packets->update(*network_thread_perhost_packets);
     perhost_packets->tv = network_thread_perhost_packets->tv;
     pthread_mutex_unlock(&this->event_lock);
+}
+
+// This gets called from the network thread to update the "perhost_packets" counter from "network_thread_perhost_packets".
+void intensity_network_stream::_update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts)
+{
+    std::shared_ptr<packet_counts> this_packet_counts;
+    pthread_mutex_lock(&this->event_lock);
+    perhost_packets->update(*network_thread_perhost_packets);
+    perhost_packets->tv = network_thread_perhost_packets->tv;
+    // deep copy
+    this_packet_counts = make_shared<packet_counts>(*perhost_packets);
+    pthread_mutex_unlock(&this->event_lock);
+
+    // Build new packet_counts structure with differences vs last_
+    shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
+    count_diff->tv = this_packet_counts->tv;
+    count_diff->period = usec_between(last_packet_counts->tv, this_packet_counts->tv) * 1e-6;
+    for (auto it : this_packet_counts->counts) {
+        auto it2 = last_packet_counts->counts.find(it.first);
+        if (it2 == last_packet_counts->counts.end())
+            // not found in last_packet_counts; new sender
+            count_diff->counts[it.first] = it.second;
+        else
+            count_diff->counts[it.first] = it.second - it2->second;
+    }
+    // last_packet_count = this_packet_counts
+    last_packet_counts.reset();
+    last_packet_counts.swap(this_packet_counts);
+
+    // Add *count_diff* to the packet history
+    pthread_mutex_lock(&this->packet_history_lock);
+    if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
+        packet_history.erase(--packet_history.end());
+    packet_history.insert(make_pair(count_diff->start_time(), count_diff));
+    pthread_mutex_unlock(&this->packet_history_lock);
 }
 
 // This gets called when the network thread exits (on all exit paths).
@@ -995,67 +1014,6 @@ void intensity_network_stream::assembler_thread_main() {
     _assembler_thread_exit();
 }
 
-class CurlStringHolder {
-public:
-    string thestring;
-};
-
-static size_t
-CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    CurlStringHolder* h = (CurlStringHolder*)userp;
-    h->thestring += string((char*)contents, realsize);
-    return realsize;
-}
-
-void intensity_network_stream::_fetch_frame0() {
-    if (ini_params.frame0_url.size() == 0) {
-        cout << "No 'frame0_url' set; skipping." << endl;
-        return;
-    }
-    CURL *curl_handle;
-    CURLcode res;
-    CurlStringHolder holder;
-    // init the curl session
-    curl_handle = curl_easy_init();
-    // specify URL to get
-    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
-    // set timeout
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
-    // set received-data callback
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
-                     CurlWriteMemoryCallback);
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
-    // curl!
-    cout << "Fetching frame0_time from " << ini_params.frame0_url << endl;
-    res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK)
-        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
-    curl_easy_cleanup(curl_handle);
-
-    string frame0_txt = holder.thestring;
-    cout << "Received frame0 text: " << frame0_txt << endl;
-    Json::Reader frame0_reader;
-    Json::Value frame0_json;
-    if (!frame0_reader.parse(frame0_txt, frame0_json))
-        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
-
-    cout << "Parsed: " << frame0_json << endl;
-    if (!frame0_json.isObject())
-        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
-
-    string key = "frame0_nano";
-    if (!frame0_json.isMember(key))
-        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
-
-    const Json::Value v = frame0_json[key];
-    if (!v.isIntegral())
-        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
-    frame0_nano = v.asUInt64();
-    cout << "Found frame0_nano: " << frame0_nano << endl;
-}
-
 void intensity_network_stream::_assembler_thread_body()
 {
     pin_thread_to_cores(ini_params.assembler_thread_cores);
@@ -1085,16 +1043,11 @@ void intensity_network_stream::_assembler_thread_body()
 	if (!first_packet_received && this->ini_params.frame0_url.size()) {
 	    // After we receive our first packet, we will go fetch the frame0_ctime
 	    // via curl.  This is usually fast, so we'll do it in blocking mode.
-
-	    cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
-
-	    _fetch_frame0();
-            // raises runtime_error on failure
-
-	    for (unsigned int i = 0; i < assemblers.size(); i++) {
-		if (assemblers[i])
-		    assemblers[i]->set_frame0(frame0_nano);
-	    }
+	    chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
+	    _fetch_frame0();    // raises runtime_error on failure
+	    for (auto a : assemblers)
+                if (a)
+                    a->set_frame0(frame0_nano);
 	}
 
 	first_packet_received = true;
@@ -1147,7 +1100,9 @@ void intensity_network_stream::_assembler_thread_body()
 	    // so it's important that they're done here!
 
 	    event_subcounts[event_type::packet_good]++;
-	    
+
+            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
 	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
@@ -1250,5 +1205,66 @@ void intensity_network_stream::_assembler_thread_exit()
 #endif
 }
 
+
+class CurlStringHolder {
+public:
+    string thestring;
+};
+
+static size_t
+CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    CurlStringHolder* h = (CurlStringHolder*)userp;
+    h->thestring += string((char*)contents, realsize);
+    return realsize;
+}
+
+void intensity_network_stream::_fetch_frame0() {
+    if (ini_params.frame0_url.size() == 0) {
+        chlog("No 'frame0_url' set; skipping.");
+        return;
+    }
+    CURL *curl_handle;
+    CURLcode res;
+    CurlStringHolder holder;
+    // init the curl session
+    curl_handle = curl_easy_init();
+    // specify URL to get
+    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
+    // set timeout
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
+    // set received-data callback
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
+                     CurlWriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
+    // curl!
+    chlog("Fetching frame0_time from " << ini_params.frame0_url);
+    res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK)
+        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
+    curl_easy_cleanup(curl_handle);
+
+    string frame0_txt = holder.thestring;
+    chlog("Received frame0 text: " << frame0_txt);
+    Json::Reader frame0_reader;
+    Json::Value frame0_json;
+    if (!frame0_reader.parse(frame0_txt, frame0_json))
+        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
+
+    chlog("Parsed: " << frame0_json);
+    if (!frame0_json.isObject())
+        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
+
+    string key = "frame0_nano";
+    if (!frame0_json.isMember(key))
+        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
+
+    const Json::Value v = frame0_json[key];
+    if (!v.isIntegral())
+        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
+    frame0_nano = v.asUInt64();
+    chlog("Found frame0_nano: " << frame0_nano);
+}
 
 }  // namespace ch_frb_io

@@ -11,6 +11,9 @@ namespace ch_frb_io {
 
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
+    max_fpga_flushed(0),
+    max_fpga_retrieved(0),
+    first_fpgacount(0),
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),
@@ -281,6 +284,9 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	this->active_chunk0 = this->_make_assembled_chunk(first_ichunk, 1);
 	this->active_chunk1 = this->_make_assembled_chunk(first_ichunk+1, 1);
 	this->first_packet_received = true;
+        // This rounds down to the FPGA count of the beginning of this chunk
+        // (which may be before the first packet.fpga_count)
+        this->first_fpgacount = packet_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
     }
 
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
@@ -391,6 +397,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // List of chunks to be pushed and popped at each level of the ring buffer (in step 2!)
     vector<shared_ptr<assembled_chunk>> pushlist(nds);
     vector<shared_ptr<assembled_chunk>> poplist(2*nds);
+
+    uint64_t chunk_fpga_end = chunk->fpga_end;
     
     // Converts unique_ptr -> shared_ptr, and resets 'chunk' to a null pointer.
     pushlist[0] = shared_ptr<assembled_chunk> (chunk.release());
@@ -529,6 +537,9 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped] += num_assembled_chunks_dropped;
     }
 
+    assert(chunk_fpga_end > this->max_fpga_flushed);
+    this->max_fpga_flushed = chunk_fpga_end;
+
     if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	cout << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk" << endl;
     if (ini_params.throw_exception_on_buffer_drop && (num_assembled_chunks_dropped > 0))
@@ -655,6 +666,12 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
     }
 
     pthread_mutex_unlock(&this->lock);
+
+    if (chunk) {
+        assert(chunk->fpga_end > this->max_fpga_retrieved);
+        this->max_fpga_retrieved = chunk->fpga_end;
+    }
+
     return chunk;
 }
 

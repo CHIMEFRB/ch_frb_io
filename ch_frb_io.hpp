@@ -417,6 +417,9 @@ public:
     };
 
     const initializer ini_params;
+
+    // The largest FPGA count in a received packet.
+    std::atomic<uint64_t> packet_max_fpga_seen;
     
     // It's convenient to initialize intensity_network_streams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns network and assembler threads,
@@ -463,6 +466,16 @@ public:
     // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
 
+    // Returns the first fpgacount of the first chunk sent downstream by
+    // the given beam id.
+    uint64_t get_first_fpga_count(int beam);
+
+    // Returns the last FPGA count processed by each of the assembler,
+    // (in the same order as the "beam_ids" array), flushed downstream,
+    // and retrieved by downstream callers.
+    void get_max_fpga_count_seen(std::vector<uint64_t> &flushed,
+                                 std::vector<uint64_t> &retrieved);
+    
     // If period = 0, returns the packet rate with timestamp closest
     // to *start*.  If *start* is zero or negative, it is interpreted
     // as seconds relative to now; otherwise as gettimeofday()
@@ -600,6 +613,7 @@ protected:
     void _open_socket();
     void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
+    void _update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts);
 
     void network_thread_main();
     void assembler_thread_main();
@@ -688,9 +702,8 @@ public:
     const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
     const uint64_t ichunk = 0;
-
     // "ctime" in nanoseconds of FGPAcount zero
-    uint64_t frame0_nano = 0;
+    const uint64_t frame0_nano = 0;
 
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
@@ -700,10 +713,6 @@ public:
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-
-    // False on initialization.
-    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
-    std::atomic<bool> has_rfi_mask;
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
@@ -768,6 +777,12 @@ public:
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
     uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (nrfifreq x constants::nt_per_assembled_chunk / 8 bits)
+
+    // False on initialization.
+    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
+    std::atomic<bool> has_rfi_mask;
+
+    std::atomic<int> packets_received;
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)

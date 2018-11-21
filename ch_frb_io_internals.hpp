@@ -247,6 +247,14 @@ struct udp_packet_ringbuf : noncopyable {
 class assembled_chunk_ringbuf : noncopyable,
                                 public std::enable_shared_from_this<assembled_chunk_ringbuf> {
 public:
+    // When an assembled_chunk is put in the downstream ringbuf
+    std::atomic<uint64_t> max_fpga_flushed;
+    // When an assembled_chunk is retrieved from the downstream ringbuf
+    // by, eg, rf_pipelines::chime_network_stream
+    std::atomic<uint64_t> max_fpga_retrieved;
+    // The fpgacount of the first chunk produced by this stream
+    std::atomic<uint64_t> first_fpgacount;
+    
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     ~assembled_chunk_ringbuf();
