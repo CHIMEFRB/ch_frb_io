@@ -278,7 +278,12 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 
 	if (ini_params.nt_align > 0) {
 	    uint64_t chunk_align = ini_params.nt_align / constants::nt_per_assembled_chunk;
+
+            uint64_t first_ichunk_before = first_ichunk;
+
 	    first_ichunk = ((first_ichunk + chunk_align - 1) / chunk_align) * chunk_align;
+            cout << "first packet: packet_t0 " << packet_t0 << ", packet_ichunk " << packet_ichunk
+                  << ", first_ichunk (before) " << first_ichunk_before << ", chunk_align " << chunk_align << ", first_ichunk " << first_ichunk << endl;
 	}
 	
 	this->active_chunk0 = this->_make_assembled_chunk(first_ichunk, 1);
