@@ -14,6 +14,7 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     max_fpga_flushed(0),
     max_fpga_retrieved(0),
     first_fpgacount(0),
+    first_packet_received(false),
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),

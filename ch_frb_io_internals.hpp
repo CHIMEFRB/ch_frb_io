@@ -254,7 +254,10 @@ public:
     std::atomic<uint64_t> max_fpga_retrieved;
     // The fpgacount of the first chunk produced by this stream
     std::atomic<uint64_t> first_fpgacount;
-    
+
+    // Set to 'true' in the first call to put_unassembled_packet().
+    std::atomic<bool> first_packet_received;
+
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     ~assembled_chunk_ringbuf();
@@ -346,9 +349,6 @@ protected:
     uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
     
     output_device_pool output_devices;
-
-    // Set to 'true' in the first call to put_unassembled_packet().
-    bool first_packet_received = false;
 
     // Helper function called in assembler thread, to add a new assembled_chunk to the ring buffer.
     // Resets 'chunk' to a null pointer.
