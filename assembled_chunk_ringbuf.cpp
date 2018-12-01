@@ -95,8 +95,15 @@ void assembled_chunk_ringbuf::print_state()
 
 shared_ptr<assembled_chunk>
 assembled_chunk_ringbuf::find_assembled_chunk(uint64_t fpga_counts, bool top_level_only)
-{                                              
+{
     pthread_mutex_lock(&this->lock);
+
+    // Return an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // (If anything else goes wrong, an exception will be thrown.)
+    if (this->doneflag && (fpga_counts >= this->final_fpga)) {
+	pthread_mutex_unlock(&this->lock);
+	return shared_ptr<assembled_chunk> ();
+    }
     
     // Scan telescoping ring buffer
     int start_level = (top_level_only ? 0 : num_downsampling_levels-1);
@@ -641,16 +648,18 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
 }
 
 
+// Called by the assembler thread, when it exits.
 void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 {
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
-    if (active_chunk0)
-        this->_put_assembled_chunk(active_chunk0, event_counts);
+    // Local variable (will shortly assign to this->final_fpga, after acquiring lock).
+    uint64_t loc_final_fpga = (active_chunk0->ichunk + 2) * uint64_t(constants::nt_per_assembled_chunk * active_chunk0->fpga_counts_per_sample);
 
-    if (active_chunk1)
-        this->_put_assembled_chunk(active_chunk1, event_counts);
+    // After these calls, 'active_chunk0' and 'active_chunk1' will be reset to null pointers.
+    this->_put_assembled_chunk(active_chunk0, event_counts);
+    this->_put_assembled_chunk(active_chunk1, event_counts);
 
     pthread_mutex_lock(&this->lock);
 
@@ -662,7 +671,10 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
     // Wake up processing thread, if it is waiting for data
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 
+    // With lock held
     this->doneflag = true;
+    this->final_fpga = loc_final_fpga;
+    
     pthread_mutex_unlock(&this->lock);
 }
 

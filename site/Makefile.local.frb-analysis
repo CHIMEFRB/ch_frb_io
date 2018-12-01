@@ -1,13 +1,13 @@
-# Makefile.local for frb1.physics.mcgill.ca
+# Makefile.local for frb-analysis (the CHIMEFRB compute node at DRAO)
 
 # Directory where C++ libraries will be installed
-LIBDIR ?= $(HOME)/lib
+LIBDIR=$(HOME)/lib
 
 # Directory where C++ header files will be installed
-INCDIR ?= $(HOME)/include
+INCDIR=$(HOME)/include
 
 # Directory where executables will be installed
-BINDIR ?= $(HOME)/bin
+BINDIR=$(HOME)/bin
 
 #
 # C++ command line
@@ -19,12 +19,12 @@ BINDIR ?= $(HOME)/bin
 
 DEBUG ?= no
 ifeq ($(DEBUG),no)
-  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I.
+  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I. -I$(INCDIR)
 else
-  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O0 -g -ffast-math -funroll-loops -I.
+  CPP=g++ -std=c++11 -pthread -fPIC -march=native -Wall -O0 -g -ffast-math -funroll-loops -I. -I$(INCDIR)
 endif
 
 CPP_LFLAGS=-L. -L$(LIBDIR)
 
-CPP += $(shell pkg-config --cflags jsoncpp)
 CPP_LFLAGS += $(shell pkg-config --libs jsoncpp)
+CPP += $(shell pkg-config --cflags jsoncpp)

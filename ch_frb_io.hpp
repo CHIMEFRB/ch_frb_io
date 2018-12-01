@@ -332,8 +332,10 @@ public:
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
 
+	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
         std::string frame0_url = "";
-        
+        int frame0_timeout = 3000;
+
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
@@ -450,7 +452,8 @@ public:
 
     // Searches the telescoping ring buffer for the given beam and fpgacounts start.
     // If 'toplevel' is true, then only the top level of the ring buffer is searched.
-    // If no chunk is found, then an exception will be thrown (i.e. empty pointer is never returned).
+    // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
+    // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
 
     // If period = 0, returns the packet rate with timestamp closest
@@ -526,7 +529,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
-    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero.
+    // Initialized by assembler thread when first packet is received, constant thereafter.
+    uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
@@ -601,8 +605,9 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
-
-    bool _fetch_frame0();
+    // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received.
+    // NOTE that one must call curl_global_init() before, and curl_global_cleanup() after; in chime-frb-l1 we do this in the top-level main() method.
+    void _fetch_frame0();
 };
 
 // struct ch_chunk_initializer{
@@ -753,6 +758,10 @@ public:
     const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
 
+    // False on initialization.
+    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
+    std::atomic<bool> has_rfi_mask;
+
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
     assembled_chunk(const initializer &ini_params);
@@ -808,10 +817,6 @@ public:
     void randomize(std::mt19937 &rng);   // also randomizes rfi_mask (if it exists)
 
     static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
-    
-    // False on initialization.
-    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
-    bool has_rfi_mask = false;
 
     // override the ch_chunk is_ready method to replicate has_rfi_mask behavior
     virtual bool is_ready() override

@@ -1006,10 +1006,10 @@ CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
     return realsize;
 }
 
-bool intensity_network_stream::_fetch_frame0() {
+void intensity_network_stream::_fetch_frame0() {
     if (ini_params.frame0_url.size() == 0) {
         cout << "No 'frame0_url' set; skipping." << endl;
-        return false;
+        return;
     }
     CURL *curl_handle;
     CURLcode res;
@@ -1019,49 +1019,38 @@ bool intensity_network_stream::_fetch_frame0() {
     // specify URL to get
     curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
     // set timeout
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, 3000);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
     // set received-data callback
-    //frame0_txt = "";
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
                      CurlWriteMemoryCallback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
     // curl!
     cout << "Fetching frame0_time from " << ini_params.frame0_url << endl;
     res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK) {
-        cout << "Fetch_frame0 failed: " << string(curl_easy_strerror(res)) << endl;
-        return false;
-    }
+    if (res != CURLE_OK)
+        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
     curl_easy_cleanup(curl_handle);
 
     string frame0_txt = holder.thestring;
-    
     cout << "Received frame0 text: " << frame0_txt << endl;
     Json::Reader frame0_reader;
     Json::Value frame0_json;
-    if (!frame0_reader.parse(frame0_txt, frame0_json)) {
-        cout << "ch-frb-io: failed to parse 'frame0' string: '"
-             << frame0_txt << "'" << endl;
-        return false;
-    }
+    if (!frame0_reader.parse(frame0_txt, frame0_json))
+        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
+
     cout << "Parsed: " << frame0_json << endl;
-    if (!frame0_json.isObject()) {
-        cout << "ch-frb-io: 'frame0' was not a JSON 'Object' as expected" << endl;
-        return false;
-    }
+    if (!frame0_json.isObject())
+        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
+
     string key = "frame0_nano";
-    if (!frame0_json.isMember(key)) {
-        cout << "ch-frb-io: 'frame0' did not contain key '" << key << "'" << endl;
-        return false;
-    }
+    if (!frame0_json.isMember(key))
+        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
+
     const Json::Value v = frame0_json[key];
-    if (!v.isIntegral()) {
-        cout << "ch-frb-io: expected 'frame0[frame0_nano]' to be integral." << endl;
-        return false;
-    }
+    if (!v.isIntegral())
+        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
     frame0_nano = v.asUInt64();
     cout << "Found frame0_nano: " << frame0_nano << endl;
-    return true;
 }
 
 void intensity_network_stream::_assembler_thread_body()
@@ -1072,6 +1061,7 @@ void intensity_network_stream::_assembler_thread_body()
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     int nbeams = this->ini_params.beam_ids.size();
+    bool first_packet_received = false;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
 
@@ -1079,32 +1069,6 @@ void intensity_network_stream::_assembler_thread_body()
 
     struct timeval tva, tvb;
     tva = xgettimeofday();
-
-    // After we receive our first packet, we will go fetch the frame0_ctime
-    // via curl.  This is usually fast, so we'll do it in blocking mode.
-    if (this->ini_params.frame0_url.size()) {
-        while (1) {
-            // Wait for first packet
-            cout << "Waiting for packets..." << endl;
-            if (!unassembled_ringbuf->get_packet_list(packet_list))
-                continue;
-            break;
-        }
-        cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
-
-        if (!_fetch_frame0()) {
-            // FIXME --- fetch failed.... now what?!
-            throw runtime_error("Failed to retrieve frame0_ctime");
-        }
-
-        for (unsigned int i = 0; i < assemblers.size(); i++) {
-            if (assemblers[i])
-                assemblers[i]->set_frame0(frame0_nano);
-        }
-        
-        // Just discard packet_list ?
-        cout << "Discarding " << packet_list->curr_npackets << " packets" << endl;
-    }
     
     // Main packet loop
 
@@ -1114,6 +1078,23 @@ void intensity_network_stream::_assembler_thread_body()
 
         if (!unassembled_ringbuf->get_packet_list(packet_list))
             break;
+
+	if (!first_packet_received && this->ini_params.frame0_url.size()) {
+	    // After we receive our first packet, we will go fetch the frame0_ctime
+	    // via curl.  This is usually fast, so we'll do it in blocking mode.
+
+	    cout << "Retrieving frame0_ctime from " << this->ini_params.frame0_url << endl;
+
+	    _fetch_frame0();
+            // raises runtime_error on failure
+
+	    for (unsigned int i = 0; i < assemblers.size(); i++) {
+		if (assemblers[i])
+		    assemblers[i]->set_frame0(frame0_nano);
+	    }
+	}
+
+	first_packet_received = true;
 
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
