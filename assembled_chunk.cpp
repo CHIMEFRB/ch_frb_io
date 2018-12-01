@@ -94,22 +94,17 @@ struct memory_slab_layout {
 
 
 assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params) :
-    beam_id(ini_params.beam_id), 
+    ch_chunk(ini_params),
     nupfreq(ini_params.nupfreq),
     nrfifreq(ini_params.nrfifreq),
     nt_per_packet(ini_params.nt_per_packet),
-    fpga_counts_per_sample(ini_params.fpga_counts_per_sample), 
-    binning(ini_params.binning),
     stream_id(ini_params.stream_id),
-    ichunk(ini_params.ichunk),
     frame0_nano(ini_params.frame0_nano),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
     nrfimaskbytes(nrfifreq * constants::nt_per_assembled_chunk / 8),
     isample(ichunk * constants::nt_per_assembled_chunk),
-    fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
-    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
     has_rfi_mask(false)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
@@ -176,11 +171,6 @@ assembled_chunk::~assembled_chunk()
 // Helper function for destructors.
 void assembled_chunk::_deallocate()
 {
-    if (memory_pool) {
-	memory_pool->put_slab(memory_slab);
-	memory_pool = shared_ptr<memory_slab_pool> ();
-    }
-    
     // Shouldn't be necessary, but guards against accidental pointer reuse after free().
     this->scales = nullptr;
     this->offsets = nullptr;

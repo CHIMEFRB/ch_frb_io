@@ -491,7 +491,7 @@ public:
     // Throws an exception if anything goes wrong!  When called from an RPC thread, caller will want to
     // wrap in try..except, and use exception::what() to get the error message.
 
-    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_rfi);
+    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_wait);
 
     void get_streaming_status(std::string &filename_pattern,
                               std::vector<int> &beam_ids,
@@ -605,6 +605,90 @@ protected:
     bool _fetch_frame0();
 };
 
+// struct ch_chunk_initializer{
+//     int beam_id = 0;
+//     int fpga_counts_per_sample = 0;
+//     uint64_t ichunk = 0;
+
+//     // "ctime" in nanoseconds of FGPAcount zero
+//     uint64_t frame0_nano = 0;
+
+//     // If a memory slab has been preallocated from a pool, these pointers should be set.
+//     // Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
+//     std::shared_ptr<memory_slab_pool> pool;
+//         mutable memory_slab_t slab;
+// };
+
+class ch_chunk : noncopyable {
+public:
+    // typedef ch_chunk_initializer initializer;
+    struct initializer{
+        int beam_id = 0;
+        int fpga_counts_per_sample = 0;
+        uint64_t ichunk = 0;
+
+        int binning = 1;
+        // "ctime" in nanoseconds of FGPAcount zero
+        uint64_t frame0_nano = 0;
+
+        // If a memory slab has been preallocated from a pool, these pointers should be set.
+        // Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
+        std::shared_ptr<memory_slab_pool> pool;
+            mutable memory_slab_t slab;
+    };
+
+    const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
+    const int fpga_counts_per_sample = 0;    // no binning factor applied here
+    const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+
+
+    const uint64_t ichunk = 0;
+    const int beam_id = 0;
+
+    ch_chunk(const initializer &ini_params) :
+                ichunk(ini_params.ichunk),
+                binning(ini_params.binning),
+                beam_id(ini_params.beam_id),
+                fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
+                fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
+                fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample) {};
+
+    ~ch_chunk();
+
+    virtual void write_msgpack_file(const std::string &filename, bool compress,
+                            uint8_t* buffer=NULL) = 0;
+    virtual bool is_ready(){return true;};
+
+    // Used in the write path, to keep track of writes to disk.
+    std::mutex filename_mutex;
+    std::unordered_set<std::string> filename_set;
+    std::unordered_map<std::string, std::string> filename_map;  // hash output_device_name -> filename
+
+protected:
+    std::shared_ptr<memory_slab_pool> memory_pool;
+    memory_slab_t memory_slab;
+};
+
+// -------------------------------------------------------------------------------------------------
+// 
+// slow_pulsar_chunk
+//
+// This chunk will house slow pulsar "packetized" data
+// for now, we really only assign the binary_data field.
+// we will allocate via 
+
+class slow_pulsar_chunk : public ch_chunk {
+public:
+    static std::shared_ptr<slow_pulsar_chunk> make_slow_pulsar_chunk(ch_chunk::initializer& ini_params);
+    slow_pulsar_chunk(const ch_chunk::initializer& ini_params) : 
+                        ch_chunk(ini_params) {};
+    ~slow_pulsar_chunk() {};
+
+    uint8_t* data;
+    virtual void write_msgpack_file(const std::string &filename, bool compress,
+                            uint8_t* buffer=NULL) override;
+};
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -643,39 +727,21 @@ protected:
 // ring buffer).  Note that consecutive chunks src1, src2 with the same binning will satisfy
 // (src2->ichunk == src1->ichunk + binning).
 
-
-class assembled_chunk : noncopyable {
+class assembled_chunk : public ch_chunk {
 public:
-    struct initializer {
-	int beam_id = 0;
-	int nupfreq = 0;
+    struct initializer : ch_chunk::initializer {
+        int nupfreq = 0;
         int nrfifreq = 0;    // number of frequencies in downsampled RFI chain processing
-	int nt_per_packet = 0;
-	int fpga_counts_per_sample = 0;
-	int binning = 1;
-	int stream_id = 0;   // only used in assembled_chunk::format_filename().
-	uint64_t ichunk = 0;
-	bool force_reference = false;
-	bool force_fast = false;
-
-        // "ctime" in nanoseconds of FGPAcount zero
-        uint64_t frame0_nano = 0;
-
-	// If a memory slab has been preallocated from a pool, these pointers should be set.
-	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
-	std::shared_ptr<memory_slab_pool> pool;
-        mutable memory_slab_t slab;
+        int nt_per_packet = 0;
+        int stream_id = 0;   // only used in assembled_chunk::format_filename().
+        bool force_reference = false;
+        bool force_fast = false;
     };
-
     // Parameters specified at construction.
-    const int beam_id = 0;
     const int nupfreq = 0;
     const int nrfifreq = 0;
     const int nt_per_packet = 0;
-    const int fpga_counts_per_sample = 0;    // no binning factor applied here
-    const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int stream_id = 0;
-    const uint64_t ichunk = 0;
 
     // "ctime" in nanoseconds of FGPAcount zero
     uint64_t frame0_nano = 0;
@@ -686,12 +752,6 @@ public:
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
     const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
-    const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-    const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-
-    // False on initialization.
-    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
-    bool has_rfi_mask = false;
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().
@@ -721,13 +781,13 @@ public:
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);   // downsamples data and RFI mask
 
     // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.
-    static std::unique_ptr<assembled_chunk> make(const initializer &ini_params);
+    static std::unique_ptr<assembled_chunk> make(const assembled_chunk::initializer &ini_params);
     static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
 
     // Note: the hdf5 file format has been phased out now..
     void write_hdf5_file(const std::string &filename);
-    void write_msgpack_file(const std::string &filename, bool compress,
-                            uint8_t* buffer=NULL);
+    virtual void write_msgpack_file(const std::string &filename, bool compress,
+                            uint8_t* buffer=NULL) override;
 
     // How big can the bitshuffle-compressed data for a chunk of this size become?
     size_t max_compressed_size();
@@ -748,6 +808,16 @@ public:
     void randomize(std::mt19937 &rng);   // also randomizes rfi_mask (if it exists)
 
     static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
+    
+    // False on initialization.
+    // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
+    bool has_rfi_mask = false;
+
+    // override the ch_chunk is_ready method to replicate has_rfi_mask behavior
+    virtual bool is_ready() override
+    {
+        return this->has_rfi_mask;
+    }
 
     // I wanted to make the following fields protected, but msgpack doesn't like it...
 
@@ -762,21 +832,12 @@ public:
     float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
     int *ds_mask = nullptr;    // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
 
-    // Used in the write path, to keep track of writes to disk.
-    std::mutex filename_mutex;
-    std::unordered_set<std::string> filename_set;
-    std::unordered_map<std::string, std::string> filename_map;  // hash output_device_name -> filename
-
 protected:
+    void _deallocate();
+    
     // The array members above (scales, ..., ds_mask) are packed into a single contiguous memory slab.
-    std::shared_ptr<memory_slab_pool> memory_pool;
-    memory_slab_t memory_slab;
 
     void _check_downsample(const assembled_chunk *src1, const assembled_chunk *src2);
-
-    // Note: destructors must call _deallocate()!  
-    // Otherwise the memory_slab can't be returned to the pool.
-    void _deallocate();
 };
 
 
@@ -864,10 +925,10 @@ protected:
 // from the i/o thread!
 
 struct write_chunk_request {
-    std::shared_ptr<assembled_chunk> chunk;
+    std::shared_ptr<ch_chunk> chunk;
     std::string filename;
     int priority = 0;
-    bool need_rfi_mask = false;
+    bool need_wait = false;
 
     // Called when the status of this chunk has changed --
     // due to an error, successful completion, or, eg, RFI mask added.
@@ -935,7 +996,7 @@ public:
 
     // Called (by RFI thread) to notify that the given chunk has had its
     // RFI mask filled in.
-    void filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk);
+    void notify_ready(const std::shared_ptr<ch_chunk> &chunk);
 
 protected:
     std::thread output_thread;
@@ -950,9 +1011,9 @@ protected:
 			std::vector<std::shared_ptr<write_chunk_request>>,
 			write_chunk_request::_less_than> _write_reqs;
 
-    // Write requests where need_rfi_mask is set and the rfi mask isn't
+    // Write requests where need_wait is set and the rfi mask isn't
     // yet available.
-    std::vector<std::shared_ptr<write_chunk_request> > _awaiting_rfi;
+    std::vector<std::shared_ptr<write_chunk_request> > _awaiting;
     
     // The state model and request queue are protected by this lock and condition variable.
     std::mutex _lock;

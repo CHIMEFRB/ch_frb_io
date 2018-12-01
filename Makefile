@@ -31,8 +31,10 @@ endif
 
 LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl
 
-OFILES = assembled_chunk.o \
+OFILES = ch_chunk.o \
+	assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
+	slow_pulsar_chunk.o \
 	avx2_kernels.o \
 	hdf5.o \
 	intensity_hdf5_file.o \

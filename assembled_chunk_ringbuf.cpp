@@ -486,7 +486,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	shared_ptr<streaming_write_chunk_request> wreq = make_shared<streaming_write_chunk_request> ();
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
 	wreq->priority = loc_stream_priority;
-        wreq->need_rfi_mask = loc_stream_rfi_mask;
+        wreq->need_wait = loc_stream_rfi_mask;
 	// DEBUG
 	if (wreq->priority == -1000)
             wreq->udelay = 1000000;
