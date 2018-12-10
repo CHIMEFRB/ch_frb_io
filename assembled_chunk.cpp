@@ -105,7 +105,14 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
     nrfimaskbytes(nrfifreq * constants::nt_per_assembled_chunk / 8),
     isample(ichunk * constants::nt_per_assembled_chunk),
+<<<<<<< HEAD
     has_rfi_mask(false)
+=======
+    fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
+    fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
+    has_rfi_mask(false),
+    packets_received(0)
+>>>>>>> master
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad 'beam_id' argument");
@@ -343,6 +350,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 		   nt_per_packet);
 	}
     }
+    this->packets_received++;
 }
 
 
