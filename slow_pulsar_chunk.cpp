@@ -21,9 +21,17 @@ std::shared_ptr<slow_pulsar_chunk> slow_pulsar_chunk::make_slow_pulsar_chunk(ch_
 	return std::shared_ptr<slow_pulsar_chunk>(new slow_pulsar_chunk(ini_params));
 }
 
+void slow_pulsar_chunk::commit_chunk(const char* ar, const ssize_t n)
+{
+	std::memcpy((void*) &(this->memory_slab[0]), (void*) ar, n);
+	this->islab++;
+}
+
 void slow_pulsar_chunk::write_msgpack_file(const std::string &filename, bool compress,
                             uint8_t* buffer)
 {
-	//no-op
+	// no-op...
+	// msgpack::fbuffer fb(f);
 }
+
 }

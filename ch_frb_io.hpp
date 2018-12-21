@@ -677,8 +677,8 @@ public:
                 binning(ini_params.binning),
                 beam_id(ini_params.beam_id),
                 fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
-                fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
-                fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample) {};
+                fpga_begin(ini_params.ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample),
+                fpga_end((ini_params.ichunk+ini_params.binning) * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample) {};
 
     ~ch_chunk();
 
@@ -711,7 +711,9 @@ public:
                         ch_chunk(ini_params) {};
     ~slow_pulsar_chunk() {};
 
-    uint8_t* data;
+    void commit_chunk(const char* ar, const ssize_t n);
+
+    ssize_t islab = 0;
     virtual void write_msgpack_file(const std::string &filename, bool compress,
                             uint8_t* buffer=NULL) override;
 };
@@ -768,11 +770,7 @@ public:
     const int nrfifreq = 0;
     const int nt_per_packet = 0;
     const int stream_id = 0;
-<<<<<<< HEAD
-
-=======
-    const uint64_t ichunk = 0;
->>>>>>> master
+    
     // "ctime" in nanoseconds of FGPAcount zero
     const uint64_t frame0_nano = 0;
 
