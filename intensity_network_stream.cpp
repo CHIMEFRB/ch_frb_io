@@ -514,6 +514,7 @@ intensity_network_stream::get_statistics() {
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
+    m["frame0_nano"]            = frame0_nano;
     m["fpga_count"]             = 0;    // XXX FIXME XXX
     m["network_thread_waiting_usec"] = network_thread_waiting_usec;
     m["network_thread_working_usec"] = network_thread_working_usec;
