@@ -652,8 +652,11 @@ uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
     // Which of my assemblers (if any) is handling the requested beam?
     int nbeams = this->ini_params.beam_ids.size();
     for (int i=0; i<nbeams; i++)
-        if (this->ini_params.beam_ids[i] == beam)
+        if (this->ini_params.beam_ids[i] == beam) {
+            if (!this->assemblers[i]->first_packet_received)
+                throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
 	    return this->assemblers[i]->first_fpgacount;
+        }
     throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
 }
 

@@ -468,6 +468,7 @@ public:
 
     // Returns the first fpgacount of the first chunk sent downstream by
     // the given beam id.
+    // Raises runtime_error if the first packet has not been received yet.
     uint64_t get_first_fpga_count(int beam);
 
     // Returns the last FPGA count processed by each of the assembler,
