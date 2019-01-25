@@ -1251,13 +1251,13 @@ void intensity_network_stream::_fetch_frame0() {
     curl_easy_cleanup(curl_handle);
 
     string frame0_txt = holder.thestring;
-    chlog("Received frame0 text: " << frame0_txt);
+    //chlog("Received frame0 text: " << frame0_txt);
     Json::Reader frame0_reader;
     Json::Value frame0_json;
     if (!frame0_reader.parse(frame0_txt, frame0_json))
         throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
 
-    chlog("Parsed: " << frame0_json);
+    //chlog("Parsed: " << frame0_json);
     if (!frame0_json.isObject())
         throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
 
