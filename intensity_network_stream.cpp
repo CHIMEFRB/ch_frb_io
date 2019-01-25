@@ -717,6 +717,8 @@ void intensity_network_stream::network_thread_main()
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
 
+    chime_log_set_thread_name("Network-" + std::to_string(ini_params.stream_id));
+
     try {
 	_network_thread_body();   // calls pin_thread_to_cores()
     } catch (exception &e) {
@@ -1004,6 +1006,8 @@ void intensity_network_stream::assembler_thread_main() {
 
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
+
+    chime_log_set_thread_name("Assembler-" + std::to_string(ini_params.stream_id));
 
     try {
 	_assembler_thread_body();  // calls pin_thread_to_cores()
