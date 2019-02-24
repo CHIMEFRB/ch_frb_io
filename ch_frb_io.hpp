@@ -468,6 +468,7 @@ public:
 
     // Returns the first fpgacount of the first chunk sent downstream by
     // the given beam id.
+    // Raises runtime_error if the first packet has not been received yet.
     uint64_t get_first_fpga_count(int beam);
 
     // Returns the last FPGA count processed by each of the assembler,
@@ -549,8 +550,8 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
-    // Initialized by assembler thread when first packet is received, constant thereafter.
-    uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
+    // Initialized to zero by constructor, set to nonzero value by assembler thread when first packet is received.
+    std::atomic<uint64_t> frame0_nano;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
