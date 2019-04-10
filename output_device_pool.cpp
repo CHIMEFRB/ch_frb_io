@@ -34,7 +34,7 @@ output_device_pool::output_device_pool(const vector<shared_ptr<output_device>> &
 }
 
 
-bool output_device_pool::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
+bool output_device_pool::enqueue_write_request(shared_ptr<write_chunk_request> req)
 {
  //    if (req->need_wait && (req->chunk->nrfifreq <= 0)) {
 

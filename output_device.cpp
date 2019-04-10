@@ -115,7 +115,7 @@ void output_device::io_thread_main()
 
 
 // Called by an "external" thread (assembler thread or RPC thread).
-bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
+bool output_device::enqueue_write_request(shared_ptr<write_chunk_request> req)
 {
     if (!req)
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req is null");

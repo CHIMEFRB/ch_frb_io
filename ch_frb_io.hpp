@@ -645,40 +645,37 @@ protected:
 //         mutable memory_slab_t slab;
 // };
 
+class ch_chunk_initializer{
+public:
+    int beam_id = 0;
+    int fpga_counts_per_sample = 0;
+    uint64_t ichunk = 0;
+
+    // "ctime" in nanoseconds of FGPAcount zero
+    uint64_t frame0_nano = 0;
+
+    // If a memory slab has been preallocated from a pool, these pointers should be set.
+    // Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
+    std::shared_ptr<memory_slab_pool> pool;
+        mutable memory_slab_t slab;
+
+    ch_chunk_initializer(std::shared_ptr<memory_slab_pool> pool = nullptr) :
+                            pool(pool) {};
+};
+
+
 class ch_chunk : noncopyable {
 public:
-    // typedef ch_chunk_initializer initializer;
-    struct initializer{
-        int beam_id = 0;
-        int fpga_counts_per_sample = 0;
-        uint64_t ichunk = 0;
-
-        int binning = 1;
-        // "ctime" in nanoseconds of FGPAcount zero
-        uint64_t frame0_nano = 0;
-
-        // If a memory slab has been preallocated from a pool, these pointers should be set.
-        // Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
-        std::shared_ptr<memory_slab_pool> pool;
-            mutable memory_slab_t slab;
-    };
-
-    const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
     const int fpga_counts_per_sample = 0;    // no binning factor applied here
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-    const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
-
+    uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    // "ctime" in nanoseconds of FGPAcount zero
+    const uint64_t frame0_nano = 0;
 
     const uint64_t ichunk = 0;
     const int beam_id = 0;
 
-    ch_chunk(const initializer &ini_params) :
-                ichunk(ini_params.ichunk),
-                binning(ini_params.binning),
-                beam_id(ini_params.beam_id),
-                fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
-                fpga_begin(ini_params.ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample),
-                fpga_end((ini_params.ichunk+ini_params.binning) * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample) {};
+    ch_chunk(const ch_chunk_initializer &ini_params);
 
     ~ch_chunk();
 
@@ -693,6 +690,7 @@ public:
 
 protected:
     std::shared_ptr<memory_slab_pool> memory_pool;
+    std::mutex slab_mutex;
     memory_slab_t memory_slab;
 };
 
@@ -704,16 +702,43 @@ protected:
 // for now, we really only assign the binary_data field.
 // we will allocate via 
 
+ssize_t byte_ceil(const ssize_t bits, const ssize_t nbits=8);
+
+struct sp_header{
+    uint64_t ichunk = 0;
+    // nt out
+    int nt = -1;
+    // time downsampling factor
+    int ntds = 1;
+
+    // nfreq out
+    int nfreq = -1;
+    // frequency downsampling factor
+    int nfds = 1;
+    int nbits = 4;
+
+    const ssize_t get_header_size(){
+        return 5 * sizeof(int) + sizeof(uint64_t);
+    }
+    // TODO add quantization logic/metedata
+    // presumably this will be some finite boundary set per frequency channel
+    // where the number of levels is determined by nbits
+    const ssize_t get_data_size(){
+        return 2 * byte_ceil(nbits * this->nfreq * this->nt);
+    }
+};
+
 class slow_pulsar_chunk : public ch_chunk {
 public:
-    static std::shared_ptr<slow_pulsar_chunk> make_slow_pulsar_chunk(ch_chunk::initializer& ini_params);
-    slow_pulsar_chunk(const ch_chunk::initializer& ini_params) : 
-                        ch_chunk(ini_params) {};
+    static std::shared_ptr<slow_pulsar_chunk> make_slow_pulsar_chunk(std::shared_ptr<ch_chunk_initializer> ini_params);
+    
+    slow_pulsar_chunk(const std::shared_ptr<ch_chunk_initializer> ini_params);
     ~slow_pulsar_chunk() {};
 
-    void commit_chunk(const char* ar, const ssize_t n);
+    bool commit_chunk(sp_header& header, std::shared_ptr<std::vector<char>> dat);
 
     ssize_t islab = 0;
+    ssize_t ibyte_chunk = 0;
     virtual void write_msgpack_file(const std::string &filename, bool compress,
                             uint8_t* buffer=NULL) override;
 };
@@ -757,22 +782,23 @@ public:
 
 class assembled_chunk : public ch_chunk {
 public:
-    struct initializer : ch_chunk::initializer {
+    class initializer : public ch_chunk_initializer {
+    public:
+        int binning = 1;
         int nupfreq = 0;
         int nrfifreq = 0;    // number of frequencies in downsampled RFI chain processing
         int nt_per_packet = 0;
         int stream_id = 0;   // only used in assembled_chunk::format_filename().
         bool force_reference = false;
         bool force_fast = false;
+        initializer() : ch_chunk_initializer() {};
     };
     // Parameters specified at construction.
     const int nupfreq = 0;
     const int nrfifreq = 0;
     const int nt_per_packet = 0;
     const int stream_id = 0;
-    
-    // "ctime" in nanoseconds of FGPAcount zero
-    const uint64_t frame0_nano = 0;
+    const int binning = 0;                   // either 1, 2, 4, 8... depending on level in telescoping ring buffer
 
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
@@ -1012,7 +1038,7 @@ public:
 
     // Can be called by either the assembler thread, or an RPC thread.
     // Returns 'false' if request could not be queued (because end_stream() was called)
-    bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    bool enqueue_write_request(std::shared_ptr<write_chunk_request> req);
 
     // Counts the number of queued write request chunks
     int count_queued_write_requests();
@@ -1074,7 +1100,7 @@ public:
 
     // Sends the write request to the appropriate output_device (based on filename).
     // Returns 'false' if request could not be queued.
-    bool enqueue_write_request(const std::shared_ptr<write_chunk_request> &req);
+    bool enqueue_write_request(std::shared_ptr<write_chunk_request> req);
     
     // Loops over output_devices, and calls either end_stream() or join_thread().
     void end_streams(bool wait);

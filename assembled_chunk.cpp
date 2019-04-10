@@ -95,11 +95,11 @@ struct memory_slab_layout {
 
 assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params) :
     ch_chunk(ini_params),
+    binning(ini_params.binning),
     nupfreq(ini_params.nupfreq),
     nrfifreq(ini_params.nrfifreq),
     nt_per_packet(ini_params.nt_per_packet),
     stream_id(ini_params.stream_id),
-    frame0_nano(ini_params.frame0_nano),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
@@ -108,6 +108,9 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     has_rfi_mask(false),
     packets_received(0)
 {
+    //update ch_chunk default fpga_end that assumes binning=1
+    fpga_end = (ichunk + binning) * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
+
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad 'beam_id' argument");
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
@@ -118,8 +121,6 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
 	throw runtime_error("assembled_chunk constructor: bad 'nrfifreq' argument");
     if ((nt_per_packet <= 0) || !is_power_of_two(nt_per_packet) || (nt_per_packet > constants::nt_per_assembled_chunk))
 	throw runtime_error("assembled_chunk constructor: bad 'nt_per_packet' argument");
-    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("assembled_chunk constructor: bad 'fpga_counts_per_sample' argument");
     if ((binning <= 0) || !is_power_of_two(binning) || (binning > 8))
 	throw runtime_error("assembled_chunk constructor: bad 'binning' argument");
     if ((stream_id < 0) || (stream_id > 9))
@@ -132,25 +133,25 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
 
     if (ini_params.pool) {
-	if (!ini_params.slab)
-	    throw runtime_error("assembled_chunk constructor: 'pool' is a nonempty pointer, but 'slab' is empty");
+    if (!ini_params.slab)
+        throw runtime_error("assembled_chunk constructor: 'pool' is a nonempty pointer, but 'slab' is empty");
 
-	if (ini_params.pool->nbytes_per_slab < mc.slab_size) {
-	    throw runtime_error("assembled_chunk constructor: memory_slab_pool::nbytes_per_slab (=" 
-				+ to_string(ini_params.pool->nbytes_per_slab) 
-				+ ") is less than required slab size (="
-				+ to_string(mc.slab_size) + ")");
-	}
+    if (ini_params.pool->nbytes_per_slab < mc.slab_size) {
+        throw runtime_error("assembled_chunk constructor: memory_slab_pool::nbytes_per_slab (=" 
+                + to_string(ini_params.pool->nbytes_per_slab) 
+                + ") is less than required slab size (="
+                + to_string(mc.slab_size) + ")");
+    }
 
-	this->memory_pool = ini_params.pool;
-	this->memory_slab.swap(ini_params.slab);
+    this->memory_pool = ini_params.pool;
+    this->memory_slab.swap(ini_params.slab);
     }
     else {
-	if (ini_params.slab)
-	    throw runtime_error("assembled_chunk constructor: 'pool' is an empty pointer, but 'slab' is nonempty");
+    if (ini_params.slab)
+        throw runtime_error("assembled_chunk constructor: 'pool' is an empty pointer, but 'slab' is nonempty");
 
-	uint8_t *p = aligned_alloc<uint8_t> (mc.slab_size);
-	this->memory_slab = memory_slab_t(p);
+    uint8_t *p = aligned_alloc<uint8_t> (mc.slab_size);
+    this->memory_slab = memory_slab_t(p);
     }
 
     this->data = memory_slab.get() + mc.ib_data;
