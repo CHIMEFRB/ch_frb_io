@@ -1022,6 +1022,34 @@ void intensity_network_stream::assembler_thread_main() {
     _assembler_thread_exit();
 }
 
+void intensity_network_stream::start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
+    unique_lock<mutex> ulock(forking_mutex);
+    //if (forking_packets.size() == 0) {
+    if (forking_socket == 0) {
+        forking_socket = socket(AF_INET, SOCK_DGRAM, 0);
+        if (forking_socket < 0)
+            throw runtime_error(string("ch_frb_io: couldn't create udp socket for forking: ") + strerror(errno));
+    }
+    intensity_network_stream::packetfork pf;
+    // FIXME -- check that we actually hold the requested beam!!
+    // FIXME -- check that the dest beam is valid!
+    pf.beam = beam;
+    pf.destbeam = destbeam;
+    pf.dest = dest;
+    forking_packets.push_back(pf);
+}
+
+void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
+    unique_lock<mutex> ulock(forking_mutex);
+    for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+        if ((it->beam == beam) && (it->destbeam == destbeam) &&
+            (it->dest.sin_port == dest.sin_port) &&
+            (it->dest.sin_addr.s_addr == dest.sin_addr.s_addr)) {
+            forking_packets.erase(it);
+            it--;
+        }
+}
+
 void intensity_network_stream::_assembler_thread_body()
 {
     pin_thread_to_cores(ini_params.assembler_thread_cores);
@@ -1063,101 +1091,131 @@ void intensity_network_stream::_assembler_thread_body()
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
 
-	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
-            uint8_t *packet_data = packet_list->get_packet_data(ipacket);
-            int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
-	    intensity_packet packet;
+        {
+            // we hold this lock while processing the whole list...
+            // the only contention for the lock is from rare RPCs.
+            unique_lock<mutex> ulock(forking_mutex);
+        
+            for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
+                uint8_t *packet_data = packet_list->get_packet_data(ipacket);
+                int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
+                intensity_packet packet;
 
-	    if (!packet.decode(packet_data, packet_nbytes)) {
-		event_subcounts[event_type::packet_bad]++;
-		continue;
-	    }
+                if (!packet.decode(packet_data, packet_nbytes)) {
+                    event_subcounts[event_type::packet_bad]++;
+                    continue;
+                }
 
-	    bool mismatch = ((packet.nbeams != nbeams) || 
-			     (packet.nupfreq != nupfreq) || 
-			     (packet.ntsamp != nt_per_packet) || 
-			     (packet.fpga_counts_per_sample != fpga_counts_per_sample));
+                bool mismatch = ((packet.nbeams != nbeams) || 
+                                 (packet.nupfreq != nupfreq) || 
+                                 (packet.ntsamp != nt_per_packet) || 
+                                 (packet.fpga_counts_per_sample != fpga_counts_per_sample));
 
-	    if (_unlikely(mismatch)) {
-		if (ini_params.throw_exception_on_packet_mismatch) {
-		    stringstream ss;
-		    ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
-		       << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
-		       << "), expected ("
-		       << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
+                if (_unlikely(mismatch)) {
+                    if (ini_params.throw_exception_on_packet_mismatch) {
+                        stringstream ss;
+                        ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
+                           << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
+                           << "), expected ("
+                           << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
 
-		    throw runtime_error(ss.str());
-		}
+                        throw runtime_error(ss.str());
+                    }
 
-		event_subcounts[event_type::stream_mismatch]++;
-		continue;
-	    }
+                    event_subcounts[event_type::stream_mismatch]++;
+                    continue;
+                }
 
-	    // All checks passed.  Packet is declared "good" here.  
-	    //
-	    // The following checks have been performed, either in this routine or in intensity_packet::read().
-	    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
-	    //     and not large enough to lead to integer overflows
-	    //   - packet and data byte counts are correct
-	    //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
-	    //   - ntsamp is a power of two
-	    //   - fpga_counts_per_sample is > 0
-	    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
-	    //
-	    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
-	    // so it's important that they're done here!
+                // All checks passed.  Packet is declared "good" here.  
+                //
+                // The following checks have been performed, either in this routine or in intensity_packet::read().
+                //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
+                //     and not large enough to lead to integer overflows
+                //   - packet and data byte counts are correct
+                //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
+                //   - ntsamp is a power of two
+                //   - fpga_counts_per_sample is > 0
+                //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+                //
+                // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
+                // so it's important that they're done here!
 
-	    event_subcounts[event_type::packet_good]++;
+                event_subcounts[event_type::packet_good]++;
 
-            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+                this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
 
-	    int nfreq_coarse = packet.nfreq_coarse;
-	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
+                int nfreq_coarse = packet.nfreq_coarse;
+                int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
+                const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
 
-	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
-	    // length fields.  The new packet corresponds to a subset of the original packet containing
-	    // only beam index zero.  This scheme avoids the overhead of copying the packet.
+                // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
+                // length fields.  The new packet corresponds to a subset of the original packet containing
+                // only beam index zero.  This scheme avoids the overhead of copying the packet.
+
+                intensity_packet packetcopy;
+                if (this->forking_packets.size())
+                    memcpy(&packetcopy, &packet, sizeof(packet));
+            
+                packet.data_nbytes = new_data_nbytes;
+                packet.nbeams = 1;
 	    
-	    packet.data_nbytes = new_data_nbytes;
-	    packet.nbeams = 1;
-	    
-	    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-		// Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
-		// original packet containing only beam index 'ibeam'.
+                for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+                    // Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
+                    // original packet containing only beam index 'ibeam'.
 		
-		// Loop over assembler ids, to find a match for the packet_id.
-		int packet_id = packet.beam_ids[0];
-		int assembler_ix = 0;
+                    // Loop over assembler ids, to find a match for the packet_id.
+                    int packet_id = packet.beam_ids[0];
+                    int assembler_ix = 0;
 
-		for (;;) {
-		    if (assembler_ix >= nbeams) {
-			// No match found
-			event_subcounts[event_type::beam_id_mismatch]++;
-			if (ini_params.throw_exception_on_beam_id_mismatch)
-                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
-			break;
-		    }
+                    for (;;) {
+                        if (assembler_ix >= nbeams) {
+                            // No match found
+                            event_subcounts[event_type::beam_id_mismatch]++;
+                            if (ini_params.throw_exception_on_beam_id_mismatch)
+                                throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
+                            break;
+                        }
 
-		    if (assembler_beam_ids[assembler_ix] != packet_id) {
-			assembler_ix++;
-			continue;
-		    }
+                        if (assembler_beam_ids[assembler_ix] != packet_id) {
+                            assembler_ix++;
+                            continue;
+                        }
 
-		    // Match found
-		    assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
-		    break;
-		}
+                        // Match found
+                        assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
+                        break;
+                    }
 		
-		// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
-		// corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
+                    // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
+                    // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
 		
-		packet.beam_ids += 1;
-		packet.scales += nfreq_coarse;
-		packet.offsets += nfreq_coarse;
-		packet.data += new_data_nbytes;
-	    }
-	}
+                    packet.beam_ids += 1;
+                    packet.scales += nfreq_coarse;
+                    packet.offsets += nfreq_coarse;
+                    packet.data += new_data_nbytes;
+                }
+
+            
+                if (this->forking_packets.size()) {
+                    memcpy(&packet, &packetcopy, sizeof(packet));
+                
+                    for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
+                        if (it->beam == 0) {
+                            // send all (four) beams!
+                            for (int i=0; i<packet.nbeams; i++)
+                                packet.beam_ids[i] += it->destbeam;
+                            int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0, reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                            if (nsent == -1) {
+                                cout << "Failed to send forked packet data: " << strerror(errno) << endl;
+                            }
+                        
+                        } else
+                            cout << "NOT IMPLEMENTED: forking a single beam" << endl;
+                    }
+                }
+            
+            }
+        }
 
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);

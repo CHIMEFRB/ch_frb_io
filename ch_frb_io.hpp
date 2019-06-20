@@ -497,6 +497,9 @@ public:
     // For debugging/testing: pretend a packet has just arrived.
     void fake_packet_from(const struct sockaddr_in& sender, int nbytes);
 
+    void start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest);
+    void stop_forking_packets (int beam, int destbeam, const struct sockaddr_in& dest);
+
     // stream_to_files(): for streaming incoming data to disk.
     //
     //   'filename_pattern': see assembled_chunk::format_filename below (empty string means "streaming disabled")
@@ -607,6 +610,16 @@ protected:
     int stream_chunks_written;
     size_t stream_bytes_written;
 
+    struct packetfork {
+        int beam;
+        int destbeam;
+        struct sockaddr_in dest;
+    };
+
+    std::mutex forking_mutex;
+    std::vector<packetfork> forking_packets;
+    int forking_socket = 0;
+    
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
