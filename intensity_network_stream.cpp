@@ -1064,6 +1064,8 @@ void intensity_network_stream::_assembler_thread_body()
 
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
+    uint8_t* forked_packet_data = reinterpret_cast<uint8_t*>(malloc(16384));
+
     struct timeval tva, tvb;
     tva = xgettimeofday();
     
@@ -1092,7 +1094,7 @@ void intensity_network_stream::_assembler_thread_body()
         assembler_thread_waiting_usec += usec_between(tvb, tva);
 
         {
-            // we hold this lock while processing the whole list...
+            // We hold this lock while processing the whole packet list;
             // the only contention for the lock is from rare RPCs.
             unique_lock<mutex> ulock(forking_mutex);
         
@@ -1154,7 +1156,7 @@ void intensity_network_stream::_assembler_thread_body()
 
                 intensity_packet packetcopy;
                 if (this->forking_packets.size())
-                    memcpy(&packetcopy, &packet, sizeof(packet));
+                    memcpy(&packetcopy, &packet, sizeof(intensity_packet));
             
                 packet.data_nbytes = new_data_nbytes;
                 packet.nbeams = 1;
@@ -1185,36 +1187,68 @@ void intensity_network_stream::_assembler_thread_body()
                         assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
                         break;
                     }
-		
+
                     // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
                     // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
-		
+
                     packet.beam_ids += 1;
                     packet.scales += nfreq_coarse;
                     packet.offsets += nfreq_coarse;
                     packet.data += new_data_nbytes;
                 }
 
-            
+
                 if (this->forking_packets.size()) {
-                    memcpy(&packet, &packetcopy, sizeof(packet));
+                    memcpy(&packet, &packetcopy, sizeof(intensity_packet));
+
+                    // In case there are any single-beam forks
+                    intensity_packet subpacket;
+                    memcpy(&subpacket, &packetcopy, sizeof(intensity_packet));
+                    int nc = subpacket.nfreq_coarse;
+                    subpacket.nbeams = 1;
+                    subpacket.data_nbytes = nc * subpacket.nupfreq * subpacket.ntsamp;
+                    int nsub = subpacket.set_pointers(forked_packet_data);
 
                     for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
                         if (it->beam == 0) {
-                            //cout << "forking to " << inet_ntoa(it->dest.sin_addr) << " with beam offset " << it->destbeam << endl;
                             // send all (four) beams!
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] += it->destbeam;
-                            int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0, reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                            int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
+                                               reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] -= it->destbeam;
-                            //cout << "sending " << packet_nbytes << " bytes to fork dest" << endl;
-                            if (nsent == -1) {
+                            if (nsent == -1)
                                 cout << "Failed to send forked packet data: " << strerror(errno) << endl;
+                        } else {
+                            for (int i=0; i<packet.nbeams; i++) {
+                                if (packet.beam_ids[i] != it->beam)
+                                    continue;
+                                subpacket.beam_ids[0] = it->destbeam;
+                                memcpy(subpacket.coarse_freq_ids,
+                                       packet.coarse_freq_ids,
+                                       nc * sizeof(uint16_t));
+                                memcpy(subpacket.scales,
+                                       packet.scales + i*nc,
+                                       nc * sizeof(float));
+                                memcpy(subpacket.offsets,
+                                       packet.offsets + i*nc,
+                                       nc * sizeof(float));
+                                memcpy(subpacket.data,
+                                       packet.data + i*subpacket.data_nbytes,
+                                       subpacket.data_nbytes);
+                                int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
+                                                   reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                                if (nsent == -1)
+                                    cout << "Failed to send forked packet data: " << strerror(errno) << endl;
+
+                                /*
+                                 intensity_packet dec;
+                                 bool ok = dec.decode(forked_packet_data, nsub);
+                                 cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;
+                                 */
                             }
-                        
-                        } else
-                            cout << "NOT IMPLEMENTED: forking a single beam" << endl;
+                        }
                     }
                 }
             }
@@ -1223,6 +1257,7 @@ void intensity_network_stream::_assembler_thread_body()
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
     }
+    free(forked_packet_data);
 }
 
 bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) 

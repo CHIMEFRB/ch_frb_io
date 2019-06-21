@@ -75,6 +75,22 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
     return true;
 }
 
+int intensity_packet::set_pointers(uint8_t *dst) {
+    int nb = this->nbeams;
+    int nf = this->nfreq_coarse;
+    int nu = this->nupfreq;
+    int nt = this->ntsamp;
+
+    memcpy(dst, this, 24);
+
+    this->beam_ids = (uint16_t *)(dst + 24);
+    this->coarse_freq_ids = (uint16_t *)(dst + 24 + 2*nb);
+    this->scales  = (float *) (dst + 24 + 2*nb + 2*nf);
+    this->offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
+    this->data = dst + 24 + 2*nb + 2*nf + 8*nb*nf;
+
+    return 24 + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
+}
 
 // Encodes a floating-point array of intensities into raw packet data, before sending packet.
 // The precise semantics aren't very intuitive, see extended comment in ch_frb_io_internals.hpp for details!
@@ -86,19 +102,22 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
     int nu = this->nupfreq;
     int nt = this->ntsamp;
 
+    // similar but not exactly the same as set_pointers()...
     memcpy(dst, this, 24);
     memcpy(dst + 24, this->beam_ids, 2*nb);
     memcpy(dst + 24 + 2*nb, this->coarse_freq_ids, 2*nf);
 
-    this->scales = (float *) (dst + 24 + 2*nb + 2*nf);
+    this->scales  = (float *) (dst + 24 + 2*nb + 2*nf);
     this->offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
     this->data = dst + 24 + 2*nb + 2*nf + 8*nb*nf;
+
+    int nbytes = 24 + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
 
     for (int b = 0; b < nb; b++) {
 	for (int f = 0; f < nf; f++) {
 	    uint8_t *sub_data = data + (b*nf+f) * (nu*nt);
 	    const float *sub_int = intensity + b*beam_istride + f*nu*freq_istride;
-	    const float *sub_wt = weights + b*beam_wstride + f*nu*freq_wstride;
+	    const float *sub_wt  = weights   + b*beam_wstride + f*nu*freq_wstride;
 
 	    float acc0 = 0.0;
 	    float acc1 = 0.0;
@@ -116,7 +135,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    }
 		    
 	    if (acc0 <= 0.0) {
-		this->scales[b*nf+f] = 1.0;
+		this->scales [b*nf+f] = 1.0;
 		this->offsets[b*nf+f] = 0.0;
 		memset(sub_data, 0, nu*nt);
 		continue;
@@ -135,7 +154,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    float scale = sqrt(var) / 25.;
 	    float offset = -128.*scale + mean;   // 0x80 -> mean
 
-	    this->scales[b*nf+f] = scale;
+	    this->scales [b*nf+f] = scale;
 	    this->offsets[b*nf+f] = offset;
 
 	    for (int u = 0; u < nu; u++) {
@@ -151,8 +170,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    }
 	}
     }
-
-    return 24 + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
+    return nbytes;
 }
 
 

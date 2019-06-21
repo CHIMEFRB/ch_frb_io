@@ -140,6 +140,11 @@ struct intensity_packet {
 	       const float *weights, int beam_wstride, int freq_wstride, 
 	       float wt_cutoff);
 
+    // sets up my pointers to point into the given data array (which
+    // must be large enough to hold the data); returns the number of
+    // bytes used.  This allows the "dest" array to be send as the
+    // data packet.
+    int set_pointers(uint8_t *dest);
 
     // Currently used only for debugging
     int find_coarse_freq_id(int id) const;
