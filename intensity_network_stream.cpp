@@ -1041,6 +1041,11 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
 
 void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
     unique_lock<mutex> ulock(forking_mutex);
+    if ((beam == -1) && (destbeam == -1)) {
+        // Stop all!
+        forking_packets.clear();
+        return;
+    }
     for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
         if ((it->beam == beam) && (it->destbeam == destbeam) &&
             (it->dest.sin_port == dest.sin_port) &&
