@@ -56,7 +56,8 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
-    stream_bytes_written(0)
+    stream_bytes_written(0),
+    forking_paused(false)
 {
     // Argument checking
 
@@ -1055,6 +1056,14 @@ void intensity_network_stream::stop_forking_packets(int beam, int destbeam, cons
         }
 }
 
+void intensity_network_stream::pause_forking_packets() {
+    forking_paused = true;
+}
+
+void intensity_network_stream::resume_forking_packets() {
+    forking_paused = false;
+}
+
 void intensity_network_stream::_assembler_thread_body()
 {
     pin_thread_to_cores(ini_params.assembler_thread_cores);
@@ -1160,7 +1169,8 @@ void intensity_network_stream::_assembler_thread_body()
                 // only beam index zero.  This scheme avoids the overhead of copying the packet.
 
                 intensity_packet packetcopy;
-                if (this->forking_packets.size())
+                bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
+                if (forking_active)
                     memcpy(&packetcopy, &packet, sizeof(intensity_packet));
             
                 packet.data_nbytes = new_data_nbytes;
@@ -1203,7 +1213,7 @@ void intensity_network_stream::_assembler_thread_body()
                 }
 
 
-                if (this->forking_packets.size()) {
+                if (forking_active) {
                     memcpy(&packet, &packetcopy, sizeof(intensity_packet));
 
                     // In case there are any single-beam forks
@@ -1226,6 +1236,7 @@ void intensity_network_stream::_assembler_thread_body()
                             if (nsent == -1)
                                 cout << "Failed to send forked packet data: " << strerror(errno) << endl;
                         } else {
+                            // send a single beam!
                             for (int i=0; i<packet.nbeams; i++) {
                                 if (packet.beam_ids[i] != it->beam)
                                     continue;
@@ -1247,7 +1258,7 @@ void intensity_network_stream::_assembler_thread_body()
                                 if (nsent == -1)
                                     cout << "Failed to send forked packet data: " << strerror(errno) << endl;
 
-                                /*
+                                /* check what we sent
                                  intensity_packet dec;
                                  bool ok = dec.decode(forked_packet_data, nsub);
                                  cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;

@@ -499,6 +499,8 @@ public:
 
     void start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest);
     void stop_forking_packets (int beam, int destbeam, const struct sockaddr_in& dest);
+    void pause_forking_packets();
+    void resume_forking_packets();
 
     // stream_to_files(): for streaming incoming data to disk.
     //
@@ -619,7 +621,8 @@ protected:
     std::mutex forking_mutex;
     std::vector<packetfork> forking_packets;
     int forking_socket = 0;
-    
+    std::atomic<bool> forking_paused;
+
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
