@@ -1198,13 +1198,17 @@ void intensity_network_stream::_assembler_thread_body()
             
                 if (this->forking_packets.size()) {
                     memcpy(&packet, &packetcopy, sizeof(packet));
-                
+
                     for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
                         if (it->beam == 0) {
+                            //cout << "forking to " << inet_ntoa(it->dest.sin_addr) << " with beam offset " << it->destbeam << endl;
                             // send all (four) beams!
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] += it->destbeam;
                             int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0, reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                            for (int i=0; i<packet.nbeams; i++)
+                                packet.beam_ids[i] -= it->destbeam;
+                            //cout << "sending " << packet_nbytes << " bytes to fork dest" << endl;
                             if (nsent == -1) {
                                 cout << "Failed to send forked packet data: " << strerror(errno) << endl;
                             }
@@ -1213,7 +1217,6 @@ void intensity_network_stream::_assembler_thread_body()
                             cout << "NOT IMPLEMENTED: forking a single beam" << endl;
                     }
                 }
-            
             }
         }
 
