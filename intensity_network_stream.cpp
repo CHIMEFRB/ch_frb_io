@@ -1038,22 +1038,31 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
     pf.destbeam = destbeam;
     pf.dest = dest;
     forking_packets.push_back(pf);
+
+    cout << "Forking packet list:" << endl;
+    for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+        cout << "  beam " << it->beam << " -> " << it->destbeam << " to " <<
+            inet_ntoa(it->dest.sin_addr) << " port " << ntohs(it->dest.sin_port) << endl;
 }
 
 void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
     unique_lock<mutex> ulock(forking_mutex);
-    if ((beam == -1) && (destbeam == -1)) {
+    if ((beam == -1) && (destbeam == -1))
         // Stop all!
         forking_packets.clear();
-        return;
-    }
+    else
+        for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+            if ((it->beam == beam) && (it->destbeam == destbeam) &&
+                (it->dest.sin_port == dest.sin_port) &&
+                (it->dest.sin_addr.s_addr == dest.sin_addr.s_addr)) {
+                forking_packets.erase(it);
+                it--;
+            }
+
+    cout << "Forking packet list:" << endl;
     for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
-        if ((it->beam == beam) && (it->destbeam == destbeam) &&
-            (it->dest.sin_port == dest.sin_port) &&
-            (it->dest.sin_addr.s_addr == dest.sin_addr.s_addr)) {
-            forking_packets.erase(it);
-            it--;
-        }
+        cout << "  beam " << it->beam << " -> " << it->destbeam << " to " <<
+            inet_ntoa(it->dest.sin_addr) << " port " << ntohs(it->dest.sin_port) << endl;
 }
 
 void intensity_network_stream::pause_forking_packets() {
