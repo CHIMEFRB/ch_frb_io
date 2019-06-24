@@ -1034,6 +1034,14 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
         flags |= FD_CLOEXEC;
         if (fcntl(forking_socket, F_SETFD, flags) < 0)
             throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on packet-forking socket file descriptor") + strerror(errno));
+
+        // bufsize
+        if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize)) < 0)
+            throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed for forking socket: ") + strerror(errno));
+        // timeout
+        const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
+        if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDTIMEO, &tv_timeout, sizeof(tv_timeout)) < 0)
+            throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDTIMEO) failed for forking socket: ") + strerror(errno));
     }
     intensity_network_stream::packetfork pf;
     // FIXME -- check that we actually hold the requested beam!!
