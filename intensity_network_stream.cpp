@@ -1027,9 +1027,13 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
     unique_lock<mutex> ulock(forking_mutex);
     //if (forking_packets.size() == 0) {
     if (forking_socket == 0) {
-        forking_socket = socket(AF_INET, SOCK_DGRAM, 0);
+        forking_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (forking_socket < 0)
             throw runtime_error(string("ch_frb_io: couldn't create udp socket for forking: ") + strerror(errno));
+        int flags = fcntl(forking_socket, F_GETFD);
+        flags |= FD_CLOEXEC;
+        if (fcntl(forking_socket, F_SETFD, flags) < 0)
+            throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on packet-forking socket file descriptor") + strerror(errno));
     }
     intensity_network_stream::packetfork pf;
     // FIXME -- check that we actually hold the requested beam!!
