@@ -1345,8 +1345,14 @@ void intensity_network_stream::_assembler_thread_body()
 #else
                 fork_sendspace_end = -1;
 #endif
+                int esz = sizeof(int);
+                int forking_error = 0;
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_ERROR,
+                               &forking_error, reinterpret_cast<socklen_t*>(&esz))) {
+                    cout << "Failed to call getsockopt(SO_ERROR): " << strerror(errno) << endl;
+                }
 
-                cout << "Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end." << endl;
+                cout << "Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end.  Socket error: " << forking_error << endl;
 
             }
         } // end of forking_mutex lock
