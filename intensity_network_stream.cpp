@@ -1129,9 +1129,42 @@ void intensity_network_stream::_assembler_thread_body()
         assembler_thread_waiting_usec += usec_between(tvb, tva);
 
         {
-            // We hold this lock while processing the whole packet list;
-            // the only contention for the lock is from rare RPCs.
+            // We hold this lock while processing the whole packet
+            // list (even if we're not doing any packet forking); the
+            // only contention for the lock is from rare RPCs.
             unique_lock<mutex> ulock(forking_mutex);
+
+            int fork_sendqueue_start = 0;
+            int fork_sendqueue_end = 0;
+            int fork_sendspace_start = 0;
+            int fork_sendspace_end = 0;
+            int fork_packets_sent = 0;
+            int fork_bytes_sent = 0;
+
+            bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
+
+            if (forking_active) {
+#if defined(FIONWRITE)
+                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
+                    cout << "Failed to call ioctl(FIONWRITE): " << strerror(errno) << endl;
+                }
+#elif defined(SO_NWRITE)
+                int sz = sizeof(int);
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                               &fork_sendqueue_start, reinterpret_cast<socklen_t*>(&sz))) {
+                    cout << "Failed to call getsockopt(SO_NWRITE): " << strerror(errno) << endl;
+                }
+#else
+                fork_sendqueue_start = -1;
+#endif
+#if defined(FIONSPACE)
+                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_start) == -1) {
+                    cout << "Failed to call ioctl(FIONSPACE): " << strerror(errno) << endl;
+                }
+#else
+                fork_sendspace_start = -1;
+#endif
+            }
         
             for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
                 uint8_t *packet_data = packet_list->get_packet_data(ipacket);
@@ -1190,7 +1223,6 @@ void intensity_network_stream::_assembler_thread_body()
                 // only beam index zero.  This scheme avoids the overhead of copying the packet.
 
                 intensity_packet packetcopy;
-                bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
                 if (forking_active)
                     memcpy(&packetcopy, &packet, sizeof(intensity_packet));
             
@@ -1233,7 +1265,6 @@ void intensity_network_stream::_assembler_thread_body()
                     packet.data += new_data_nbytes;
                 }
 
-
                 if (forking_active) {
                     memcpy(&packet, &packetcopy, sizeof(intensity_packet));
 
@@ -1252,6 +1283,8 @@ void intensity_network_stream::_assembler_thread_body()
                                 packet.beam_ids[i] += it->destbeam;
                             int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
                                                reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                            fork_packets_sent++;
+                            fork_bytes_sent += packet_nbytes;
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] -= it->destbeam;
                             if (nsent == -1)
@@ -1276,6 +1309,8 @@ void intensity_network_stream::_assembler_thread_body()
                                        subpacket.data_nbytes);
                                 int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
                                                    reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                                fork_packets_sent++;
+                                fork_bytes_sent += nsub;
                                 if (nsent == -1)
                                     cout << "Failed to send forked packet data: " << strerror(errno) << endl;
 
@@ -1287,9 +1322,34 @@ void intensity_network_stream::_assembler_thread_body()
                             }
                         }
                     }
+                } // end forking_active
+            } // end of loop over packet list
+            if (forking_active) {
+#if defined(FIONWRITE)
+                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
+                    cout << "Failed to call ioctl(FIONWRITE): " << strerror(errno) << endl;
                 }
+#elif defined(SO_NWRITE)
+                int sz = sizeof(int);
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                               &fork_sendqueue_end, reinterpret_cast<socklen_t*>(&sz))) {
+                    cout << "Failed to call getsockopt(SO_NWRITE): " << strerror(errno) << endl;
+                }
+#else
+                fork_sendqueue_end = -1;
+#endif
+#if defined(FIONSPACE)
+                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_end) == -1) {
+                    cout << "Failed to call ioctl(FIONSPACE): " << strerror(errno) << endl;
+                }
+#else
+                fork_sendspace_end = -1;
+#endif
+
+                cout << "Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end." << endl;
+
             }
-        }
+        } // end of forking_mutex lock
 
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
