@@ -1108,7 +1108,8 @@ void intensity_network_stream::_assembler_thread_body()
 
     struct timeval tva, tvb;
     tva = xgettimeofday();
-    
+
+    struct timeval tvf = tva;
     // Main packet loop
 
     while (1) {
@@ -1365,9 +1366,12 @@ void intensity_network_stream::_assembler_thread_body()
                     chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
                 }
 
-                uint64_t worktime = usec_between(tva, xgettimeofday());
+                struct timeval tvnow = xgettimeofday();
+                uint64_t worktime = usec_between(tva, tvnow);
+                uint64_t tperiod = usec_between(tvf, tvnow);
+                tvf = tvnow;
 
-                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime << "usec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
             }
         } // end of forking_mutex lock
 
