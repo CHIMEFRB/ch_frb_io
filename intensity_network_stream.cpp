@@ -4,6 +4,11 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#if defined(__linux__)
+// for forking stats (SIOCOUTQ)
+#include <linux/sockios.h>
+#endif
+
 #include <functional>
 #include <algorithm>
 #include <iostream>
@@ -1148,6 +1153,10 @@ void intensity_network_stream::_assembler_thread_body()
                 if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
                     chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
                 }
+#elif defined(SIOCOUTQ)
+                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
+                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
+                }
 #elif defined(SO_NWRITE)
                 int sz = sizeof(int);
                 if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
@@ -1327,6 +1336,10 @@ void intensity_network_stream::_assembler_thread_body()
 #if defined(FIONWRITE)
                 if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
                     chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
+                }
+#elif defined(SIOCOUTQ)
+                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
+                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
                 }
 #elif defined(SO_NWRITE)
                 int sz = sizeof(int);
