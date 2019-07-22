@@ -1154,7 +1154,8 @@ void intensity_network_stream::_assembler_thread_body()
                     chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
                 }
 #elif defined(SIOCOUTQ)
-                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
+                // linux
+                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_start) == -1) {
                     chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
                 }
 #elif defined(SO_NWRITE)
