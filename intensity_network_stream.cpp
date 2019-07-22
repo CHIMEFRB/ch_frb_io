@@ -1146,26 +1146,26 @@ void intensity_network_stream::_assembler_thread_body()
             if (forking_active) {
 #if defined(FIONWRITE)
                 if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
-                    cout << "Failed to call ioctl(FIONWRITE): " << strerror(errno) << endl;
+                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
                 }
 #elif defined(SO_NWRITE)
                 int sz = sizeof(int);
                 if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
                                &fork_sendqueue_start, reinterpret_cast<socklen_t*>(&sz))) {
-                    cout << "Failed to call getsockopt(SO_NWRITE): " << strerror(errno) << endl;
+                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
                 }
 #else
                 fork_sendqueue_start = -1;
 #endif
 #if defined(FIONSPACE)
                 if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_start) == -1) {
-                    cout << "Failed to call ioctl(FIONSPACE): " << strerror(errno) << endl;
+                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
                 }
 #else
                 fork_sendspace_start = -1;
 #endif
             }
-        
+
             for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
                 uint8_t *packet_data = packet_list->get_packet_data(ipacket);
                 int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
@@ -1188,7 +1188,6 @@ void intensity_network_stream::_assembler_thread_body()
                            << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
                            << "), expected ("
                            << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
-
                         throw runtime_error(ss.str());
                     }
 
@@ -1212,7 +1211,8 @@ void intensity_network_stream::_assembler_thread_body()
 
                 event_subcounts[event_type::packet_good]++;
 
-                this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+                this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(),
+                                                      packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
 
                 int nfreq_coarse = packet.nfreq_coarse;
                 int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
@@ -1288,7 +1288,7 @@ void intensity_network_stream::_assembler_thread_body()
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] -= it->destbeam;
                             if (nsent == -1)
-                                cout << "Failed to send forked packet data: " << strerror(errno) << endl;
+                                chlog("Failed to send forked packet data: " << strerror(errno));
                         } else {
                             // send a single beam!
                             for (int i=0; i<packet.nbeams; i++) {
@@ -1312,8 +1312,7 @@ void intensity_network_stream::_assembler_thread_body()
                                 fork_packets_sent++;
                                 fork_bytes_sent += nsub;
                                 if (nsent == -1)
-                                    cout << "Failed to send forked packet data: " << strerror(errno) << endl;
-
+                                    chlog("Failed to send forked packet data: " << strerror(errno));
                                 /* check what we sent
                                  intensity_packet dec;
                                  bool ok = dec.decode(forked_packet_data, nsub);
@@ -1327,20 +1326,20 @@ void intensity_network_stream::_assembler_thread_body()
             if (forking_active) {
 #if defined(FIONWRITE)
                 if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
-                    cout << "Failed to call ioctl(FIONWRITE): " << strerror(errno) << endl;
+                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
                 }
 #elif defined(SO_NWRITE)
                 int sz = sizeof(int);
                 if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
                                &fork_sendqueue_end, reinterpret_cast<socklen_t*>(&sz))) {
-                    cout << "Failed to call getsockopt(SO_NWRITE): " << strerror(errno) << endl;
+                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
                 }
 #else
                 fork_sendqueue_end = -1;
 #endif
 #if defined(FIONSPACE)
                 if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_end) == -1) {
-                    cout << "Failed to call ioctl(FIONSPACE): " << strerror(errno) << endl;
+                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
                 }
 #else
                 fork_sendspace_end = -1;
@@ -1349,11 +1348,10 @@ void intensity_network_stream::_assembler_thread_body()
                 int forking_error = 0;
                 if (getsockopt(forking_socket, SOL_SOCKET, SO_ERROR,
                                &forking_error, reinterpret_cast<socklen_t*>(&esz))) {
-                    cout << "Failed to call getsockopt(SO_ERROR): " << strerror(errno) << endl;
+                    chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
                 }
 
-                cout << "Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end.  Socket error: " << forking_error << endl;
-
+                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
             }
         } // end of forking_mutex lock
 
