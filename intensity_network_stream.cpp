@@ -1365,7 +1365,9 @@ void intensity_network_stream::_assembler_thread_body()
                     chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
                 }
 
-                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes.  Send queue: " << fork_sendqueue_start << ", avail " << fork_sendspace_start << " at start, " << fork_sendqueue_end << ", avail " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+                uint64_t worktime = usec_between(tva, xgettimeofday());
+
+                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime << "usec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
             }
         } // end of forking_mutex lock
 
