@@ -1300,6 +1300,8 @@ void intensity_network_stream::_assembler_thread_body()
                                 packet.beam_ids[i] -= it->destbeam;
                             if (nsent == -1)
                                 chlog("Failed to send forked packet data: " << strerror(errno));
+                            if (nsent < packet_nbytes)
+                                chlog("Sent " << nsent << " < " << packet_nbytes << " bytes of forked packet data!");
                         } else {
                             // send a single beam!
                             for (int i=0; i<packet.nbeams; i++) {
@@ -1324,6 +1326,8 @@ void intensity_network_stream::_assembler_thread_body()
                                 fork_bytes_sent += nsub;
                                 if (nsent == -1)
                                     chlog("Failed to send forked packet data: " << strerror(errno));
+                                if (nsent < nsub)
+                                    chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
                                 /* check what we sent
                                  intensity_packet dec;
                                  bool ok = dec.decode(forked_packet_data, nsub);
