@@ -935,6 +935,7 @@ void intensity_network_stream::_network_thread_body()
 	if (incoming_packet_list->is_full) {
             _network_flush_packets();
 
+            /*
             // Log our packet receive rate each flush!
             float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
             chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
@@ -943,6 +944,7 @@ void intensity_network_stream::_network_thread_body()
             rate_logging_timestamp = curr_timestamp;
             rate_nbytes = 0;
             rate_npackets = 0;
+             */
         }
     }
 }
@@ -1272,7 +1274,7 @@ void intensity_network_stream::_assembler_thread_body()
                 intensity_packet packetcopy;
                 if (forking_active)
                     memcpy(&packetcopy, &packet, sizeof(intensity_packet));
-            
+
                 packet.data_nbytes = new_data_nbytes;
                 packet.nbeams = 1;
 	    
@@ -1327,14 +1329,15 @@ void intensity_network_stream::_assembler_thread_body()
                      int nsub = subpacket.set_pointers(forked_packet_data);
                      */
 
-                    int nc = packetcopy.nfreq_coarse;
+                    int nc = packet.nfreq_coarse;
+                    // Create headers for 1, 2, or 3-beam sub-packets.
                     const int NS = 3;
                     intensity_packet subpackets[NS];
                     int nsubs[NS];
                     for (int s=0; s<NS; s++) {
                         memcpy(&(subpackets[s]), &packetcopy, sizeof(intensity_packet));
                         subpackets[s].nbeams = s+1;
-                        subpackets[s].data_nbytes = nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
+                        subpackets[s].data_nbytes = subpackets[s].nbeams * nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
                         nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
                     }
                     
@@ -1382,18 +1385,18 @@ void intensity_network_stream::_assembler_thread_body()
                         memcpy(subpacket->coarse_freq_ids,
                                packet.coarse_freq_ids,
                                nc * sizeof(uint16_t));
-                        for (int i=0; i<nbeams; i++) {
+                        for (int i=0; i<nbeams; i++)
                             subpacket->beam_ids[i] = packet.beam_ids[ibeam + i] + it->destbeam;
-                            memcpy(subpacket->scales,
-                                   packet.scales + (ibeam + i)*nc,
-                                   nc * sizeof(float));
-                            memcpy(subpacket->offsets,
-                                   packet.offsets + (ibeam + i)*nc,
-                                   nc * sizeof(float));
-                            memcpy(subpacket->data,
-                                   packet.data + (ibeam + i)*subpacket->data_nbytes,
-                                   subpacket->data_nbytes);
-                        }
+                        memcpy(subpacket->scales,
+                               packet.scales + ibeam * nc,
+                               nbeams * nc * sizeof(float));
+                        memcpy(subpacket->offsets,
+                               packet.offsets + ibeam * nc,
+                               nbeams * nc * sizeof(float));
+                        memcpy(subpacket->data,
+                               packet.data + ibeam * subpacket->data_nbytes/nbeams,
+                               subpacket->data_nbytes);
+
                         int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
                                            reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
                         fork_packets_sent++;
