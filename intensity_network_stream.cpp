@@ -1073,7 +1073,9 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
             throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on packet-forking socket file descriptor") + strerror(errno));
 
         // bufsize
-        if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize)) < 0)
+        //if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize)) < 0)
+	int bufsize = 1024*1024;
+	if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &bufsize, sizeof(bufsize)) < 0)
             throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed for forking socket: ") + strerror(errno));
         // timeout
         const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
