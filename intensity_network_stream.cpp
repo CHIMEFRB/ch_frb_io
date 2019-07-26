@@ -822,6 +822,10 @@ void intensity_network_stream::_network_thread_body()
     // the previous counts added to the history list
     last_packet_counts->tv = tv_ini;
 
+    uint64_t rate_logging_timestamp = 0;
+    uint64_t rate_nbytes = 0;
+    uint64_t rate_npackets = 0;
+    
     for (;;) {
         uint64_t timestamp;
 
@@ -855,7 +859,7 @@ void intensity_network_stream::_network_thread_body()
             _update_packet_rates(last_packet_counts);
             packet_history_timestamp = curr_timestamp;
         }
-        
+
         timestamp = usec_between(tv_ini, xgettimeofday());
         network_thread_working_usec += (timestamp - curr_timestamp);
 
@@ -881,6 +885,18 @@ void intensity_network_stream::_network_thread_body()
             throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
+        // Log our packet receive rate every 100 ms!
+        rate_nbytes += packet_nbytes;
+        rate_npackets++;
+        if (curr_timestamp > rate_logging_timestamp + 100000) {
+            float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
+            chlogf("Packet receive rate: %.3f packets/sec, %.0f bits/sec",
+                   (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
+            rate_logging_timestamp = curr_timestamp;
+            rate_nbytes = 0;
+            rate_npackets = 0;
+        }
+        
         {
             int nqueued = 0;
             if (ioctl(sockfd, FIONREAD, &nqueued) == -1) {
@@ -1413,7 +1429,7 @@ void intensity_network_stream::_assembler_thread_body()
                 uint64_t tperiod = usec_between(tvf, tvnow);
                 tvf = tvnow;
 
-                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+                chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms -> " << ((fork_packets_sent * 1e6) / tperiod) << " packets/sec, " << ((fork_bytes_sent * 1e6 * 8) / tperiod) << " bits/sec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
             }
         } // end of forking_mutex lock
 
