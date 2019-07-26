@@ -1233,6 +1233,8 @@ void intensity_network_stream::_assembler_thread_body()
                 // length fields.  The new packet corresponds to a subset of the original packet containing
                 // only beam index zero.  This scheme avoids the overhead of copying the packet.
 
+                // If we're re-sending packets, make a copy, because pointers get
+                // modified in this loop!
                 intensity_packet packetcopy;
                 if (forking_active)
                     memcpy(&packetcopy, &packet, sizeof(intensity_packet));
@@ -1277,16 +1279,31 @@ void intensity_network_stream::_assembler_thread_body()
                 }
 
                 if (forking_active) {
+                    // Revert the packet header to its original state!
                     memcpy(&packet, &packetcopy, sizeof(intensity_packet));
 
-                    // In case there are any single-beam forks
-                    intensity_packet subpacket;
-                    memcpy(&subpacket, &packetcopy, sizeof(intensity_packet));
-                    int nc = subpacket.nfreq_coarse;
-                    subpacket.nbeams = 1;
-                    subpacket.data_nbytes = nc * subpacket.nupfreq * subpacket.ntsamp;
-                    int nsub = subpacket.set_pointers(forked_packet_data);
+                    /*
+                     // In case there are any single-beam forks, create a header
+                     // for 1 beam.
+                     intensity_packet subpacket;
+                     memcpy(&subpacket, &packetcopy, sizeof(intensity_packet));
+                     int nc = subpacket.nfreq_coarse;
+                     subpacket.nbeams = 1;
+                     subpacket.data_nbytes = nc * subpacket.nupfreq * subpacket.ntsamp;
+                     int nsub = subpacket.set_pointers(forked_packet_data);
+                     */
 
+                    int nc = packetcopy.nfreq_coarse;
+                    const int NS = 3;
+                    intensity_packet subpackets[NS];
+                    int nsubs[NS];
+                    for (int s=0; s<NS; s++) {
+                        memcpy(&(subpackets[s]), &packetcopy, sizeof(intensity_packet));
+                        subpackets[s].nbeams = s+1;
+                        subpackets[s].data_nbytes = nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
+                        nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
+                    }
+                    
                     for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
                         if (it->beam == 0) {
                             // send all (four) beams!
@@ -1295,46 +1312,67 @@ void intensity_network_stream::_assembler_thread_body()
                             int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
                                                reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
                             fork_packets_sent++;
-                            fork_bytes_sent += packet_nbytes;
+                            fork_bytes_sent += nsent;
                             for (int i=0; i<packet.nbeams; i++)
                                 packet.beam_ids[i] -= it->destbeam;
                             if (nsent == -1)
                                 chlog("Failed to send forked packet data: " << strerror(errno));
                             if (nsent < packet_nbytes)
                                 chlog("Sent " << nsent << " < " << packet_nbytes << " bytes of forked packet data!");
-                        } else {
-                            // send a single beam!
-                            for (int i=0; i<packet.nbeams; i++) {
-                                if (packet.beam_ids[i] != it->beam)
-                                    continue;
-                                subpacket.beam_ids[0] = it->destbeam;
-                                memcpy(subpacket.coarse_freq_ids,
-                                       packet.coarse_freq_ids,
-                                       nc * sizeof(uint16_t));
-                                memcpy(subpacket.scales,
-                                       packet.scales + i*nc,
-                                       nc * sizeof(float));
-                                memcpy(subpacket.offsets,
-                                       packet.offsets + i*nc,
-                                       nc * sizeof(float));
-                                memcpy(subpacket.data,
-                                       packet.data + i*subpacket.data_nbytes,
-                                       subpacket.data_nbytes);
-                                int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
-                                                   reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
-                                fork_packets_sent++;
-                                fork_bytes_sent += nsub;
-                                if (nsent == -1)
-                                    chlog("Failed to send forked packet data: " << strerror(errno));
-                                if (nsent < nsub)
-                                    chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
-                                /* check what we sent
-                                 intensity_packet dec;
-                                 bool ok = dec.decode(forked_packet_data, nsub);
-                                 cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;
-                                 */
+                            continue;
+                        }
+                        // send 1-3 beams
+                        // start beam index
+                        int ibeam = 0;
+                        if (it->beam == 0) {
+                            // find beam index
+                            ibeam = -1;
+                            for (int i=0; i<packet.nbeams; i++)
+                                if (packet.beam_ids[i] == it->beam) {
+                                    ibeam = i;
+                                    break;
+                                }
+                            if (ibeam == -1) {
+                                chlog("Forking: beam " << it->beam << " not found");
+                                continue;
                             }
                         }
+                        int nbeams = 1;
+                        if (it->beam == -2) {
+                            nbeams = 2;
+                        } else if (it->beam == -3) {
+                            nbeams = 3;
+                        }
+                        intensity_packet* subpacket = &(subpackets[nbeams-1]);
+                        int nsub = nsubs[nbeams-1];
+                        memcpy(subpacket->coarse_freq_ids,
+                               packet.coarse_freq_ids,
+                               nc * sizeof(uint16_t));
+                        for (int i=0; i<nbeams; i++) {
+                            subpacket->beam_ids[i] = packet.beam_ids[ibeam + i] + it->destbeam;
+                            memcpy(subpacket->scales,
+                                   packet.scales + (ibeam + i)*nc,
+                                   nc * sizeof(float));
+                            memcpy(subpacket->offsets,
+                                   packet.offsets + (ibeam + i)*nc,
+                                   nc * sizeof(float));
+                            memcpy(subpacket->data,
+                                   packet.data + (ibeam + i)*subpacket->data_nbytes,
+                                   subpacket->data_nbytes);
+                        }
+                        int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
+                                           reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                        fork_packets_sent++;
+                        fork_bytes_sent += nsent;
+                        if (nsent == -1)
+                            chlog("Failed to send forked packet data: " << strerror(errno));
+                        if (nsent < nsub)
+                            chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
+                        /* check what we sent
+                         intensity_packet dec;
+                         bool ok = dec.decode(forked_packet_data, nsub);
+                         cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;
+                         */
                     }
                 } // end forking_active
             } // end of loop over packet list
