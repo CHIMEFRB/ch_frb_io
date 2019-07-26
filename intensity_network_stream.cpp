@@ -1431,7 +1431,14 @@ void intensity_network_stream::_assembler_thread_body()
                     chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
                 }
 #else
-                fork_sendspace_end = -1;
+                int isz = sizeof(int);
+                int bufsize = 0;
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF,
+                               &bufsize, reinterpret_cast<socklen_t*>(&isz))) {
+                    chlog("Failed to call getsockopt(SO_SNDBUF): " << strerror(errno));
+                }
+                fork_sendspace_end = bufsize;
+                //fork_sendspace_end = -1;
 #endif
                 int esz = sizeof(int);
                 int forking_error = 0;
