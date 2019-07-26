@@ -885,18 +885,20 @@ void intensity_network_stream::_network_thread_body()
             throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
-        // Log our packet receive rate every 100 ms!
-        rate_nbytes += packet_nbytes;
-        rate_npackets++;
-        if (curr_timestamp > rate_logging_timestamp + 100000) {
-            float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
-            chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
-                   curr_timestamp * 1e-6,
-                   (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
-            rate_logging_timestamp = curr_timestamp;
-            rate_nbytes = 0;
-            rate_npackets = 0;
-        }
+        /*
+         // Log our packet receive rate every 100 ms!
+         rate_nbytes += packet_nbytes;
+         rate_npackets++;
+         if (curr_timestamp > rate_logging_timestamp + 100000) {
+         float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
+         chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
+         curr_timestamp * 1e-6,
+         (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
+         rate_logging_timestamp = curr_timestamp;
+         rate_nbytes = 0;
+         rate_npackets = 0;
+         }
+         */
         
         {
             int nqueued = 0;
@@ -927,8 +929,21 @@ void intensity_network_stream::_network_thread_body()
 
 	incoming_packet_list->add_packet(packet_nbytes);
 
-	if (incoming_packet_list->is_full)
+        rate_nbytes += packet_nbytes;
+        rate_npackets++;
+
+	if (incoming_packet_list->is_full) {
             _network_flush_packets();
+
+            // Log our packet receive rate each flush!
+            float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
+            chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
+                   curr_timestamp * 1e-6,
+                   (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
+            rate_logging_timestamp = curr_timestamp;
+            rate_nbytes = 0;
+            rate_npackets = 0;
+        }
     }
 }
 
