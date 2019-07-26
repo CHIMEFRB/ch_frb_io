@@ -890,7 +890,8 @@ void intensity_network_stream::_network_thread_body()
         rate_npackets++;
         if (curr_timestamp > rate_logging_timestamp + 100000) {
             float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
-            chlogf("Packet receive rate: %.3f packets/sec, %.0f bits/sec",
+            chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
+                   curr_timestamp * 1e-6,
                    (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
             rate_logging_timestamp = curr_timestamp;
             rate_nbytes = 0;
