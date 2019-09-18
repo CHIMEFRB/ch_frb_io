@@ -514,6 +514,7 @@ intensity_network_stream::get_statistics() {
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
+    m["frame0_nano"]            = frame0_nano;
     m["fpga_count"]             = 0;    // XXX FIXME XXX
     m["network_thread_waiting_usec"] = network_thread_waiting_usec;
     m["network_thread_working_usec"] = network_thread_working_usec;
@@ -652,9 +653,12 @@ uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
     // Which of my assemblers (if any) is handling the requested beam?
     int nbeams = this->ini_params.beam_ids.size();
     for (int i=0; i<nbeams; i++)
-        if (this->ini_params.beam_ids[i] == beam)
+        if (this->ini_params.beam_ids[i] == beam) {
+            if (!this->assemblers[i]->first_packet_received)
+                throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
 	    return this->assemblers[i]->first_fpgacount;
-    return 0;
+        }
+    throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
 }
 
 void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
@@ -715,6 +719,8 @@ void intensity_network_stream::network_thread_main()
 {
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
+
+    chime_log_set_thread_name("Network-" + std::to_string(ini_params.stream_id));
 
     try {
 	_network_thread_body();   // calls pin_thread_to_cores()
@@ -1004,6 +1010,8 @@ void intensity_network_stream::assembler_thread_main() {
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
 
+    chime_log_set_thread_name("Assembler-" + std::to_string(ini_params.stream_id));
+
     try {
 	_assembler_thread_body();  // calls pin_thread_to_cores()
     } catch (exception &e) {
@@ -1246,13 +1254,13 @@ void intensity_network_stream::_fetch_frame0() {
     curl_easy_cleanup(curl_handle);
 
     string frame0_txt = holder.thestring;
-    chlog("Received frame0 text: " << frame0_txt);
+    //chlog("Received frame0 text: " << frame0_txt);
     Json::Reader frame0_reader;
     Json::Value frame0_json;
     if (!frame0_reader.parse(frame0_txt, frame0_json))
         throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
 
-    chlog("Parsed: " << frame0_json);
+    //chlog("Parsed: " << frame0_json);
     if (!frame0_json.isObject())
         throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
 
