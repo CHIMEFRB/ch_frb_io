@@ -936,6 +936,7 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 
 	_add_packet_kernel(dst, src, nupfreq);
     }
+    this->packets_received++;
 }
 
 
