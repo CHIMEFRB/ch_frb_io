@@ -140,6 +140,11 @@ struct intensity_packet {
 	       const float *weights, int beam_wstride, int freq_wstride, 
 	       float wt_cutoff);
 
+    // sets up my pointers to point into the given data array (which
+    // must be large enough to hold the data); returns the number of
+    // bytes used.  This allows the "dest" array to be send as the
+    // data packet.
+    int set_pointers(uint8_t *dest);
 
     // Currently used only for debugging
     int find_coarse_freq_id(int id) const;
@@ -246,6 +251,17 @@ struct udp_packet_ringbuf : noncopyable {
 class assembled_chunk_ringbuf : noncopyable,
                                 public std::enable_shared_from_this<assembled_chunk_ringbuf> {
 public:
+    // When an assembled_chunk is put in the downstream ringbuf
+    std::atomic<uint64_t> max_fpga_flushed;
+    // When an assembled_chunk is retrieved from the downstream ringbuf
+    // by, eg, rf_pipelines::chime_network_stream
+    std::atomic<uint64_t> max_fpga_retrieved;
+    // The fpgacount of the first chunk produced by this stream
+    std::atomic<uint64_t> first_fpgacount;
+
+    // Set to 'true' in the first call to put_unassembled_packet().
+    std::atomic<bool> first_packet_received;
+
     assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
@@ -335,9 +351,6 @@ protected:
     uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
     
     output_device_pool output_devices;
-
-    // Set to 'true' in the first call to put_unassembled_packet().
-    bool first_packet_received = false;
 
     // Helper function called in assembler thread, to add a new assembled_chunk to the ring buffer.
     // Resets 'chunk' to a null pointer.

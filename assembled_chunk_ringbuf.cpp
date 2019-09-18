@@ -15,6 +15,10 @@ typedef std::lock_guard<std::mutex> guard_t;
 typedef std::unique_lock<std::mutex> ulock_t;
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
+    max_fpga_flushed(0),
+    max_fpga_retrieved(0),
+    first_fpgacount(0),
+    first_packet_received(false),
     ini_params(ini_params_),
     beam_id(beam_id_),
     stream_id(stream_id_),
@@ -23,8 +27,12 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
+    
     if (ini_params.assembled_ringbuf_capacity <= 0)
 	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: assembled_ringbuf_capacity must be > 0");
+
+    if ((ini_params.nt_align < 0) || (ini_params.nt_align % constants::nt_per_assembled_chunk))
+	throw runtime_error("ch_frb_io: 'nt_align' must be a multiple of nt_per_assembled_chunk(=" + to_string(constants::nt_per_assembled_chunk) + ")");
 
     for (int n: ini_params.telescoping_ringbuf_capacity) {
 	if (n < 2)
@@ -248,9 +256,23 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
     if (!first_packet_received) {
-	this->active_chunk0 = this->_make_assembled_chunk(packet_ichunk, 1);
-	this->active_chunk1 = this->_make_assembled_chunk(packet_ichunk+1, 1);
+	uint64_t first_ichunk = packet_ichunk;
+
+	if (ini_params.nt_align > 0) {
+	    uint64_t chunk_align = ini_params.nt_align / constants::nt_per_assembled_chunk;
+	    first_ichunk = ((first_ichunk + chunk_align - 1) / chunk_align) * chunk_align;
+	}
+	
+	this->active_chunk0 = this->_make_assembled_chunk(first_ichunk, 1);
+	this->active_chunk1 = this->_make_assembled_chunk(first_ichunk+1, 1);
 	this->first_packet_received = true;
+
+	// We initialize 'first_fpgacount' to the FPGA count of the first assembled_chunk.
+	// (Note that this can be either earlier or later than the FPGA count of the packet.)
+	// This makes sense because 'first_fpgacount' is used to convert between FPGA counts and
+	// time sample indices in rf_pipelines/bonsai.
+	
+        this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
     }
 
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
@@ -346,6 +368,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     if (chunk->has_rfi_mask)
 	throw runtime_error("ch_frb_io: internal error: chunk passed to assembled_chunk_ringbuf::_put_unassembled_packet() has rfi_mask flag set");
 
+    chlog("Assembled chunk " << chunk->ichunk << " beam " << beam_id << ": received " << chunk->packets_received << " packets");
+
     // Step 1: prepare all data needed to modify the ring buffer.  In this step, we do all of our
     // buffer allocation and downsampling, without the lock held.  In step 2, we will acquire the
     // lock and modify the ring buffer (without expensive operations like allocation/downsampling).
@@ -359,6 +383,8 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // List of chunks to be pushed and popped at each level of the ring buffer (in step 2!)
     vector<shared_ptr<assembled_chunk>> pushlist(nds);
     vector<shared_ptr<assembled_chunk>> poplist(2*nds);
+
+    uint64_t chunk_fpga_end = chunk->fpga_end;
     
     // Converts unique_ptr -> shared_ptr, and resets 'chunk' to a null pointer.
     pushlist[0] = shared_ptr<assembled_chunk> (chunk.release());
@@ -495,6 +521,9 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped] += num_assembled_chunks_dropped;
     }
 
+    assert(chunk_fpga_end > this->max_fpga_flushed);
+    this->max_fpga_flushed = chunk_fpga_end;
+
     if (ini_params.emit_warning_on_buffer_drop && (num_assembled_chunks_dropped > 0))
 	cout << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk" << endl;
     if (ini_params.throw_exception_on_buffer_drop && (num_assembled_chunks_dropped > 0))
@@ -622,6 +651,10 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
         this->cond_assembled_chunks_added.wait(lock);
     }
 
+    if (chunk) {
+        assert(chunk->fpga_end > this->max_fpga_retrieved);
+        this->max_fpga_retrieved = chunk->fpga_end;
+    }
     return chunk;
 }
 
