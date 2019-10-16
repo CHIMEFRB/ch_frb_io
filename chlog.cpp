@@ -25,15 +25,20 @@ namespace ch_frb_io {
 static string 
 vstringprintf(const char* format, va_list lst) {
     char temps[256];
+    va_list lst2;
+    va_copy(lst2, lst);
     // truncates if length > size of 'temps'
-    int n = vsnprintf(temps, sizeof(temps), format, lst);
+    size_t n = vsnprintf(temps, sizeof(temps), format, lst);
     if (n < 0)
         throw runtime_error("vstringprintf failed: " + string(strerror(errno)));
-    if (n < 256)
+    if (n < 256) {
+        va_end(lst2);
         return string(temps);
+    }
     // Try again with larger temp buffer
     char* temp2 = new char[n+1];
-    n = vsnprintf(temp2, n+1, format, lst);
+    n = vsnprintf(temp2, n+1, format, lst2);
+    va_end(lst2);
     if (n < 0)
         throw runtime_error("vstringprintf(2) failed: " + string(strerror(errno)));
     string s(temp2);
