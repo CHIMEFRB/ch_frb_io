@@ -32,7 +32,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
     uint8_t version = 2;
     // We are going to pack N items as a msgpack array (with mixed types)
-    o.pack_array(27);
+    o.pack_array(29);
     // Item 0: header string
     o.pack("assembled_chunk in msgpack format");
     // Item 1: version number
@@ -126,6 +126,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     }
 
     // Item[21]
+    o.pack(ch->detrend_t_type);
     o.pack(ch->n_detrend_t);
     bool hasit = ch->has_detrend_t;
     o.pack(hasit);
@@ -137,7 +138,8 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
         o.pack_bin(0);
     }
 
-    // Item[24]
+    // Item[25]
+    o.pack(ch->detrend_f_type);
     o.pack(ch->n_detrend_f);
     hasit = ch->has_detrend_f;
     o.pack(hasit);
@@ -148,6 +150,8 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     } else {
         o.pack_bin(0);
     }
+
+    // (up to Item[28] written)
 
 }
 
