@@ -328,6 +328,8 @@ public:
 
 	int nupfreq = 0;
 	int nrfifreq = 0;
+        int n_detrend_t = 0; // number of parameters for time/freq detrenders
+        int n_detrend_f = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 384;
 	int stream_id = 0;   // only used in assembled_chunk::format_filename().
@@ -693,6 +695,8 @@ public:
 	int beam_id = 0;
 	int nupfreq = 0;
         int nrfifreq = 0;    // number of frequencies in downsampled RFI chain processing
+        int n_detrend_t = 0; // number of parameters for time/freq detrenders
+        int n_detrend_f = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	int binning = 1;
@@ -727,6 +731,8 @@ public:
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
     const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
+    const int n_detrend_t = 0;
+    const int n_detrend_f = 0;
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
@@ -785,7 +791,8 @@ public:
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);   // also randomizes rfi_mask (if it exists)
 
-    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq);
+    static ssize_t get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq,
+                                        int n_detrend_t, int n_detrend_f);
 
     // I wanted to make the following fields protected, but msgpack doesn't like it...
 
@@ -794,10 +801,15 @@ public:
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
     uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (nrfifreq x constants::nt_per_assembled_chunk / 8 bits)
+    float *detrend_params_t = nullptr;
+    float *detrend_params_f = nullptr;
 
     // False on initialization.
     // If the RFI mask is being saved (nrfifreq > 0), it will be subsequently set to True by the processing thread.
     std::atomic<bool> has_rfi_mask;
+
+    std::atomic<bool> has_detrend_t;
+    std::atomic<bool> has_detrend_f;
 
     std::atomic<int> packets_received;
 

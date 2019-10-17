@@ -693,6 +693,8 @@ std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(
     chunk_params.beam_id = this->beam_id;
     chunk_params.nupfreq = this->ini_params.nupfreq;
     chunk_params.nrfifreq = this->ini_params.nrfifreq;
+    chunk_params.n_detrend_t = this->ini_params.n_detrend_t;
+    chunk_params.n_detrend_f = this->ini_params.n_detrend_f;
     chunk_params.nt_per_packet = this->ini_params.nt_per_packet;
     chunk_params.fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     chunk_params.frame0_nano = this->frame0_nano;

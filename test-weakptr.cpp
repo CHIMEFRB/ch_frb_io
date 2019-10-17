@@ -16,7 +16,7 @@ int main() {
     out_ini.device_name = "/tmp";
     out_ini.verbosity = 3;
 
-    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet, nrfifreq);
+    int nbytes_per_memory_slab = assembled_chunk::get_memory_slab_size(nupfreq, nt_per_packet, nrfifreq, 0, 0);
     shared_ptr<memory_slab_pool> pool = make_shared<memory_slab_pool>(nbytes_per_memory_slab, 10, vector<int>(), 1);
 
     intensity_network_stream::initializer ini_params;

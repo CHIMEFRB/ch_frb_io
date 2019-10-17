@@ -56,6 +56,8 @@ struct memory_slab_layout {
     const int nb_ds_data;
     const int nb_ds_mask;
     const int nb_ds_w2;
+    const int nb_detrend_t;
+    const int nb_detrend_f;
 
     // All ib_* fields are array offsets within the memory_slab, in bytes
     const int ib_data;
@@ -65,11 +67,14 @@ struct memory_slab_layout {
     const int ib_ds_data;
     const int ib_ds_mask;
     const int ib_ds_w2;
+    const int ib_detrend_t;
+    const int ib_detrend_f;
     const int slab_size;
 
     static int align(int nbytes) { return ((nbytes+63)/64) * 64; }
 
-    memory_slab_layout(int nupfreq, int nt_per_packet, int nrfifreq) :
+    memory_slab_layout(int nupfreq, int nt_per_packet, int nrfifreq,
+                       int n_detrend_t, int n_detrend_f) :
 	nfreq_c(constants::nfreq_coarse_tot),
 	nfreq_f(constants::nfreq_coarse_tot * nupfreq),
 	nt_f(constants::nt_per_assembled_chunk),
@@ -81,6 +86,8 @@ struct memory_slab_layout {
 	nb_ds_data(nupfreq * (nt_f/2) * sizeof(float)),
 	nb_ds_mask(nupfreq * (nt_f/2) * sizeof(int)),
 	nb_ds_w2((nt_c/2) * sizeof(float)),
+        nb_detrend_t(nt_f * n_detrend_t * sizeof(float)),
+        nb_detrend_f(nfreq_f * n_detrend_f * sizeof(float)),
 	ib_data(0),
 	ib_scales(align(ib_data + nb_data)),
 	ib_offsets(align(ib_scales + nb_scales)),
@@ -88,7 +95,9 @@ struct memory_slab_layout {
 	ib_ds_data(align(ib_rfimask + nb_rfimask)),
 	ib_ds_mask(align(ib_ds_data + nb_ds_data)),
 	ib_ds_w2(align(ib_ds_mask + nb_ds_mask)),
-	slab_size(align(ib_ds_w2 + nb_ds_w2))
+        ib_detrend_t(align(ib_ds_w2 + nb_ds_w2)),
+        ib_detrend_f(align(ib_detrend_t + nb_detrend_t)),
+	slab_size(align(ib_detrend_f + nb_detrend_f))
     { }
 };
 
@@ -107,10 +116,14 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
     nrfimaskbytes(nrfifreq * constants::nt_per_assembled_chunk / 8),
+    n_detrend_t(ini_params.n_detrend_t),
+    n_detrend_f(ini_params.n_detrend_f),
     isample(ichunk * constants::nt_per_assembled_chunk),
     fpga_begin(ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
     fpga_end((ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample),
     has_rfi_mask(false),
+    has_detrend_t(false),
+    has_detrend_f(false),
     packets_received(0)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
@@ -134,7 +147,8 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     if (ichunk > ichunk_max)
 	throw runtime_error("assembled_chunk constructor: bad 'ichunk' argument");
 
-    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
+    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq,
+                          n_detrend_t, n_detrend_f);
 
     if (ini_params.pool) {
 	if (!ini_params.slab)
@@ -162,6 +176,8 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     this->scales = reinterpret_cast<float *> (memory_slab.get() + mc.ib_scales);
     this->offsets = reinterpret_cast<float *> (memory_slab.get() + mc.ib_offsets);
     this->rfi_mask = nrfifreq ? reinterpret_cast<uint8_t *> (memory_slab.get() + mc.ib_rfimask) : nullptr;
+    this->detrend_params_t = n_detrend_t ? reinterpret_cast<float *> (memory_slab.get() + mc.ib_detrend_t) : nullptr;
+    this->detrend_params_f = n_detrend_f ? reinterpret_cast<float *> (memory_slab.get() + mc.ib_detrend_f) : nullptr;
     this->ds_data = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_data);
     this->ds_mask = reinterpret_cast<int *> (memory_slab.get() + mc.ib_ds_mask);
     this->ds_w2 = reinterpret_cast<float *> (memory_slab.get() + mc.ib_ds_w2);
@@ -187,6 +203,8 @@ void assembled_chunk::_deallocate()
     this->offsets = nullptr;
     this->data = nullptr;
     this->rfi_mask = nullptr;
+    this->detrend_params_t = nullptr;
+    this->detrend_params_f = nullptr;
     this->ds_w2 = nullptr;
     this->ds_data = nullptr;
     this->ds_mask = nullptr;
@@ -194,7 +212,7 @@ void assembled_chunk::_deallocate()
 
     
 // Static member function
-ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq)
+ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq, int n_detrend_t, int n_detrend_f)
 {
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nupfreq' argument");
@@ -205,7 +223,7 @@ ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet, in
     if ((nrfifreq > 0) && ((constants::nfreq_coarse_tot * nupfreq) % nrfifreq))
 	throw runtime_error("assembled_chunk::get_memory_slab_size(): bad 'nrfifreq' argument");
 
-    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq);
+    memory_slab_layout mc(nupfreq, nt_per_packet, nrfifreq, n_detrend_t, n_detrend_f);
     return mc.slab_size;
 }
 
