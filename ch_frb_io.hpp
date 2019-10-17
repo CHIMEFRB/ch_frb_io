@@ -731,8 +731,8 @@ public:
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
     const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
-    const int n_detrend_t = 0;
-    const int n_detrend_f = 0;
+    const int n_detrend_t = 0;  // number of detrending terms *per time bin*
+    const int n_detrend_f = 0;  // number of detrending terms *per freq bin*
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
