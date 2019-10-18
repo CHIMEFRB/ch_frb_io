@@ -737,8 +737,8 @@ public:
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
 
-    std::string detrend_t_type = "";
-    std::string detrend_f_type = "";
+    std::string detrend_t_type = "none";
+    std::string detrend_f_type = "none";
 
     // Note: you probably don't want to call the assembled_chunk constructor directly!
     // Instead use the static factory function assembed_chunk::make().

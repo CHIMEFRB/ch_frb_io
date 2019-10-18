@@ -649,9 +649,12 @@ void assembled_chunk::write_msgpack_file(const string &filename, bool compress, 
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
     msgpack::packer<msgpack::fbuffer> packer(fb);
-    // The real deal: in assembled_chunk_msgpack.hpp
-    pack_assembled_chunk(packer, shthis, compress, buffer);
-
+    try {
+        // The real deal: in assembled_chunk_msgpack.hpp
+        pack_assembled_chunk(packer, shthis, compress, buffer);
+    } catch (exception &e) {
+        throw runtime_error("ch_frb_io: failed to write assembled_chunk msgpack file contents: " + string(e.what()) + " / " + string(strerror(errno)));
+    }
     if (fclose(f))
         throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack temp file " + string(tempfilename) + ": " + string(strerror(errno)));
 
