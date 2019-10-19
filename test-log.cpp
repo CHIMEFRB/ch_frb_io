@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iostream>
 #include <mutex>
+#include <functional>
 #include <unistd.h>
 #include <zmq.hpp>
 #include "chlog.hpp"
