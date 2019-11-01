@@ -440,7 +440,11 @@ public:
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
 
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index, bool wait=true);
-    
+
+    // Called when the given assembled_chunk has been updated (eg, RFI mask
+    // or detrending arrays have been filled in).
+    void updated_assembled_chunk(std::shared_ptr<assembled_chunk>);
+
     // Can be called at any time, from any thread.  Note that the event counts returned by get_event_counts()
     // may slightly lag the real-time event counts (this behavior derives from wanting to avoid acquiring a
     // lock in every iteration of the packet read loop).
@@ -992,9 +996,9 @@ public:
     // Blocks until i/o thread exits.  Call end_stream() first!
     void join_thread();
 
-    // Called (by RFI thread) to notify that the given chunk has had its
-    // RFI mask filled in.
-    void filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk);
+    // Called (by RFI thread) to notify that the given chunk has been updated
+    // (eg, had its RFI mask filled in)
+    void chunk_updated(const std::shared_ptr<assembled_chunk> &chunk);
 
 protected:
     std::thread output_thread;

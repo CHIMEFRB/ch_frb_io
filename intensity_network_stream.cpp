@@ -339,6 +339,11 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     return ret;
 }
 
+void intensity_network_stream::updated_assembled_chunk(std::shared_ptr<assembled_chunk> chunk) {
+    // Notify output_devices
+    for (auto od : ini_params.output_devices)
+        od->chunk_updated(chunk);
+}
 
 vector<int64_t> intensity_network_stream::get_event_counts()
 {

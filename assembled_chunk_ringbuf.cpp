@@ -654,6 +654,7 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wa
     if (chunk) {
         assert(chunk->fpga_end > this->max_fpga_retrieved);
         this->max_fpga_retrieved = chunk->fpga_end;
+        chlog("Assembled chunk ready to enter rf_pipelines: beam " << chunk->beam_id << ", chunk " << chunk->ichunk);
     }
     return chunk;
 }

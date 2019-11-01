@@ -172,18 +172,16 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 int output_device::count_queued_write_requests() {
     unique_lock<std::mutex> ulock(_lock);
     int rtn = _write_reqs.size();
-    ulock.unlock();
     return rtn;
 }
 
-// This gets called by the chime_mask_counter class in rf_pipelines
-// to tell us that a chunk's RFI mask has been filled in.
-void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
+// This gets called by the RFI/bonsai thread when a chunk's RFI mask,
+// detrending arrays, etc get filled in.
+void output_device::chunk_updated(const std::shared_ptr<assembled_chunk> &chunk) {
     // FIXME? -- simplest approach -- tell i/o thread(s) waiting on the
     // queue not being empty that something may have happened!
     unique_lock<std::mutex> ulock(_lock);
     _cond.notify_all();
-    ulock.unlock();
 }
 
 // Called internally by I/O thread.
