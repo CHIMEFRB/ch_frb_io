@@ -30,7 +30,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
                           uint8_t* buffer=NULL) {
     // pack member variables as an array.
     //std::cout << "Pack shared_ptr<assembled-chunk> into msgpack object..." << std::endl;
-    uint8_t version = 2;
+    uint8_t version = 3;
     // We are going to pack N items as a msgpack array (with mixed types)
     o.pack_array(29);
     // Item 0: header string
@@ -131,7 +131,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     bool hasit = ch->has_detrend_t;
     o.pack(hasit);
     if (hasit) {
-        int nbytes = ch->n_detrend_t * ch->nt_per_packet * ch->nt_coarse * sizeof(float);
+        int nbytes = ch->n_detrend_t * ch->nupfreq * ch_frb_io::constants::nfreq_coarse_tot * sizeof(float);
         o.pack_bin(nbytes);
         o.pack_bin_body(reinterpret_cast<const char*>(ch->detrend_params_t), nbytes);
     } else {
@@ -144,7 +144,7 @@ void pack_assembled_chunk(msgpack::packer<Stream>& o,
     hasit = ch->has_detrend_f;
     o.pack(hasit);
     if (hasit) {
-        int nbytes = ch->n_detrend_f * ch->nupfreq * ch_frb_io::constants::nfreq_coarse_tot * sizeof(float);
+        int nbytes = ch->n_detrend_f * ch->nt_per_packet * ch->nt_coarse * sizeof(float);
         o.pack_bin(nbytes);
         o.pack_bin_body(reinterpret_cast<const char*>(ch->detrend_params_f), nbytes);
     } else {
@@ -179,8 +179,11 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         } else if (version == 2) {
             if (o.via.array.size != 21)
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack version 2: expected 21 items, got " + std::to_string(o.via.array.size));
+        } else if (version == 3) {
+            if (o.via.array.size != 27)
+                throw std::runtime_error("ch_frb_io: assembled_chunk msgpack version 3: expected 29 items, got " + std::to_string(o.via.array.size));
         } else {
-            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: expected version = 1 or 2, got " + std::to_string(version));
+            throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: expected version = 1, 2, or 3, got " + std::to_string(version));
         }
 
         enum compression_type comp = (enum compression_type)arr[2].as<uint8_t>();
@@ -203,7 +206,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint64_t ichunk = isample / ch_frb_io::constants::nt_per_assembled_chunk;
 
         uint64_t frame0_nano = 0;
-        if (version == 2)
+        if (version >= 2)
             frame0_nano = arr[17].as<uint64_t>();
 
 	ch_frb_io::assembled_chunk::initializer ini_params;
@@ -215,8 +218,13 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.ichunk = ichunk;
         ini_params.frame0_nano = frame0_nano;
 
-        if (version == 2)
+        if (version >= 2)
             ini_params.nrfifreq = arr[18].as<int>();
+
+        if (version >= 3) {
+            ini_params.n_detrend_t = arr[22].as<int>();
+            ini_params.n_detrend_f = arr[26].as<int>();
+        }
 
         ch = ch_frb_io::assembled_chunk::make(ini_params);
 
@@ -253,13 +261,38 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
                 throw std::runtime_error("ch_frb_io: assembled_chunk msgpack bitshuffle decompression failure, code " + std::to_string(n));
         }
 
-        if (version == 2) {
+        if (version >= 2) {
             ch->has_rfi_mask = arr[19].as<bool>();
             if (ch->has_rfi_mask) {
                 uint nb = ch->nrfimaskbytes;
                 if (arr[20].via.bin.size != (uint)nb)
                     throw msgpack::type_error();
                 memcpy(ch->rfi_mask, arr[20].via.bin.ptr, nb);
+            }
+        }
+
+        if (version >= 3) {
+            ch->detrend_t_type = arr[21].as<std::string>();
+            ch->has_detrend_t  = arr[23].as<bool>();
+            ch->detrend_f_type = arr[25].as<std::string>();
+            ch->has_detrend_f  = arr[27].as<bool>();
+            if (ch->has_detrend_t && !ch->detrend_params_t)
+                throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: has_detrend_t, but array was not allocated!");
+            if (ch->has_detrend_f && !ch->detrend_params_f)
+                throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: has_detrend_f, but array was not allocated!");
+            if (ch->has_detrend_t) {
+                uint nb = arr[24].via.bin.size;
+                uint nexpect = ch->n_detrend_t * nupfreq * ch_frb_io::constants::nfreq_coarse_tot * sizeof(float);
+                if (nb != nexpect)
+                    throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: expected " + std::to_string(nexpect) + " bytes of detrend_t data, but got " + std::to_string(nb));
+                memcpy(ch->detrend_params_t, arr[24].via.bin.ptr, nb);
+            }
+            if (ch->has_detrend_f) {
+                uint nb = arr[28].via.bin.size;
+                uint nexpect = ch->n_detrend_f * ch_frb_io::constants::nt_per_assembled_chunk * sizeof(float);
+                if (nb != nexpect)
+                    throw std::runtime_error("ch_frb_io: assembled_chunk msgpack: expected " + std::to_string(nexpect) + " bytes of detrend_f data, but got " + std::to_string(nb));
+                memcpy(ch->detrend_params_f, arr[28].via.bin.ptr, nb);
             }
         }
 

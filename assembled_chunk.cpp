@@ -86,8 +86,8 @@ struct memory_slab_layout {
 	nb_ds_data(nupfreq * (nt_f/2) * sizeof(float)),
 	nb_ds_mask(nupfreq * (nt_f/2) * sizeof(int)),
 	nb_ds_w2((nt_c/2) * sizeof(float)),
-        nb_detrend_t(nt_f * n_detrend_t * sizeof(float)),
-        nb_detrend_f(nfreq_f * n_detrend_f * sizeof(float)),
+        nb_detrend_t(nfreq_f * n_detrend_t * sizeof(float)),
+        nb_detrend_f(nt_f    * n_detrend_f * sizeof(float)),
 	ib_data(0),
 	ib_scales(align(ib_data + nb_data)),
 	ib_offsets(align(ib_scales + nb_scales)),
@@ -550,6 +550,8 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
 		       nupfreq, nt_f, nt_per_packet);
     }
 
+    fake_downsample_detrenders();
+
     if (nrfifreq <= 0)
 	return;
 
@@ -568,6 +570,25 @@ void assembled_chunk::downsample(const assembled_chunk *src1, const assembled_ch
     }
 
     this->has_rfi_mask = true;
+}
+
+void assembled_chunk::fake_downsample_detrenders() {
+    // Bail out and don't try to downsample detrending coefficients -- but
+    // do set them to zero to mark as invalid.
+    if (n_detrend_t) {
+        memset(this->detrend_params_t, 0,
+               constants::nfreq_coarse_tot * this->nupfreq *
+               this->n_detrend_t * sizeof(float));
+        this->detrend_t_type = "NONE";
+        this->has_detrend_t = true;
+    }
+    if (n_detrend_f) {
+        memset(this->detrend_params_f, 0,
+               constants::nt_per_assembled_chunk *
+               this->n_detrend_f * sizeof(float));
+        this->detrend_f_type = "NONE";
+        this->has_detrend_f = true;
+    }
 }
 
 

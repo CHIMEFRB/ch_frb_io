@@ -494,7 +494,7 @@ public:
     // Returns the set of packet rates with timestamps overlapping *start* to *end*.
     // If *start* is zero, treat as NOW.  If *start* or *end* are negative, NOW - that many seconds.
     std::vector<std::shared_ptr<packet_counts> > get_packet_rate_history(double start, double end, double period);
-    
+
     // For debugging/testing purposes: pretend that the given
     // assembled_chunk has just arrived.  Returns true if there was
     // room in the ring buffer for the new chunk.
@@ -735,8 +735,8 @@ public:
     const int nscales = 0;            // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;              // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
     const int nrfimaskbytes = 0;      // equal to (nrfifreq * constants::nt_per_assembled_chunk / 8)
-    const int n_detrend_t = 0;  // number of detrending terms *per time bin*
-    const int n_detrend_f = 0;  // number of detrending terms *per freq bin*
+    const int n_detrend_t = 0;        // number of terms for detrending *along* the time axis; this is the number of terms *per frequency bin*
+    const int n_detrend_f = 0;        // number of terms for detrending *along* the freq axis; this is the number of terms "per time bin"
     const uint64_t isample = 0;       // equal to ichunk * constants::nt_per_assembled_chunk
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     const uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
@@ -770,6 +770,7 @@ public:
     virtual void decode(float *intensity, float *weights, int istride, int wstride, float prescale=1.0) const;
     virtual void decode_subset(float *intensity, float *weights, int t0, int nt, int istride, int wstride) const;
     virtual void downsample(const assembled_chunk *src1, const assembled_chunk *src2);   // downsamples data and RFI mask
+    void fake_downsample_detrenders();
 
     // Static factory functions which can return either an assembled_chunk or a fast_assembled_chunk.
     static std::unique_ptr<assembled_chunk> make(const initializer &ini_params);
@@ -808,7 +809,9 @@ public:
     float *offsets = nullptr;  // 2d array of shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // 2d array of shape (constants::nfreq_coarse * nupfreq, constants::nt_per_assembled_chunk)
     uint8_t *rfi_mask = nullptr;   // 2d array of downsampled masks, packed bitwise; (nrfifreq x constants::nt_per_assembled_chunk / 8 bits)
+    // Careful here: detrend_params_t has nfreq x n_detrend_t elements.
     float *detrend_params_t = nullptr;
+    // Careful here: detrend_params_f has nt x n_detrend_f elements.
     float *detrend_params_f = nullptr;
 
     // False on initialization.
