@@ -210,6 +210,11 @@ void assembled_chunk::_deallocate()
     this->ds_mask = nullptr;
 }
 
+bool assembled_chunk::has_all_fields() {
+    return has_rfi_mask &&
+        ((n_detrend_t == 0) || has_detrend_t) &&
+        ((n_detrend_f == 0) || has_detrend_f);
+}
     
 // Static member function
 ssize_t assembled_chunk::get_memory_slab_size(int nupfreq, int nt_per_packet, int nrfifreq, int n_detrend_t, int n_detrend_f)
@@ -636,7 +641,7 @@ void assembled_chunk::write_msgpack_file(const string &filename, bool compress, 
     if ((this->rfi_mask != nullptr) && (!this->has_rfi_mask))
 	throw runtime_error("ch_frb_io::assembled_chunk::write_msgpack_file() called on chunk whose RFI mask has not been initialized yet");
     
-    char tempfilename[filename.size() + 10];
+    char tempfilename[filename.size() + 11];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
     int fd = mkstemp(tempfilename);
     if (fd == -1)

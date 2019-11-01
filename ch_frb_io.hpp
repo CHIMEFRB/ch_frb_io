@@ -818,6 +818,9 @@ public:
     std::atomic<bool> has_detrend_t;
     std::atomic<bool> has_detrend_f;
 
+    // checks whether has_rfi_mask is set, and has_detrend_{t,f}, if being used
+    bool has_all_fields();
+
     std::atomic<int> packets_received;
 
     // Temporary buffers used during downsampling.

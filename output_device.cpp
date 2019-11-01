@@ -144,7 +144,7 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	return false;
     }
 
-    if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
+    if (req->need_rfi_mask && !req->chunk->has_all_fields()) {
         _awaiting_rfi.push_back(req);
         req->status_changed(false, true, "AWAITING_RFI", "Waiting for RFI mask to be computed");
     } else {
@@ -193,8 +193,9 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
         // Check whether any chunks that were waiting for RFI masks to be
         // filled in have been.
         for (auto req=_awaiting_rfi.begin(); req!=_awaiting_rfi.end(); req++) {
-            if ((*req)->chunk->has_rfi_mask) {
-                cout << "Chunk " << (*req)->filename << " got its RFI mask!" << endl;
+            auto ch = (*req)->chunk;
+            if (ch->has_all_fields()) {
+                cout << "Chunk " << (*req)->filename << " got its RFI mask (etc)!" << endl;
                 _write_reqs.push((*req));
                 (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
                 auto toerase = req;
