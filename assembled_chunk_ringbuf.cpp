@@ -326,6 +326,8 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	active_chunk1->add_packet(packet);
     }
     else {
+        chlog("Assembler miss (packet_ichunk " << packet_ichunk << " vs active " << active_chunk0->ichunk << " and " << active_chunk1->ichunk
+              << "), from " << ip_to_string(packet.sender));
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
 	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");

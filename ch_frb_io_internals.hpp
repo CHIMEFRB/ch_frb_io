@@ -51,6 +51,10 @@ namespace ch_frb_io {
 #endif
 
 
+// in misc.cpp
+std::string ip_to_string(const sockaddr_in &addr);
+
+
 // -------------------------------------------------------------------------------------------------
 //
 // struct intensity_packet: a lightweight struct representing one UDP packet.
@@ -68,6 +72,8 @@ struct intensity_packet {
     uint16_t  nfreq_coarse;
     uint16_t  nupfreq;
     uint16_t  ntsamp;
+
+    sockaddr_in sender;
 
     // "Pointer" fields
     uint16_t  *beam_ids;          // 1D array of length nbeams
@@ -172,6 +178,8 @@ struct udp_packet_list {
     std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
     std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
 
+    std::vector<sockaddr_in> sender; // of length max_npackets
+    
     // Bare pointers.
     uint8_t *data_start = nullptr;    // points to &buf[0]
     uint8_t *data_end = nullptr;      // points to &buf[curr_nbytes]
@@ -185,7 +193,7 @@ struct udp_packet_list {
 
     // To add a packet, we copy its data to the udp_packet_list::data_end pointer, then call add_packet()
     // to update the rest of the udp_packet_list fields consistently.
-    void add_packet(int packet_nbytes);
+    void add_packet(int packet_nbytes, const sockaddr_in &sender);
 
     // Doesn't deallocate buffers or change the max_* fields, but sets the current packet count to zero.
     void reset();

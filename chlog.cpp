@@ -22,6 +22,9 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
+// in misc.cpp
+std::string ip_to_string(const sockaddr_in &addr);
+
 static string 
 vstringprintf(const char* format, va_list lst) {
     char temps[256];
@@ -286,13 +289,10 @@ chime_log_server::chime_log_server(std::ostream& out,
                 for(a = addrs; a != NULL; a = a->ai_next) {
                     if (a->ai_family != AF_INET)
                         continue;
-                    char dots[INET_ADDRSTRLEN];
                     struct sockaddr_in* sin = reinterpret_cast<struct sockaddr_in*>(a->ai_addr);
-                    if (!inet_ntop(AF_INET, &(sin->sin_addr), dots, INET_ADDRSTRLEN)) {
-                        cout << "Failed to inet_ntop: " << strerror(errno) << endl;
-                    } else {
-                        ipaddress = dots;
-                        //cout << "My address: " << dots << endl;
+                    string ipstr = ip_to_string(*sin);
+                    if (ipstr.size()) {
+                        ipaddress = ipstr;
                         break;
                     }
                 }

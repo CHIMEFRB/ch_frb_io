@@ -295,7 +295,9 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, int istrid
 	    if (_unlikely(nbytes_encoded != nbytes_per_packet))
 		throw runtime_error("ch_frb_io: internal error in network_ostream: nbytes_encoded != nbytes_per_packet");
 
-	    out->add_packet(nbytes_per_packet);
+            sockaddr_in fake;
+            memset(&fake, 0, sizeof(sockaddr_in));
+	    out->add_packet(nbytes_per_packet, fake);
 	}
     }
 }

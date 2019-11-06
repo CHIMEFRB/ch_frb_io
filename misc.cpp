@@ -1,4 +1,5 @@
 #include <thread>
+#include <arpa/inet.h>
 #include "ch_frb_io.hpp"
 
 using namespace std;
@@ -8,6 +9,20 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
+
+std::string ip_to_string(const sockaddr_in &addr) {
+    char dots[INET_ADDRSTRLEN];
+
+    if (addr.sin_family != AF_INET) {
+        cout << "ch_frb_io: ip_to_string only works for IPv4 addresses" << endl;
+        return "";
+    }
+    if (!inet_ntop(AF_INET, &(addr.sin_addr), dots, INET_ADDRSTRLEN)) {
+        cout << "ch_frb_io:ip_to_string: Failed to inet_ntop: " << strerror(errno) << endl;
+        return "";
+    }
+    return string(dots);
+}
 
 void pin_thread_to_cores(const vector<int> &core_list)
 {
