@@ -1,5 +1,6 @@
 #include <thread>
 #include <arpa/inet.h>
+#include <string.h>
 #include "ch_frb_io.hpp"
 
 using namespace std;

@@ -308,6 +308,10 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
+
+      chlog("Received a packet with ichunk = " << packet_ichunk << ", vs active chunks " << active_chunk0->ichunk << " and " << active_chunk1->ichunk
+	    << " -- shipping out " << active_chunk0->ichunk << " -- sender " << ip_to_string(packet.sender));
+
 	this->_put_assembled_chunk(active_chunk0, event_counts);
 
         // After _put_assembled_chunk(), active_chunk0 has been reset to a null pointer.
