@@ -783,6 +783,8 @@ public:
     std::atomic<bool> has_rfi_mask;
 
     std::atomic<int> packets_received;
+  // how many assembler misses occurred while this chunk was active_chunk0?
+    std::atomic<int> packets_missed;
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
