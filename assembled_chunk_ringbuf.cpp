@@ -309,8 +309,8 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// in the far future effectively kills the L1 node.
 	//
 
-      chlog("Got packet with ichunk = " << packet_ichunk << ", vs active " << active_chunk2->ichunk << ", " << active_chunk1->ichunk << ", " << active_chunk0->ichunk
-	    << " (" << active_chunk2->packets_received << ", " << active_chunk1->packets_received << ", " << active_chunk0->packets_received << " packets received, " << active_chunk0->packets_missed << " missed) -- sender "
+      chlog("Got packet with ichunk = " << packet_ichunk << ", vs active " << active_chunk1->ichunk << ", " << active_chunk0->ichunk
+	    << " (" << active_chunk1->packets_received << ", " << active_chunk0->packets_received << " packets received, " << active_chunk0->packets_missed << " missed) -- sender "
 	    << ip_to_string(packet.sender));
 
 	this->_put_assembled_chunk(active_chunk0, event_counts);
