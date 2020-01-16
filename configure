@@ -1,0 +1,103 @@
+#!/usr/bin/env python
+
+
+hpp_files = [
+    'assembled_chunk_msgpack.hpp',
+    'ch_frb_io.hpp',
+    'ch_frb_io_internals.hpp',
+    'chlog.hpp',
+]
+
+# In bitshuffle/ subdirectory.
+# Currently installing in $(INCDIR), not $(INCDIR)/bitshuffle, which seems a little weird.
+bitshuffle_hpp_files = [
+    'bitshuffle.h',
+    'bitshuffle_core.h',
+    'bitshuffle_internals.h',
+    'iochain.h'
+]
+
+cpp_core_files = [
+    'assembled_chunk.cpp',
+    'assembled_chunk_ringbuf.cpp',
+    'avx2_kernels.cpp',
+    'chlog.cpp',
+    'hdf5.cpp',
+    'intensity_hdf5_file.cpp',
+    'intensity_hdf5_ofile.cpp',
+    'intensity_network_stream.cpp',
+    'intensity_network_ostream.cpp',
+    'intensity_packet.cpp',
+    'lexical_cast.cpp',
+    'memory_slab_pool.cpp',
+    'misc.cpp',
+    'output_device.cpp',
+    'output_device_pool.cpp',
+    'udp_packet_list.cpp',
+    'udp_packet_ringbuf.cpp',
+    'bitshuffle/bitshuffle.c',
+    'bitshuffle/bitshuffle_core.c',
+    'bitshuffle/iochain.c'
+]
+
+cpp_unit_tests = [
+    'test-intensity-hdf5-file.cpp',
+    'test-assembled-chunk.cpp',
+    'test-misc.cpp',
+    'test-network-streams.cpp',
+    'test-log.cpp',
+    'test-weakptr.cpp'
+]
+
+cpp_installed_binaries = [
+    'ch-show-intensity-file.cpp'
+]
+
+cpp_non_installed_binaries = [
+    'time-assembled-chunk-write.cpp',
+    'time-kernels.cpp'
+]
+
+
+####################################################################################################
+
+
+import build_helpers
+
+# If called recursively in superbuild, a global persistent ConfigureScript will be returned.
+cs = build_helpers.get_global_configure_script()
+cs.configure_install_directories(bin=True, inc=True, lib=True, py=False)
+cs.configure_cpp('-fPIC -Wall -Wno-strict-aliasing -O3 -march=native -ffast-math -funroll-loops --param inline-unit-growth=10000')
+
+# External dependencies.
+cs.configure_external_library(build_helpers.external_libraries.lz4)
+cs.configure_external_library(build_helpers.external_libraries.curl)
+cs.configure_external_library(build_helpers.external_libraries.hdf5)
+cs.configure_external_library(build_helpers.external_libraries.cppzmq)
+cs.configure_external_library(build_helpers.external_libraries.msgpack)
+cs.configure_external_library(build_helpers.external_libraries.jsoncpp)
+
+cs.install_cpp_headers(hpp_files)
+cs.install_cpp_headers(bitshuffle_hpp_files, srcdir='bitshuffle')
+
+cs.make_cpp_library('ch_frb_io', cpp_core_files, sublibs=['lz4','curl','hdf5','cppzmq','msgpack','jsoncpp'])
+
+# C++ unit tests
+for cpp_filename in cpp_unit_tests:
+    cs.make_binary(sources=[cpp_filename], libraries=['ch_frb_io'], test=True)
+
+# C++ installed binaries
+for cpp_filename in cpp_installed_binaries:
+    cs.make_binary(sources=[cpp_filename], libraries=['ch_frb_io'], install=True)
+
+# C++ "non-installed" binaries
+for cpp_filename in cpp_non_installed_binaries:
+    cs.make_binary(sources=[cpp_filename], libraries=['ch_frb_io'], install=False)
+
+# Stray python script.
+# (Note that it requires rf_pipelines, which isn't supposed to be a dependency of ch_frb_io.)
+cs.install_binary('ch-plot-intensity-file')
+
+# If called recursively in superbuild, write_output_files() will not be called here.
+if __name__ == '__main__':
+    cs.write_output_files()
