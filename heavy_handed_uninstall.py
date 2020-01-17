@@ -2,8 +2,8 @@
 
 import build_helpers
 
-# If called recursively in superbuild, a global persistent LegacyUninstaller will be returned.
-u = build_helpers.get_global_legacy_uninstaller()
+# If called recursively in superbuild, a global persistent HeavyHandedUninstaller will be returned.
+u = build_helpers.get_global_heavy_handed_uninstaller()
 
 u.uninstall_headers('assembled_chunk_msgpack.hpp')
 u.uninstall_headers('ch_frb_io.hpp')
@@ -18,4 +18,4 @@ u.uninstall_executables('ch-plot-intensity-file')
 
 # If called recursively in superbuild, run() will not be called here.
 if __name__ == '__main__':
-    lu.run()
+    u.run()
