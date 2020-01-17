@@ -2,6 +2,7 @@
 #include <thread>
 #include <sstream>
 #include <iostream>
+#include <functional>
 #include <mutex>
 #include <unistd.h>
 #include <zmq.hpp>
