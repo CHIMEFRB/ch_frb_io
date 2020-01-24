@@ -936,6 +936,34 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 
 	_add_packet_kernel(dst, src, nupfreq);
     }
+
+    // L0 DEBUGGING
+    bool allzero = true;
+    for (int i=0; i<(packet.nfreq_coarse * packet.nbeams); i++)
+        if (packet.scales[i] > 0) {
+            allzero = false;
+            break;
+        }
+    if (allzero)
+        this->scales_zero++;
+
+    allzero = true;
+    for (int i=0; i<packet.data_nbytes; i++)
+        if (packet.data[i] != 0) {
+            allzero = false;
+            break;
+        }
+    if (allzero)
+        this->data_all_zero++;
+    bool all255 = true;
+    for (int i=0; i<packet.data_nbytes; i++)
+        if (packet.data[i] != 255) {
+            all255 = false;
+            break;
+        }
+    if (all255)
+        this->data_all_255++;
+
     this->packets_received++;
 }
 

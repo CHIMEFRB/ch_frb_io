@@ -801,6 +801,14 @@ public:
 
     std::atomic<int> packets_received;
 
+    // of the packets received, maximum number of 0/255 values in the raw data
+    //std::atomic<int> max_zero_data;
+    //std::atomic<int> max_255_data;
+    std::atomic<int> data_all_zero;
+    std::atomic<int> data_all_255;
+    // of the packets received, how many have zero scale factors?
+    std::atomic<int> scales_zero;
+
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
     float *ds_data = nullptr;  // 2d array of shape (nupfreq, constants::nt_per_assembled_chunk/2)
