@@ -57,6 +57,7 @@ CPP += -Ibitshuffle
 INCFILES=ch_frb_io.hpp \
         ch_frb_io_internals.hpp \
 	assembled_chunk_msgpack.hpp \
+	msgpack_binary_vector.hpp \
 	bitshuffle/bitshuffle.h bitshuffle/bitshuffle_core.h \
 	bitshuffle/bitshuffle_internals.h bitshuffle/iochain.h \
 	chlog.hpp
