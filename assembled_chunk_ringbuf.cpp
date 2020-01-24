@@ -389,8 +389,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     if (chunk->has_rfi_mask)
 	throw runtime_error("ch_frb_io: internal error: chunk passed to assembled_chunk_ringbuf::_put_unassembled_packet() has rfi_mask flag set");
 
-    //chlog("Assembled chunk " << chunk->ichunk << " beam " << beam_id << ": received " << chunk->packets_received << " packets");
-    chlog("Assembled chunk " << chunk->ichunk << " beam " << beam_id << ": received " << chunk->packets_received << " packets -- " << chunk->data_all_zero << " with data all 0, " << chunk->data_all_255 << " with data all 255, and " << chunk->scales_zero << " with all zero scale factors");
+    //chlog("Assembled chunk " << chunk->ichunk << " beam " << beam_id << ": received " << chunk->packets_received << " packets -- " << chunk->data_all_zero << " with data all 0, " << chunk->data_all_255 << " with data all 255, and " << chunk->scales_zero << " with all zero scale factors");
 
     // Step 1: prepare all data needed to modify the ring buffer.  In this step, we do all of our
     // buffer allocation and downsampling, without the lock held.  In step 2, we will acquire the
