@@ -894,7 +894,7 @@ void intensity_network_stream::_network_thread_body()
 	if (incoming_packet_list->curr_npackets == 0)
 	    incoming_packet_list_timestamp = curr_timestamp;
 
-	incoming_packet_list->add_packet(packet_nbytes);
+	incoming_packet_list->add_packet(packet_nbytes, sender_addr);
 
         //rate_nbytes += packet_nbytes;
         //rate_npackets++;
@@ -1184,7 +1184,10 @@ void intensity_network_stream::_assembler_thread_body()
                 int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
                 intensity_packet packet;
 
+                packet.sender = packet_list->sender[ipacket];
+
                 if (!packet.decode(packet_data, packet_nbytes)) {
+                    chlog("Bad packet (header) from " << ip_to_string(packet.sender));
                     event_subcounts[event_type::packet_bad]++;
                     continue;
                 }
@@ -1203,7 +1206,7 @@ void intensity_network_stream::_assembler_thread_body()
                            << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
                         throw runtime_error(ss.str());
                     }
-
+                    chlog("Packet stream mismatch from " << ip_to_string(packet.sender));
                     event_subcounts[event_type::stream_mismatch]++;
                     continue;
                 }
@@ -1255,6 +1258,7 @@ void intensity_network_stream::_assembler_thread_body()
                     for (;;) {
                         if (assembler_ix >= nbeams) {
                             // No match found
+                            chlog("Beam id mismatch from " << ip_to_string(packet.sender));
                             event_subcounts[event_type::beam_id_mismatch]++;
                             if (ini_params.throw_exception_on_beam_id_mismatch)
                                 throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
@@ -1273,7 +1277,6 @@ void intensity_network_stream::_assembler_thread_body()
 
                     // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
                     // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
-
                     packet.beam_ids += 1;
                     packet.scales += nfreq_coarse;
                     packet.offsets += nfreq_coarse;

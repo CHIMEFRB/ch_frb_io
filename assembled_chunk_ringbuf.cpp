@@ -290,6 +290,13 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
+
+        /*
+         chlog("Got packet with ichunk = " << packet_ichunk << ", vs active " << active_chunk1->ichunk << ", " << active_chunk0->ichunk
+         << " (" << active_chunk1->packets_received << ", " << active_chunk0->packets_received
+         << " packets received, " << active_chunk0->packets_missed << " missed) -- sender " << ip_to_string(packet.sender));
+         */
+
 	this->_put_assembled_chunk(active_chunk0, event_counts);
 
         // After _put_assembled_chunk(), active_chunk0 has been reset to a null pointer.
@@ -308,7 +315,10 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	active_chunk1->add_packet(packet);
     }
     else {
+      //chlog("Assembler miss (packet_ichunk " << packet_ichunk << " vs active " << active_chunk0->ichunk << " and " << active_chunk1->ichunk
+      //<< "), from " << ip_to_string(packet.sender));
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
+	active_chunk0->packets_missed++;
 	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
     }
