@@ -75,18 +75,8 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     // intensity_network_stream::initializer.  Now that this has been done, it
     // would make sense to add a lot more checks here!
 
-    int nbeams = ini_params.beam_ids.size();
-
-    if (nbeams == 0)
+    if (ini_params.nbeams == 0)
 	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
-
-    for (int i = 0; i < nbeams; i++) {
-	if ((ini_params.beam_ids[i] < 0) || (ini_params.beam_ids[i] > constants::max_allowed_beam_id))
-	    throw runtime_error("ch_frb_io: bad beam_id passed to intensity_network_stream constructor");
-	for (int j = 0; j < i; j++)
-	    if (ini_params.beam_ids[i] == ini_params.beam_ids[j])
-		throw runtime_error("ch_frb_io: duplicate beam_ids passed to intensity_network_stream constructor");
-    }
 
     if ((ini_params.nupfreq <= 0) || (ini_params.nupfreq > constants::max_allowed_nupfreq))
 	throw runtime_error("ch_frb_io: bad value of 'nupfreq'");
@@ -130,9 +120,9 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     // Note: the socket is initialized in _open_socket().
 
-    this->assemblers.resize(nbeams);
-    for (int ix = 0; ix < nbeams; ix++)
-	assemblers[ix] = make_shared<assembled_chunk_ringbuf> (ini_params, ini_params.beam_ids[ix], ini_params.stream_id);
+    this->assemblers.resize(ini_params.nbeams);
+    for (int ix = 0; ix < ini_params.nbeams; ix++)
+	assemblers[ix] = make_shared<assembled_chunk_ringbuf> (ini_params, ini_params.stream_id);
 
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
 								 ini_params.max_unassembled_packets_per_list, 
@@ -158,6 +148,12 @@ intensity_network_stream::~intensity_network_stream()
     }
 }
 
+shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
+    auto it = beam_to_assembler.find(beam_id);
+    if (it == beam_to_assembler.end())
+        return shared_ptr<assembled_chunk_ringbuf>();
+    return it->second;
+}
 
 // Socket initialization factored to its own routine, rather than putting it in the constructor,
 // so that the socket will always be closed if an exception is thrown somewhere.
@@ -262,7 +258,7 @@ void intensity_network_stream::join_threads()
 }
 
 
-void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &beam_ids, int priority, bool need_rfi)
+void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &stream_beam_ids, int priority, bool need_rfi)
 {
     // Throw exception if 'beam_ids' argument contains a beam_id which is not
     // actually processed by this stream.
@@ -270,22 +266,25 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
     // Note: The 'nbeams', 'assemblers', and 'ini_params.beam_ids' fields are constant
     // after initialization, so we don't need to acquire a lock for these fields.
 
-    for (int b: beam_ids)
-	if (!vcontains(ini_params.beam_ids, b))
-	    throw runtime_error("intensity_network_stream::stream_to_files(): specified beam_id " + to_string(b) + " is not contained in stream beam_ids: " + vstr(ini_params.beam_ids));
-    
-    // If we get here, the call is valid.  The stream_lock will be held throughout.
     unique_lock<mutex> ulock(stream_lock);
 
+    for (int b: stream_beam_ids) {
+        shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(b);
+        if (!assembler)
+	    throw runtime_error("intensity_network_stream::stream_to_files(): specified beam_id " + to_string(b) + " is not contained in by beam_ids: " + vstr(this->beam_ids));
+    }
+    
     this->stream_filename_pattern = filename_pattern;
-    this->stream_beam_ids = beam_ids;
+    this->stream_beam_ids = stream_beam_ids;
     this->stream_priority = priority;
     this->stream_rfi_mask = need_rfi;
     this->stream_chunks_written = 0;
     this->stream_bytes_written = 0;
-    
-    for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
-	if (vcontains(beam_ids, ini_params.beam_ids[ibeam]))
+
+    // We're going to set the streaming status for *all* our assemblers -- clearing those
+    // not in stream_beam_ids.
+    for (int ibeam = 0; ibeam < (int)this->beam_ids.size(); ibeam++) {
+	if (vcontains(stream_beam_ids, this->beam_ids[ibeam]))
 	    assemblers[ibeam]->stream_to_files(filename_pattern, priority, need_rfi);
 	else
 	    assemblers[ibeam]->stream_to_files("", 0, false);
@@ -305,8 +304,8 @@ void intensity_network_stream::get_streaming_status(std::string &filename_patter
 
     chunks_written = 0;
     bytes_written = 0;
-    for (int ibeam = 0; ibeam < (int)ini_params.beam_ids.size(); ibeam++) {
-	if (!vcontains(beam_ids, ini_params.beam_ids[ibeam]))
+    for (int ibeam = 0; ibeam < (int)this->beam_ids.size(); ibeam++) {
+	if (!vcontains(beam_ids, this->beam_ids[ibeam]))
             continue;
         int achunks = 0;
         size_t abytes = 0;
@@ -531,8 +530,7 @@ intensity_network_stream::get_statistics() {
 
     m["count_bytes_queued"] = socket_queued_bytes;
 
-    int nbeams = this->ini_params.beam_ids.size();
-    m["nbeams"] = nbeams;
+    m["nbeams"] = ini_params.nbeams;
 
     // output_device status
     int nqueued = 0;
@@ -582,9 +580,9 @@ intensity_network_stream::get_statistics() {
     R.push_back(this->get_perhost_packets());
 
     // Collect statistics per beam:
-    for (int b=0; b<nbeams; b++) {
+    for (int b=0; b<this->beam_ids.size(); b++) {
         m.clear();
-        m["beam_id"] = this->ini_params.beam_ids[b];
+        m["beam_id"] = this->beam_ids[b];
 
         int streamed_chunks = 0;
         size_t streamed_bytes = 0;
@@ -631,32 +629,27 @@ std::shared_ptr<assembled_chunk>
 intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel)
 {
     // Which of my assemblers (if any) is handling the requested beam?
-    int nbeams = this->ini_params.beam_ids.size();
-    for (int i=0; i<nbeams; i++)
-        if (this->ini_params.beam_ids[i] == beam)
-	    return this->assemblers[i]->find_assembled_chunk(fpga_counts, toplevel);
-
-    throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
+    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(beam);
+    if (!assembler)
+        throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
+    return assembler->find_assembled_chunk(fpga_counts, toplevel);
 }
 
 uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
     // Which of my assemblers (if any) is handling the requested beam?
-    int nbeams = this->ini_params.beam_ids.size();
-    for (int i=0; i<nbeams; i++)
-        if (this->ini_params.beam_ids[i] == beam) {
-            if (!this->assemblers[i]->first_packet_received)
-                throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
-	    return this->assemblers[i]->first_fpgacount;
-        }
-    throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
+    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(beam);
+    if (!assembler)
+        throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
+    if (!assembler->first_packet_received)
+        throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
+    return assembler->first_fpgacount;
 }
 
 void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
                                                        vector<uint64_t> &retrieved) {
-    int nbeams = this->ini_params.beam_ids.size();
-    for (int i=0; i<nbeams; i++) {
-        flushed.push_back(this->assemblers[i]->max_fpga_flushed);
-        retrieved.push_back(this->assemblers[i]->max_fpga_retrieved);
+    for (auto assembler : this->assemblers) {
+        flushed.push_back(assembler->max_fpga_flushed);
+        retrieved.push_back(assembler->max_fpga_retrieved);
     }
 }
 
@@ -666,35 +659,22 @@ intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
                                                 uint64_t max_fpga_counts)
 {
     vector< vector< pair<shared_ptr<assembled_chunk>, uint64_t> > > R;
-    int nbeams = this->ini_params.beam_ids.size();
-    R.reserve(beams.size() ? beams.size() : nbeams);
-
     if (beams.size()) {
         // Grab a snapshot for each requested beam (empty if we don't
         // have that beam number).
-        for (size_t ib=0; ib<beams.size(); ib++) {
-            int beam = beams[ib];
-            bool found = false;
+        for (int beam : beams) {
             // Which of my assemblers (if any) is handling the requested beam?
-            for (int i=0; i<nbeams; i++) {
-                if (this->ini_params.beam_ids[i] != (int)beam)
-                    continue;
-                R.push_back(this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
-                                                                      max_fpga_counts));
-                found = true;
-                break;
-            }
-            if (!found) {
+            shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(beam);
+            if (assembler)
+                R.push_back(assembler->get_ringbuf_snapshot(min_fpga_counts, max_fpga_counts));
+            else
                 // add empty list
                 R.push_back(vector<pair<shared_ptr<assembled_chunk>, uint64_t > >());
-            }
         }
     } else {
         // Grab a snapshot from each of my assemblers.
-        for (int i=0; i<nbeams; i++) {
-            R.push_back(this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
-                                                                  max_fpga_counts));
-        }
+        for (auto assembler : this->assemblers)
+            R.push_back(assembler->get_ringbuf_snapshot(min_fpga_counts, max_fpga_counts));
     }
     return R;
 }
@@ -1030,7 +1010,7 @@ void intensity_network_stream::assembler_thread_main() {
 
 void intensity_network_stream::start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
     unique_lock<mutex> ulock(forking_mutex);
-    //if (forking_packets.size() == 0) {
+
     if (forking_socket == 0) {
         forking_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (forking_socket < 0)
@@ -1041,7 +1021,6 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
             throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on packet-forking socket file descriptor") + strerror(errno));
 
         // bufsize
-        //if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize)) < 0)
 	int bufsize = 1024*1024;
 	if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &bufsize, sizeof(bufsize)) < 0)
             throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed for forking socket: ") + strerror(errno));
@@ -1099,7 +1078,7 @@ void intensity_network_stream::_assembler_thread_body()
     int nupfreq = this->ini_params.nupfreq;
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
-    int nbeams = this->ini_params.beam_ids.size();
+    int nbeams = this->beam_ids.size();
     bool first_packet_received = false;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
@@ -1131,6 +1110,30 @@ void intensity_network_stream::_assembler_thread_body()
                     a->set_frame0(frame0_nano);
 	}
 
+        if (!first_packet_received) {
+            // We just received our first packet.  Set beam ids!
+            int ipacket = 0;
+            uint8_t *packet_data = packet_list->get_packet_data(ipacket);
+            int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
+            intensity_packet packet;
+            packet.sender = packet_list->sender[ipacket];
+            if (!packet.decode(packet_data, packet_nbytes)) {
+                chlog("Bad packet (header) from " << ip_to_string(packet.sender));
+                event_subcounts[event_type::packet_bad]++;
+                continue;
+            }
+            chlog("Received first packet.  Beams:" << packet.nbeams);
+            for (int i=0; i<packet.nbeams; i++) {
+                int beam = packet.beam_ids[i];
+                chlog("  beam: " << beam);
+                if ((beam < 0) || (beam > constants::max_allowed_beam_id))
+                    throw runtime_error("ch_frb_io: bad beam_id received in first packet");
+            }
+
+            // FIXME -- set assembler beam numbers, set up beam_to_assembler map.
+            
+        }
+        
 	first_packet_received = true;
 
         tva = xgettimeofday();
@@ -1192,7 +1195,7 @@ void intensity_network_stream::_assembler_thread_body()
                     continue;
                 }
 
-                bool mismatch = ((packet.nbeams != nbeams) || 
+                bool mismatch = ((packet.nbeams != ini_params.nbeams) ||
                                  (packet.nupfreq != nupfreq) || 
                                  (packet.ntsamp != nt_per_packet) || 
                                  (packet.fpga_counts_per_sample != fpga_counts_per_sample));
@@ -1203,7 +1206,7 @@ void intensity_network_stream::_assembler_thread_body()
                         ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
                            << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
                            << "), expected ("
-                           << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
+                           << ini_params.nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
                         throw runtime_error(ss.str());
                     }
                     chlog("Packet stream mismatch from " << ip_to_string(packet.sender));
@@ -1232,7 +1235,6 @@ void intensity_network_stream::_assembler_thread_body()
 
                 int nfreq_coarse = packet.nfreq_coarse;
                 int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-                const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
 
                 // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
                 // length fields.  The new packet corresponds to a subset of the original packet containing
@@ -1250,31 +1252,21 @@ void intensity_network_stream::_assembler_thread_body()
                 for (int ibeam = 0; ibeam < nbeams; ibeam++) {
                     // Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
                     // original packet containing only beam index 'ibeam'.
-		
+
                     // Loop over assembler ids, to find a match for the packet_id.
                     int packet_id = packet.beam_ids[0];
-                    int assembler_ix = 0;
 
-                    for (;;) {
-                        if (assembler_ix >= nbeams) {
-                            // No match found
-                            chlog("Beam id mismatch from " << ip_to_string(packet.sender));
-                            event_subcounts[event_type::beam_id_mismatch]++;
-                            if (ini_params.throw_exception_on_beam_id_mismatch)
-                                throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
-                            break;
-                        }
-
-                        if (assembler_beam_ids[assembler_ix] != packet_id) {
-                            assembler_ix++;
-                            continue;
-                        }
-
-                        // Match found
-                        assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
-                        break;
+                    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(packet_id);
+                    if (!assembler) {
+                        // No match found
+                        chlog("Beam id mismatch from " << ip_to_string(packet.sender));
+                        event_subcounts[event_type::beam_id_mismatch]++;
+                        if (ini_params.throw_exception_on_beam_id_mismatch)
+                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
                     }
-
+                    // Match found
+                    assembler->put_unassembled_packet(packet, event_subcounts);
+                    
                     // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
                     // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
                     packet.beam_ids += 1;
@@ -1439,13 +1431,12 @@ void intensity_network_stream::_assembler_thread_body()
 bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) 
 {
     // Find the right assembler and inject the chunk there.
-    for (unsigned int i = 0; i < ini_params.beam_ids.size(); i++) {
-        if (ini_params.beam_ids[i] == chunk->beam_id) {
-            return assemblers[i]->inject_assembled_chunk(chunk);
-        }
+    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(chunk->beam_id);
+    if (!assembler) {
+        cout << "inject_assembled_chunk: no match for beam " << chunk->beam_id << endl;
+        return false;
     }
-    cout << "inject_assembled_chunk: no match for beam " << chunk->beam_id << endl;
-    return false;
+    return assembler->inject_assembled_chunk(chunk);
 }
 
 // Called whenever the assembler thread exits (on all exit paths)
@@ -1454,9 +1445,9 @@ void intensity_network_stream::_assembler_thread_exit()
     this->end_stream();
     unassembled_ringbuf->end_stream();
 
-    for (unsigned int i = 0; i < assemblers.size(); i++) {
-	if (assemblers[i])
-	    assemblers[i]->end_stream(&assembler_thread_event_subcounts[0]);
+    for (auto assembler: assemblers) {
+	if (assembler)
+	    assembler->end_stream(&assembler_thread_event_subcounts[0]);
     }
 
     // Make sure all event counts are accumulated.

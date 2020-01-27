@@ -322,7 +322,8 @@ public:
     //     leaves the top level of the telescoping ring buffer) then an exception will be thrown.
 
     struct initializer {
-	std::vector<int> beam_ids;
+        int nbeams;
+
 	std::shared_ptr<memory_slab_pool> memory_pool;
 	std::vector<std::shared_ptr<output_device>> output_devices;
 
@@ -537,6 +538,10 @@ protected:
     // Constant after construction, so not protected by lock
     std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
 
+    std::vector<int> beam_ids;
+
+    std::map<int, std::shared_ptr<assembled_chunk_ringbuf> > beam_to_assembler;
+
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
@@ -631,6 +636,8 @@ protected:
     void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
     void _update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts);
+
+    std::shared_ptr<assembled_chunk_ringbuf> _assembler_for_beam(int beam_id);
 
     void network_thread_main();
     void assembler_thread_main();

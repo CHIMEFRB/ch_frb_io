@@ -270,7 +270,7 @@ public:
     // Set to 'true' in the first call to put_unassembled_packet().
     std::atomic<bool> first_packet_received;
 
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int stream_id);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -351,10 +351,13 @@ public:
                           uint64_t* ringbuf_fpga_max,
                           int level=0);
 
+    void set_beam_id(int beam_id);
+
 protected:
     const intensity_network_stream::initializer ini_params;
-    const int beam_id;
     const int stream_id;   // only used in assembled_chunk::format_filename().
+
+    int beam_id;
 
     uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
     
