@@ -14,14 +14,14 @@ typedef std::lock_guard<std::mutex> guard_t;
 // This is also a scoped lock that supports use of a condition variable.
 typedef std::unique_lock<std::mutex> ulock_t;
 
-assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int stream_id_) :
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
     max_fpga_flushed(0),
     max_fpga_retrieved(0),
     first_fpgacount(0),
     first_packet_received(false),
     ini_params(ini_params_),
     stream_id(stream_id_),
-    beam_id(-1),
+    beam_id(beam_id_),
     frame0_nano(0),
     output_devices(ini_params.output_devices)
 {
@@ -68,12 +68,6 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 
 void assembled_chunk_ringbuf::set_frame0(uint64_t f0) {
     frame0_nano = f0;
-}
-
-void assembled_chunk_ringbuf::set_beam_id(int b) {
-    if (beam_id != -1)
-        throw runtime_error("ch_frb_io: assembler beam id can only be set once (beam " + to_string(beam_id));
-    beam_id = b;
 }
 
 void assembled_chunk_ringbuf::print_state() 

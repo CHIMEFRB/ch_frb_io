@@ -302,6 +302,8 @@ struct packet_counts {
 
 class intensity_network_stream : noncopyable {
 public:
+
+    typedef std::function<void(std::vector<int> beam_id)> first_packet_listener;
     
     // The 'struct initializer' is used to construct the stream object.  A few notes:
     //
@@ -434,6 +436,19 @@ public:
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
+    void wait_for_first_packet();
+
+    std::vector<int> get_beam_ids();
+
+    // Returns the first fpgacount of the first chunk sent downstream by
+    // the given beam id.
+    // Raises runtime_error if the first packet has not been received yet.
+    uint64_t get_first_fpgacount();
+    
+    uint64_t get_frame0_nano();
+
+    void add_first_packet_listener(first_packet_listener f);
+    
     // This is the main routine called by the processing threads, to read data from one beam
     // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
@@ -466,11 +481,6 @@ public:
     // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
     // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
-
-    // Returns the first fpgacount of the first chunk sent downstream by
-    // the given beam id.
-    // Raises runtime_error if the first packet has not been received yet.
-    uint64_t get_first_fpga_count(int beam);
 
     // Returns the last FPGA count processed by each of the assembler,
     // (in the same order as the "beam_ids" array), flushed downstream,
@@ -538,8 +548,12 @@ protected:
     // Constant after construction, so not protected by lock
     std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
 
+    std::vector<first_packet_listener> first_packet_listeners;
+
     std::vector<int> beam_ids;
 
+    uint64_t first_fpgacount;
+    
     std::map<int, std::shared_ptr<assembled_chunk_ringbuf> > beam_to_assembler;
 
     // Used to exchange data between the network and assembler threads
@@ -596,6 +610,7 @@ protected:
     std::condition_variable cond_state_changed;
     
     bool stream_started = false;             // set asynchonously by calling start_stream()
+    bool first_packet_received = false;
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
     bool threads_joined = false;             // set when both threads (network + assembler) are joined

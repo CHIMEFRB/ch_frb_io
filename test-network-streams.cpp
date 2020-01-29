@@ -402,7 +402,7 @@ static void spawn_processing_thread(const shared_ptr<unit_test_instance> &tp, in
 static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
     ch_frb_io::intensity_network_stream::initializer initializer;
-    initializer.beam_ids = tp->recv_beam_ids;
+    initializer.nbeams = tp->recv_beam_ids.size();
     initializer.nupfreq = tp->nupfreq;
     initializer.nt_per_packet = tp->nt_per_packet;
     initializer.fpga_counts_per_sample = tp->fpga_counts_per_sample;

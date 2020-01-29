@@ -120,10 +120,6 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     // Note: the socket is initialized in _open_socket().
 
-    this->assemblers.resize(ini_params.nbeams);
-    for (int ix = 0; ix < ini_params.nbeams; ix++)
-	assemblers[ix] = make_shared<assembled_chunk_ringbuf> (ini_params, ini_params.stream_id);
-
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
 								 ini_params.max_unassembled_packets_per_list, 
 								 ini_params.max_unassembled_nbytes_per_list);
@@ -148,10 +144,32 @@ intensity_network_stream::~intensity_network_stream()
     }
 }
 
+void intensity_network_stream::add_first_packet_listener(first_packet_listener f) {
+    first_packet_listeners.push_back(f);
+}
+
+vector<int> intensity_network_stream::get_beam_ids() {
+    return beam_ids;
+}
+
+uint64_t intensity_network_stream::get_first_fpgacount() {
+    if (!first_packet_received)
+        throw runtime_error("ch_frb_io: get_first_fpgacount called, but first packet has not been received yet.");
+    return first_fpgacount;
+}
+
+uint64_t intensity_network_stream::get_frame0_nano() {
+    return frame0_nano;
+}
+
 shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
+    chlog("Looking for assembler for beam " << beam_id);
     auto it = beam_to_assembler.find(beam_id);
-    if (it == beam_to_assembler.end())
+    if (it == beam_to_assembler.end()) {
+        chlog("Did not find");
         return shared_ptr<assembled_chunk_ringbuf>();
+    }
+    chlog("Got it!");
     return it->second;
 }
 
@@ -215,6 +233,20 @@ void intensity_network_stream::start_stream()
     this->cond_state_changed.notify_all();
 }
 
+void intensity_network_stream::wait_for_first_packet() {
+    if (stream_end_requested || join_called)
+	throw runtime_error("ch_frb_io: intensity_network_stream::wait_for_first_packet() called on completed or cancelled stream");
+    ulock_t lock(this->state_mutex);
+    // Wait for "stream_started"
+    for (;;) {
+	if (this->stream_end_requested)
+	    // This case can arise if end_stream() is called early
+	    return;
+        if (this->first_packet_received)
+            return;
+	this->cond_state_changed.wait(lock);
+    }
+}
 
 // Just sets the stream_end_requested flag and returns.  The shutdown logic then proceeeds as follows.
 // The network thread will see that the stream_end_requested flag has been set, flush packets to the 
@@ -633,16 +665,6 @@ intensity_network_stream::find_assembled_chunk(int beam, uint64_t fpga_counts, b
     if (!assembler)
         throw runtime_error("ch_frb_io internal error: beam_id mismatch in intensity_network_stream::find_assembled_chunk()");
     return assembler->find_assembled_chunk(fpga_counts, toplevel);
-}
-
-uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
-    // Which of my assemblers (if any) is handling the requested beam?
-    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(beam);
-    if (!assembler)
-        throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
-    if (!assembler->first_packet_received)
-        throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
-    return assembler->first_fpgacount;
 }
 
 void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
@@ -1079,7 +1101,6 @@ void intensity_network_stream::_assembler_thread_body()
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
     int nbeams = this->beam_ids.size();
-    bool first_packet_received = false;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
 
@@ -1100,16 +1121,6 @@ void intensity_network_stream::_assembler_thread_body()
         if (!unassembled_ringbuf->get_packet_list(packet_list))
             break;
 
-	if (!first_packet_received && this->ini_params.frame0_url.size()) {
-	    // After we receive our first packet, we will go fetch the frame0_ctime
-	    // via curl.  This is usually fast, so we'll do it in blocking mode.
-	    chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
-	    _fetch_frame0();    // raises runtime_error on failure
-	    for (auto a : assemblers)
-                if (a)
-                    a->set_frame0(frame0_nano);
-	}
-
         if (!first_packet_received) {
             // We just received our first packet.  Set beam ids!
             int ipacket = 0;
@@ -1122,19 +1133,44 @@ void intensity_network_stream::_assembler_thread_body()
                 event_subcounts[event_type::packet_bad]++;
                 continue;
             }
+
+            if (this->ini_params.frame0_url.size()) {
+                // After we receive our first packet, we will go fetch the frame0_ctime
+                // via curl.  This is usually fast, so we'll do it in blocking mode.
+                chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
+                _fetch_frame0();    // raises runtime_error on failure
+            }
             chlog("Received first packet.  Beams:" << packet.nbeams);
             for (int i=0; i<packet.nbeams; i++) {
                 int beam = packet.beam_ids[i];
                 chlog("  beam: " << beam);
                 if ((beam < 0) || (beam > constants::max_allowed_beam_id))
                     throw runtime_error("ch_frb_io: bad beam_id received in first packet");
+                auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id);
+                assembler->set_frame0(frame0_nano);
+                assemblers.push_back(assembler);
+                beam_ids.push_back(beam);
+                beam_to_assembler[beam] = assembler;
             }
 
-            // FIXME -- set assembler beam numbers, set up beam_to_assembler map.
+            // Compute first_fpgacount, used by rf_pipelines::chime_network_stream
+            {
+                // This is from assembled_chunk_ringbuf
+                uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
+                uint64_t first_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
+                if (ini_params.nt_align > 0) {
+                    uint64_t chunk_align = ini_params.nt_align / constants::nt_per_assembled_chunk;
+                    first_ichunk = ((first_ichunk + chunk_align - 1) / chunk_align) * chunk_align;
+                }
+                this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
+            }
             
+            {
+                ulock_t lock(this->state_mutex);
+                this->first_packet_received = true;
+                this->cond_state_changed.notify_all();
+            }
         }
-        
-	first_packet_received = true;
 
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
