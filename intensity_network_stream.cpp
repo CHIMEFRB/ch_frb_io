@@ -358,10 +358,12 @@ void intensity_network_stream::print_state() {
 
 shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
+    cout << "i_n_s::get_assembled_chunk: assembled index " << assembler_index << ", for " << assemblers.size() << " assemblers" << endl;
     if ((assembler_index < 0) || (assembler_index >= (int)assemblers.size()))
         throw runtime_error("ch_frb_io: bad assembler_ix " + std::to_string(assembler_index) + " passed to intensity_network_stream::get_assembled_chunk() -- allowable range [0, " + std::to_string(assemblers.size()) + ")");
 
     auto ret = assemblers[assembler_index]->get_assembled_chunk(wait);
+    cout << "i_n_s::get_assembled_chunk:: got chunk " << ret->ichunk << endl;
 
     // Note that we wait for data before crashing.
     if (ini_params.deliberately_crash)
@@ -1165,11 +1167,15 @@ void intensity_network_stream::_assembler_thread_body()
                 this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
             }
             
+            chlog("Setting first_packet_received");
             {
                 ulock_t lock(this->state_mutex);
                 this->first_packet_received = true;
-                this->cond_state_changed.notify_all();
             }
+            // you don't need to (and actually shouldn't) hold the lock when doing a notify.
+            chlog("Notifying waiting threads...");
+            this->cond_state_changed.notify_all();
+            chlog("Notified waiting threads");
         }
 
         tva = xgettimeofday();
@@ -1299,10 +1305,11 @@ void intensity_network_stream::_assembler_thread_body()
                         event_subcounts[event_type::beam_id_mismatch]++;
                         if (ini_params.throw_exception_on_beam_id_mismatch)
                             throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
+                    } else {
+                        // Match found
+                        assembler->put_unassembled_packet(packet, event_subcounts);
                     }
-                    // Match found
-                    assembler->put_unassembled_packet(packet, event_subcounts);
-                    
+
                     // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
                     // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
                     packet.beam_ids += 1;
