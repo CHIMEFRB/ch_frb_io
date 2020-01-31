@@ -438,6 +438,8 @@ public:
 
     void reset_stream();
 
+    void flush_end_of_stream();
+    
     void wait_for_first_packet();
 
     std::vector<int> get_beam_ids();
@@ -616,6 +618,9 @@ protected:
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
     bool threads_joined = false;             // set when both threads (network + assembler) are joined
+    bool flush_end_of_stream_requested = false;
+    bool stream_restart = false;
+
     char _pad4[constants::cache_line_size];
 
     std::mutex event_mutex;

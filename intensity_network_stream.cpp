@@ -260,6 +260,12 @@ void intensity_network_stream::end_stream()
     this->cond_state_changed.notify_all();
 }
 
+void intensity_network_stream::flush_end_of_stream() {
+    ulock_t lock(this->state_mutex);
+    this->flush_end_of_stream_requested = true;
+    this->cond_state_changed.notify_all();
+}
+
 void intensity_network_stream::reset_stream() {
     chlog("intensity_network_stream::reset_stream()!");
     {
@@ -267,7 +273,9 @@ void intensity_network_stream::reset_stream() {
         this->stream_started = false;
         this->first_packet_received = false;
         this->stream_end_requested = false;
-
+        this->stream_restart = true;
+        this->flush_end_of_stream_requested = true;
+        
         chlog("i-n-s::reset_stream: joining assembler thread");
         this->assembler_thread.join();
         
@@ -843,13 +851,30 @@ void intensity_network_stream::_network_thread_body()
         // wait for something to happen?!
         lock.lock();
         for (;;) {
-            chlog("i_n_s network thread: waiting for state change!  join_called: " << join_called << ", stream_started: " << stream_started);
+            chlog("i_n_s network thread: waiting for state change!  join_called: " << join_called << ", stream_restart: " << stream_restart);
             if (join_called) {
                 lock.unlock();
                 return;
             }
+            if (flush_end_of_stream_requested) {
+                const int maxsize = 16384;
+                uint8_t packet_data[maxsize];
+                for (;;) {
+                    int packet_nbytes = ::recv(sockfd, packet_data, maxsize, MSG_PEEK | MSG_DONTWAIT);
+                    chlog("Flushing end-of-stream packets: peeked at a packet with " << packet_nbytes << " bytes.");
+                    if (packet_nbytes == 24) {
+                        packet_nbytes = ::recv(sockfd, packet_data, maxsize, 0);
+                        chlog("dumped a packet with " << packet_nbytes << " bytes");
+                    } else
+                        break;
+                }
+                flush_end_of_stream_requested = false;
+            }
             // !started means restarted
-            if (!stream_started) {
+            //if (!stream_started) {
+            if (stream_restart) {
+                chlog("i-n-s network thread: found stream_restart!");
+                stream_restart = false;
                 lock.unlock();
                 break;
             }
