@@ -260,6 +260,53 @@ void intensity_network_stream::end_stream()
     this->cond_state_changed.notify_all();
 }
 
+void intensity_network_stream::reset_stream() {
+    chlog("intensity_network_stream::reset_stream()!");
+    {
+        ulock_t lock(this->state_mutex);
+        this->stream_started = false;
+        this->first_packet_received = false;
+        this->stream_end_requested = false;
+
+        chlog("i-n-s::reset_stream: joining assembler thread");
+        this->assembler_thread.join();
+        
+        this->assemblers.clear();
+        this->beam_ids.clear();
+        this->beam_to_assembler.clear();
+        this->first_fpgacount = 0;
+        this->frame0_nano = 0;
+        {
+            ulock_t slock(this->stream_lock);
+            this->stream_beam_ids.clear();
+        }
+        {
+            ulock_t flock(this->forking_mutex);
+            this->forking_packets.clear();
+        }
+
+        this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (ini_params.unassembled_ringbuf_capacity, 
+                                                                     ini_params.max_unassembled_packets_per_list, 
+                                                                     ini_params.max_unassembled_nbytes_per_list);
+        
+        chlog("i-n-s::reset_stream: restarting assembler thread");
+        this->assembler_thread = std::thread(std::bind(&intensity_network_stream::assembler_thread_main, this));
+        
+        this->cond_state_changed.notify_all();
+
+        // assembler thread quits when the unassembled_ringbuf runs dry
+        // (happens when we receive an end-of-stream packet)
+        
+        /// shut down assembler thread
+        /// reset first_fpgacount
+        /// clear beam_to_assembmler
+        /// reset frame0_nano ?
+        /// reset event counts??
+        // shut down streaming
+        // shut down forking
+        /// restart assembler thread
+    }
+}
 
 void intensity_network_stream::join_threads()
 {
@@ -790,6 +837,28 @@ void intensity_network_stream::_network_thread_body()
 
     // Main packet loop
 
+    for (;;) {
+        _network_thread_one_stream();
+
+        // wait for something to happen?!
+        lock.lock();
+        for (;;) {
+            chlog("i_n_s network thread: waiting for state change!  join_called: " << join_called << ", stream_started: " << stream_started);
+            if (join_called) {
+                lock.unlock();
+                return;
+            }
+            // !started means restarted
+            if (!stream_started) {
+                lock.unlock();
+                break;
+            }
+            this->cond_state_changed.wait(lock);
+        }
+    }
+}
+
+void intensity_network_stream::_network_thread_one_stream() {
     int64_t *event_subcounts = &this->network_thread_event_subcounts[0];
     struct timeval tv_ini = xgettimeofday();
     uint64_t packet_history_timestamp = 0;
@@ -807,13 +876,15 @@ void intensity_network_stream::_network_thread_body()
     //uint64_t rate_logging_timestamp = 0;
     //uint64_t rate_nbytes = 0;
     //uint64_t rate_npackets = 0;
-    
+
+    ulock_t lock(this->state_mutex);
+    lock.unlock();
+
     for (;;) {
         uint64_t timestamp;
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
-
             lock.lock();
 	    if (this->stream_end_requested) {
                 lock.unlock();
@@ -825,7 +896,6 @@ void intensity_network_stream::_network_thread_body()
 	    // We call _add_event_counts() in a few different places in this routine, to ensure that
 	    // the network thread's event counts are always regularly accumulated.
 	    this->_add_event_counts(network_thread_event_subcounts);
-
 	    cancellation_check_timestamp = curr_timestamp;
 	}
 
@@ -884,8 +954,19 @@ void intensity_network_stream::_network_thread_body()
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	if (_unlikely(packet_nbytes == 24)) {
 	    event_subcounts[event_type::packet_end_of_stream]++;
-	    if (ini_params.accept_end_of_stream_packets)
-		return;   // triggers shutdown of entire stream
+	    if (ini_params.accept_end_of_stream_packets) {
+                chlog("i_n_s: Received end-of-stream packet.");
+                // from network_thread_exit()...
+                // This just sets the stream_end_requested flag, if it hasn't been set already.
+                this->end_stream();
+                // Flush any pending packets to assembler thread.
+                this->_put_unassembled_packets();
+                // Make sure all event counts are accumulated.
+                this->_add_event_counts(network_thread_event_subcounts);
+                // Set end-of-stream flag in the unassembled_ringbuf, so that the assembler knows there are no more packets.
+                unassembled_ringbuf->end_stream();
+                return;
+            }
 	    continue;
 	}
 
@@ -900,7 +981,6 @@ void intensity_network_stream::_network_thread_body()
 
 	if (incoming_packet_list->is_full) {
             _network_flush_packets();
-
             /*
             // Log our packet receive rate each flush!
             float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
@@ -915,6 +995,8 @@ void intensity_network_stream::_network_thread_body()
     }
 }
 
+
+ 
 // This gets called from the network thread to flush packets to the assembler threads.
 void intensity_network_stream::_network_flush_packets() 
 {
@@ -1115,9 +1197,11 @@ void intensity_network_stream::_assembler_thread_body()
         tvb = xgettimeofday();
         assembler_thread_working_usec += usec_between(tva, tvb);
 
-        if (!unassembled_ringbuf->get_packet_list(packet_list))
+        if (!unassembled_ringbuf->get_packet_list(packet_list)) {
+            chlog("assembler thread: unassembled_ringbuf empty; quitting");
             break;
-
+        }
+        
         if (!first_packet_received) {
             // We just received our first packet.  Set beam ids!
             int ipacket = 0;

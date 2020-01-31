@@ -436,6 +436,8 @@ public:
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
+    void reset_stream();
+
     void wait_for_first_packet();
 
     std::vector<int> get_beam_ids();
@@ -659,6 +661,7 @@ protected:
 
     // Private methods called by the network thread.    
     void _network_thread_body();
+    void _network_thread_one_stream();
     void _network_thread_exit();
     void _put_unassembled_packets();
 

@@ -102,7 +102,6 @@ void udp_packet_ringbuf::end_stream()
     cond_packets_removed.notify_all();
 }
 
-
 bool udp_packet_ringbuf::is_alive()
 {
     guard_t lock(mutx);
