@@ -163,13 +163,10 @@ uint64_t intensity_network_stream::get_frame0_nano() {
 }
 
 shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
-    chlog("Looking for assembler for beam " << beam_id);
     auto it = beam_to_assembler.find(beam_id);
     if (it == beam_to_assembler.end()) {
-        chlog("Did not find");
         return shared_ptr<assembled_chunk_ringbuf>();
     }
-    chlog("Got it!");
     return it->second;
 }
 
@@ -358,12 +355,10 @@ void intensity_network_stream::print_state() {
 
 shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
-    cout << "i_n_s::get_assembled_chunk: assembled index " << assembler_index << ", for " << assemblers.size() << " assemblers" << endl;
     if ((assembler_index < 0) || (assembler_index >= (int)assemblers.size()))
         throw runtime_error("ch_frb_io: bad assembler_ix " + std::to_string(assembler_index) + " passed to intensity_network_stream::get_assembled_chunk() -- allowable range [0, " + std::to_string(assemblers.size()) + ")");
 
     auto ret = assemblers[assembler_index]->get_assembled_chunk(wait);
-    cout << "i_n_s::get_assembled_chunk:: got chunk " << ret->ichunk << endl;
 
     // Note that we wait for data before crashing.
     if (ini_params.deliberately_crash)
@@ -1102,7 +1097,7 @@ void intensity_network_stream::_assembler_thread_body()
     int nupfreq = this->ini_params.nupfreq;
     int nt_per_packet = this->ini_params.nt_per_packet;
     int fpga_counts_per_sample = this->ini_params.fpga_counts_per_sample;
-    int nbeams = this->beam_ids.size();
+    int nbeams = 0;
 
     auto packet_list = make_unique<udp_packet_list> (ini_params.max_unassembled_packets_per_list, ini_params.max_unassembled_nbytes_per_list);
 
@@ -1154,7 +1149,7 @@ void intensity_network_stream::_assembler_thread_body()
                 beam_ids.push_back(beam);
                 beam_to_assembler[beam] = assembler;
             }
-
+            nbeams = this->beam_ids.size();
             // Compute first_fpgacount, used by rf_pipelines::chime_network_stream
             {
                 // This is from assembled_chunk_ringbuf
@@ -1167,15 +1162,12 @@ void intensity_network_stream::_assembler_thread_body()
                 this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
             }
             
-            chlog("Setting first_packet_received");
             {
                 ulock_t lock(this->state_mutex);
                 this->first_packet_received = true;
             }
             // you don't need to (and actually shouldn't) hold the lock when doing a notify.
-            chlog("Notifying waiting threads...");
             this->cond_state_changed.notify_all();
-            chlog("Notified waiting threads");
         }
 
         tva = xgettimeofday();
