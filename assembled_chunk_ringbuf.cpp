@@ -521,7 +521,7 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // shouldn't be enabled in production.
     //
     // FIXME!!  Make sure this line gets commented out eventually.
-    this->_check_invariants();
+    //this->_check_invariants();
 
     // For even more debugging, uncomment this line!
     // this->print_state();
