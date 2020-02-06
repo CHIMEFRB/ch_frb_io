@@ -1304,7 +1304,12 @@ void intensity_network_stream::_assembler_thread_body()
 
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
-    uint8_t* forked_packet_data = reinterpret_cast<uint8_t*>(malloc(16384));
+    uint8_t* forked_packet_data1 = reinterpret_cast<uint8_t*>(malloc(16384));
+    uint8_t* forked_packet_data2 = reinterpret_cast<uint8_t*>(malloc(16384));
+    uint8_t* forked_packet_data3 = reinterpret_cast<uint8_t*>(malloc(16384));
+    uint8_t* forked_packet_data[3] = { forked_packet_data1,
+                                       forked_packet_data2,
+                                       forked_packet_data3 };
 
     struct timeval tva, tvb;
     tva = xgettimeofday();
@@ -1329,7 +1334,10 @@ void intensity_network_stream::_assembler_thread_body()
             intensity_packet packet;
             packet.sender = packet_list->sender[ipacket];
             if (!packet.decode(packet_data, packet_nbytes)) {
-                chlog("Bad packet (header) from " << ip_to_string(packet.sender));
+                chlog("Bad packet (header, first packet) from " << ip_to_string(packet.sender));
+                chlog("packet nbeams " << packet.nbeams << ", nf_c" << packet.nfreq_coarse <<
+                      ", nupfreq " << packet.nupfreq << ", ntsamp " << packet.ntsamp << 
+                      ", src_nb " << packet_nbytes);
                 event_subcounts[event_type::packet_bad]++;
                 continue;
             }
@@ -1387,6 +1395,9 @@ void intensity_network_stream::_assembler_thread_body()
 
             if (!packet.decode(packet_data, packet_nbytes)) {
                 chlog("Bad packet (header) from " << ip_to_string(packet.sender));
+                chlog("packet nbeams " << packet.nbeams << ", nf_c" << packet.nfreq_coarse <<
+                      ", nupfreq " << packet.nupfreq << ", ntsamp " << packet.ntsamp << 
+                      ", src_nb " << packet_nbytes);
                 event_subcounts[event_type::packet_bad]++;
                 continue;
             }
@@ -1483,7 +1494,7 @@ void intensity_network_stream::_assembler_thread_body()
                     memcpy(&(subpackets[s]), &fs.packetcopy, sizeof(intensity_packet));
                     subpackets[s].nbeams = s+1;
                     subpackets[s].data_nbytes = subpackets[s].nbeams * nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
-                    nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
+                    nsubs[s] = subpackets[s].set_pointers(forked_packet_data[s]);
                 }
                 for (auto it : forking_packets) {
                     if (it.beam == 0) {
@@ -1505,7 +1516,7 @@ void intensity_network_stream::_assembler_thread_body()
                     // send 1-3 beams
                     // start beam index
                     int ibeam = 0;
-                    if (it.beam == 0) {
+                    if (it.beam > 0) {
                         // find beam index
                         ibeam = -1;
                         for (int i=0; i<packet.nbeams; i++)
@@ -1541,7 +1552,7 @@ void intensity_network_stream::_assembler_thread_body()
                            packet.data + ibeam * subpacket->data_nbytes/nbeams,
                            subpacket->data_nbytes);
 
-                    int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
+                    int nsent = sendto(forking_socket, forked_packet_data[nbeams-1], nsub, 0,
                                        reinterpret_cast<struct sockaddr*>(&(it.dest)),
                                        sizeof(it.dest));
                     fs.fork_packets_sent++;
@@ -1564,7 +1575,9 @@ void intensity_network_stream::_assembler_thread_body()
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
     }
-    free(forked_packet_data);
+    free(forked_packet_data1);
+    free(forked_packet_data2);
+    free(forked_packet_data3);
 }
 
 bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) 

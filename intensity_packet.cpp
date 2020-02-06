@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -29,24 +30,36 @@ namespace ch_frb_io {
 
 bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
 {
-    if (_unlikely(src_nbytes < 24))
+    if (_unlikely(src_nbytes < 24)) {
+        chlog("packet nbytes < 24");
 	return false;
-    if (_unlikely(src_nbytes > constants::max_input_udp_packet_size))
+    }
+    if (_unlikely(src_nbytes > constants::max_input_udp_packet_size)) {
+        chlog("packet nbytes > " << constants::max_input_udp_packet_size);
 	return false;
+    }
 
     memcpy(this, src, 24);
 
-    if (_unlikely(protocol_version != 1))
+    if (_unlikely(protocol_version != 1)) {
+        chlog("packet protocol version bad");
 	return false;
-    if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0)))
+    }
+    if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0))) {
+        chlog("packet ntsamp bad");
 	return false;
-    if (_unlikely(fpga_counts_per_sample == 0))
+    }
+    if (_unlikely(fpga_counts_per_sample == 0)) {
+        chlog("packet fpga_counts_per_sample bad");
 	return false;
+    }
 
     // Note conversions to uint64_t, to prevent integer overflow
     uint64_t fpga_counts_per_packet = uint64_t(fpga_counts_per_sample) * uint64_t(ntsamp);
-    if (_unlikely(fpga_count % fpga_counts_per_packet != 0))
+    if (_unlikely(fpga_count % fpga_counts_per_packet != 0)) {
+        chlog("packet fpga_count bad");
 	return false;
+    }
 	
     uint64_t n1 = uint64_t(nbeams);
     uint64_t n2 = uint64_t(nfreq_coarse);
@@ -57,10 +70,14 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
     uint64_t nh = 24 + 2*n1 + 2*n2 + 8*n1*n2;
     uint64_t nd = n1 * n2 * n3 * n4;
 
-    if (_unlikely(uint64_t(src_nbytes) != nh+nd))
+    if (_unlikely(uint64_t(src_nbytes) != nh+nd)) {
+        chlog("packet src_nbytes bad");
 	return false;
-    if (_unlikely(uint64_t(data_nbytes) != nd))
+    }
+    if (_unlikely(uint64_t(data_nbytes) != nd)) {
+        chlog("packet data_nbytes bad");
 	return false;
+    }
 
     this->beam_ids = (uint16_t *) (src + 24);
     this->coarse_freq_ids = (uint16_t *) (src + 24 + 2*n1);
@@ -69,8 +86,10 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
     this->data = (uint8_t *) (src + nh);
 
     for (int i = 0; i < nfreq_coarse; i++)
-	if (_unlikely(coarse_freq_ids[i] >= constants::nfreq_coarse_tot))
+	if (_unlikely(coarse_freq_ids[i] >= constants::nfreq_coarse_tot)) {
+            chlog("packet coarse_freq_ids bad");
 	    return false;
+        }
 
     return true;
 }
