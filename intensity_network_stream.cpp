@@ -1197,6 +1197,113 @@ void intensity_network_stream::resume_forking_packets() {
     forking_paused = false;
 }
 
+
+// RAII
+class forking_state {
+public:
+    forking_state(bool forking_active, int socket, mutex& mutx):
+        active(forking_active),
+        forking_socket(socket),
+        flock(mutx, std::defer_lock)
+    {
+        if (!active)
+            return;
+        flock.lock();
+#if defined(FIONWRITE)
+        if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
+            chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
+        }
+#elif defined(SIOCOUTQ)
+        // linux
+        if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_start) == -1) {
+            chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
+        }
+#elif defined(SO_NWRITE)
+        int sz = sizeof(int);
+        if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                       &fork_sendqueue_start, reinterpret_cast<socklen_t*>(&sz))) {
+            chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
+        }
+#else
+        fork_sendqueue_start = -1;
+#endif
+#if defined(FIONSPACE)
+        if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_start) == -1) {
+            chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
+        }
+#else
+        fork_sendspace_start = -1;
+#endif
+    }
+
+    void copy_packet(const intensity_packet& packet) {
+        if (active)
+            memcpy(&packetcopy, &packet, sizeof(intensity_packet));
+    }
+    void revert_packet(intensity_packet* packet) {
+        if (active)
+            memcpy(packet, &packetcopy, sizeof(intensity_packet));
+    }
+
+    void finish() {
+#if defined(FIONWRITE)
+        if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
+            chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
+        }
+#elif defined(SIOCOUTQ)
+        if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
+            chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
+        }
+#elif defined(SO_NWRITE)
+        int sz = sizeof(int);
+        if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                       &fork_sendqueue_end, reinterpret_cast<socklen_t*>(&sz))) {
+            chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
+        }
+#else
+        fork_sendqueue_end = -1;
+#endif
+#if defined(FIONSPACE)
+        if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_end) == -1) {
+            chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
+        }
+#else
+        int isz = sizeof(int);
+        int bufsize = 0;
+        if (getsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF,
+                       &bufsize, reinterpret_cast<socklen_t*>(&isz))) {
+            chlog("Failed to call getsockopt(SO_SNDBUF): " << strerror(errno));
+        }
+        fork_sendspace_end = bufsize;
+        //fork_sendspace_end = -1;
+#endif
+        int esz = sizeof(int);
+        int forking_error = 0;
+        if (getsockopt(forking_socket, SOL_SOCKET, SO_ERROR,
+                       &forking_error, reinterpret_cast<socklen_t*>(&esz))) {
+            chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
+        }
+    }
+
+    //chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms -> " << ((fork_packets_sent * 1e6) / tperiod) << " packets/sec, " << ((fork_bytes_sent * 1e6 * 8) / tperiod) << " bits/sec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+    
+    int fork_sendqueue_start = 0;
+    int fork_sendqueue_end = 0;
+    int fork_sendspace_start = 0;
+    int fork_sendspace_end = 0;
+    int fork_packets_sent = 0;
+    int fork_bytes_sent = 0;
+
+    intensity_packet packetcopy;
+
+protected:
+    bool active;
+    int forking_socket;
+
+    unique_lock<mutex> flock;
+};
+
+
 void intensity_network_stream::_assembler_thread_body()
 {
     pin_thread_to_cores(ini_params.assembler_thread_cores);
@@ -1282,289 +1389,190 @@ void intensity_network_stream::_assembler_thread_body()
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
 
-        {
-            // We hold this lock while processing the whole packet
-            // list (even if we're not doing any packet forking); the
-            // only contention for the lock is from rare RPCs.
-            unique_lock<mutex> ulock(forking_mutex);
+        bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
+        forking_state fs(forking_active, forking_socket, forking_mutex);
 
-            int fork_sendqueue_start = 0;
-            int fork_sendqueue_end = 0;
-            int fork_sendspace_start = 0;
-            int fork_sendspace_end = 0;
-            int fork_packets_sent = 0;
-            int fork_bytes_sent = 0;
+        for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
+            uint8_t *packet_data = packet_list->get_packet_data(ipacket);
+            int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
+            intensity_packet packet;
+            packet.sender = packet_list->sender[ipacket];
 
-            bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
-
-            if (forking_active) {
-#if defined(FIONWRITE)
-                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
-                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
-                }
-#elif defined(SIOCOUTQ)
-                // linux
-                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_start) == -1) {
-                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
-                }
-#elif defined(SO_NWRITE)
-                int sz = sizeof(int);
-                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
-                               &fork_sendqueue_start, reinterpret_cast<socklen_t*>(&sz))) {
-                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
-                }
-#else
-                fork_sendqueue_start = -1;
-#endif
-#if defined(FIONSPACE)
-                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_start) == -1) {
-                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
-                }
-#else
-                fork_sendspace_start = -1;
-#endif
+            if (!packet.decode(packet_data, packet_nbytes)) {
+                chlog("Bad packet (header) from " << ip_to_string(packet.sender));
+                event_subcounts[event_type::packet_bad]++;
+                continue;
             }
 
-            for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
-                uint8_t *packet_data = packet_list->get_packet_data(ipacket);
-                int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
-                intensity_packet packet;
+            bool mismatch = ((packet.nbeams != ini_params.nbeams) ||
+                             (packet.nupfreq != nupfreq) || 
+                             (packet.ntsamp != nt_per_packet) || 
+                             (packet.fpga_counts_per_sample != fpga_counts_per_sample));
 
-                packet.sender = packet_list->sender[ipacket];
+            if (_unlikely(mismatch)) {
+                if (ini_params.throw_exception_on_packet_mismatch) {
+                    stringstream ss;
+                    ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
+                       << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
+                       << "), expected ("
+                       << ini_params.nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
+                    throw runtime_error(ss.str());
+                }
+                chlog("Packet stream mismatch from " << ip_to_string(packet.sender));
+                event_subcounts[event_type::stream_mismatch]++;
+                continue;
+            }
 
-                if (!packet.decode(packet_data, packet_nbytes)) {
-                    chlog("Bad packet (header) from " << ip_to_string(packet.sender));
-                    event_subcounts[event_type::packet_bad]++;
-                    continue;
+            // All checks passed.  Packet is declared "good" here.  
+            //
+            // The following checks have been performed, either in this routine or in intensity_packet::read().
+            //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
+            //     and not large enough to lead to integer overflows
+            //   - packet and data byte counts are correct
+            //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
+            //   - ntsamp is a power of two
+            //   - fpga_counts_per_sample is > 0
+            //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+            //
+            // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
+            // so it's important that they're done here!
+            event_subcounts[event_type::packet_good]++;
+
+            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(),
+                                                  packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+
+            int nfreq_coarse = packet.nfreq_coarse;
+            int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
+
+            // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
+            // length fields.  The new packet corresponds to a subset of the original packet containing
+            // only beam index zero.  This scheme avoids the overhead of copying the packet.
+
+            // If we're re-sending packets, make a copy, because pointers get
+            // modified in this loop!
+            if (forking_active)
+                fs.copy_packet(packet);
+
+            packet.data_nbytes = new_data_nbytes;
+            packet.nbeams = 1;
+
+            for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+                // Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
+                // original packet containing only beam index 'ibeam'.
+
+                // Packet_id is beam number
+                int packet_id = packet.beam_ids[0];
+
+                shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(packet_id);
+                if (_unlikely(!assembler)) {
+                    // No match found
+                    chlog("Beam id mismatch from " << ip_to_string(packet.sender));
+                    event_subcounts[event_type::beam_id_mismatch]++;
+                    if (ini_params.throw_exception_on_beam_id_mismatch)
+                        throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
+                } else {
+                    // Match found
+                    assembler->put_unassembled_packet(packet, event_subcounts);
                 }
 
-                bool mismatch = ((packet.nbeams != ini_params.nbeams) ||
-                                 (packet.nupfreq != nupfreq) || 
-                                 (packet.ntsamp != nt_per_packet) || 
-                                 (packet.fpga_counts_per_sample != fpga_counts_per_sample));
+                // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
+                // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
+                packet.beam_ids += 1;
+                packet.scales += nfreq_coarse;
+                packet.offsets += nfreq_coarse;
+                packet.data += new_data_nbytes;
+            }
 
-                if (_unlikely(mismatch)) {
-                    if (ini_params.throw_exception_on_packet_mismatch) {
-                        stringstream ss;
-                        ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
-                           << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
-                           << "), expected ("
-                           << ini_params.nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
-                        throw runtime_error(ss.str());
-                    }
-                    chlog("Packet stream mismatch from " << ip_to_string(packet.sender));
-                    event_subcounts[event_type::stream_mismatch]++;
-                    continue;
+            if (forking_active) {
+                // Revert the packet header to its original state!
+                fs.revert_packet(&packet);
+
+                int nc = packet.nfreq_coarse;
+                // Create headers for 1, 2, or 3-beam sub-packets.
+                const int NS = 3;
+                intensity_packet subpackets[NS];
+                int nsubs[NS];
+                for (int s=0; s<NS; s++) {
+                    memcpy(&(subpackets[s]), &fs.packetcopy, sizeof(intensity_packet));
+                    subpackets[s].nbeams = s+1;
+                    subpackets[s].data_nbytes = subpackets[s].nbeams * nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
+                    nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
                 }
-
-                // All checks passed.  Packet is declared "good" here.  
-                //
-                // The following checks have been performed, either in this routine or in intensity_packet::read().
-                //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
-                //     and not large enough to lead to integer overflows
-                //   - packet and data byte counts are correct
-                //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
-                //   - ntsamp is a power of two
-                //   - fpga_counts_per_sample is > 0
-                //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
-                //
-                // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
-                // so it's important that they're done here!
-
-                event_subcounts[event_type::packet_good]++;
-
-                this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(),
-                                                      packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
-
-                int nfreq_coarse = packet.nfreq_coarse;
-                int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-
-                // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
-                // length fields.  The new packet corresponds to a subset of the original packet containing
-                // only beam index zero.  This scheme avoids the overhead of copying the packet.
-
-                // If we're re-sending packets, make a copy, because pointers get
-                // modified in this loop!
-                intensity_packet packetcopy;
-                if (forking_active)
-                    memcpy(&packetcopy, &packet, sizeof(intensity_packet));
-
-                packet.data_nbytes = new_data_nbytes;
-                packet.nbeams = 1;
-	    
-                for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-                    // Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
-                    // original packet containing only beam index 'ibeam'.
-
-                    // Loop over assembler ids, to find a match for the packet_id.
-                    int packet_id = packet.beam_ids[0];
-
-                    shared_ptr<assembled_chunk_ringbuf> assembler = _assembler_for_beam(packet_id);
-                    if (!assembler) {
-                        // No match found
-                        chlog("Beam id mismatch from " << ip_to_string(packet.sender));
-                        event_subcounts[event_type::beam_id_mismatch]++;
-                        if (ini_params.throw_exception_on_beam_id_mismatch)
-                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
-                    } else {
-                        // Match found
-                        assembler->put_unassembled_packet(packet, event_subcounts);
-                    }
-
-                    // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
-                    // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
-                    packet.beam_ids += 1;
-                    packet.scales += nfreq_coarse;
-                    packet.offsets += nfreq_coarse;
-                    packet.data += new_data_nbytes;
-                }
-
-                if (forking_active) {
-                    // Revert the packet header to its original state!
-                    memcpy(&packet, &packetcopy, sizeof(intensity_packet));
-
-                    /*
-                     // In case there are any single-beam forks, create a header
-                     // for 1 beam.
-                     intensity_packet subpacket;
-                     memcpy(&subpacket, &packetcopy, sizeof(intensity_packet));
-                     int nc = subpacket.nfreq_coarse;
-                     subpacket.nbeams = 1;
-                     subpacket.data_nbytes = nc * subpacket.nupfreq * subpacket.ntsamp;
-                     int nsub = subpacket.set_pointers(forked_packet_data);
-                     */
-
-                    int nc = packet.nfreq_coarse;
-                    // Create headers for 1, 2, or 3-beam sub-packets.
-                    const int NS = 3;
-                    intensity_packet subpackets[NS];
-                    int nsubs[NS];
-                    for (int s=0; s<NS; s++) {
-                        memcpy(&(subpackets[s]), &packetcopy, sizeof(intensity_packet));
-                        subpackets[s].nbeams = s+1;
-                        subpackets[s].data_nbytes = subpackets[s].nbeams * nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
-                        nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
-                    }
-                    
-                    for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
-                        if (it->beam == 0) {
-                            // send all (four) beams!
-                            for (int i=0; i<packet.nbeams; i++)
-                                packet.beam_ids[i] += it->destbeam;
-                            int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
-                                               reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
-                            fork_packets_sent++;
-                            fork_bytes_sent += nsent;
-                            for (int i=0; i<packet.nbeams; i++)
-                                packet.beam_ids[i] -= it->destbeam;
-                            if (nsent == -1)
-                                chlog("Failed to send forked packet data: " << strerror(errno));
-                            if (nsent < packet_nbytes)
-                                chlog("Sent " << nsent << " < " << packet_nbytes << " bytes of forked packet data!");
-                            continue;
-                        }
-                        // send 1-3 beams
-                        // start beam index
-                        int ibeam = 0;
-                        if (it->beam == 0) {
-                            // find beam index
-                            ibeam = -1;
-                            for (int i=0; i<packet.nbeams; i++)
-                                if (packet.beam_ids[i] == it->beam) {
-                                    ibeam = i;
-                                    break;
-                                }
-                            if (ibeam == -1) {
-                                chlog("Forking: beam " << it->beam << " not found");
-                                continue;
-                            }
-                        }
-                        int nbeams = 1;
-                        if (it->beam == -2) {
-                            nbeams = 2;
-                        } else if (it->beam == -3) {
-                            nbeams = 3;
-                        }
-                        intensity_packet* subpacket = &(subpackets[nbeams-1]);
-                        int nsub = nsubs[nbeams-1];
-                        memcpy(subpacket->coarse_freq_ids,
-                               packet.coarse_freq_ids,
-                               nc * sizeof(uint16_t));
-                        for (int i=0; i<nbeams; i++)
-                            subpacket->beam_ids[i] = packet.beam_ids[ibeam + i] + it->destbeam;
-                        memcpy(subpacket->scales,
-                               packet.scales + ibeam * nc,
-                               nbeams * nc * sizeof(float));
-                        memcpy(subpacket->offsets,
-                               packet.offsets + ibeam * nc,
-                               nbeams * nc * sizeof(float));
-                        memcpy(subpacket->data,
-                               packet.data + ibeam * subpacket->data_nbytes/nbeams,
-                               subpacket->data_nbytes);
-
-                        int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
-                                           reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
-                        fork_packets_sent++;
-                        fork_bytes_sent += nsent;
+                for (auto it : forking_packets) {
+                    if (it.beam == 0) {
+                        // send all (four) beams!
+                        for (int i=0; i<packet.nbeams; i++)
+                            packet.beam_ids[i] += it.destbeam;
+                        int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
+                                           reinterpret_cast<struct sockaddr*>(&(it.dest)), sizeof(it.dest));
+                        fs.fork_packets_sent++;
+                        fs.fork_bytes_sent += nsent;
+                        for (int i=0; i<packet.nbeams; i++)
+                            packet.beam_ids[i] -= it.destbeam;
                         if (nsent == -1)
                             chlog("Failed to send forked packet data: " << strerror(errno));
-                        if (nsent < nsub)
-                            chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
-                        /* check what we sent
-                         intensity_packet dec;
-                         bool ok = dec.decode(forked_packet_data, nsub);
-                         cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;
-                         */
+                        if (nsent < packet_nbytes)
+                            chlog("Sent " << nsent << " < " << packet_nbytes << " bytes of forked packet data!");
+                        continue;
                     }
-                } // end forking_active
-            } // end of loop over packet list
-            if (forking_active) {
-#if defined(FIONWRITE)
-                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
-                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
-                }
-#elif defined(SIOCOUTQ)
-                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
-                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
-                }
-#elif defined(SO_NWRITE)
-                int sz = sizeof(int);
-                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
-                               &fork_sendqueue_end, reinterpret_cast<socklen_t*>(&sz))) {
-                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
-                }
-#else
-                fork_sendqueue_end = -1;
-#endif
-#if defined(FIONSPACE)
-                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_end) == -1) {
-                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
-                }
-#else
-                int isz = sizeof(int);
-                int bufsize = 0;
-                if (getsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF,
-                               &bufsize, reinterpret_cast<socklen_t*>(&isz))) {
-                    chlog("Failed to call getsockopt(SO_SNDBUF): " << strerror(errno));
-                }
-                fork_sendspace_end = bufsize;
-                //fork_sendspace_end = -1;
-#endif
-                int esz = sizeof(int);
-                int forking_error = 0;
-                if (getsockopt(forking_socket, SOL_SOCKET, SO_ERROR,
-                               &forking_error, reinterpret_cast<socklen_t*>(&esz))) {
-                    chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
-                }
+                    // send 1-3 beams
+                    // start beam index
+                    int ibeam = 0;
+                    if (it.beam == 0) {
+                        // find beam index
+                        ibeam = -1;
+                        for (int i=0; i<packet.nbeams; i++)
+                            if (packet.beam_ids[i] == it.beam) {
+                                ibeam = i;
+                                break;
+                            }
+                        if (ibeam == -1) {
+                            chlog("Forking: beam " << it.beam << " not found");
+                            continue;
+                        }
+                    }
+                    int nbeams = 1;
+                    if (it.beam == -2) {
+                        nbeams = 2;
+                    } else if (it.beam == -3) {
+                        nbeams = 3;
+                    }
+                    intensity_packet* subpacket = &(subpackets[nbeams-1]);
+                    int nsub = nsubs[nbeams-1];
+                    memcpy(subpacket->coarse_freq_ids,
+                           packet.coarse_freq_ids,
+                           nc * sizeof(uint16_t));
+                    for (int i=0; i<nbeams; i++)
+                        subpacket->beam_ids[i] = packet.beam_ids[ibeam + i] + it.destbeam;
+                    memcpy(subpacket->scales,
+                           packet.scales + ibeam * nc,
+                           nbeams * nc * sizeof(float));
+                    memcpy(subpacket->offsets,
+                           packet.offsets + ibeam * nc,
+                           nbeams * nc * sizeof(float));
+                    memcpy(subpacket->data,
+                           packet.data + ibeam * subpacket->data_nbytes/nbeams,
+                           subpacket->data_nbytes);
 
-                struct timeval tvnow = xgettimeofday();
-                uint64_t worktime = usec_between(tva, tvnow);
-                uint64_t tperiod = usec_between(tvf, tvnow);
-                tvf = tvnow;
-
-                //chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms -> " << ((fork_packets_sent * 1e6) / tperiod) << " packets/sec, " << ((fork_bytes_sent * 1e6 * 8) / tperiod) << " bits/sec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+                    int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
+                                       reinterpret_cast<struct sockaddr*>(&(it.dest)),
+                                       sizeof(it.dest));
+                    fs.fork_packets_sent++;
+                    fs.fork_bytes_sent += nsent;
+                    if (nsent == -1)
+                        chlog("Failed to send forked packet data: " << strerror(errno));
+                    if (nsent < nsub)
+                        chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
+                }
             }
-        } // end of forking_mutex lock
+            if (forking_active)
+                fs.finish();
+
+            struct timeval tvnow = xgettimeofday();
+            uint64_t worktime = usec_between(tva, tvnow);
+            uint64_t tperiod = usec_between(tvf, tvnow);
+            tvf = tvnow;
+        }
 
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
