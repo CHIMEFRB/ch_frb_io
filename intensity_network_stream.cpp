@@ -1170,15 +1170,30 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
 }
 
 void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
+
+    // end-of-stream packet
+    vector<uint8_t> packet(24, uint8_t(0));
+    *((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
+
     unique_lock<mutex> ulock(forking_mutex);
-    if ((beam == -1) && (destbeam == -1))
+    if ((beam == -1) && (destbeam == -1)) {
         // Stop all!
+        for (auto& it : forking_packets) {
+            if (forking_socket)
+                sendto(forking_socket, &packet[0], packet.size(), 0,
+                       reinterpret_cast<struct sockaddr*>(&(it.dest)), sizeof(it.dest));
+        }
         forking_packets.clear();
-    else
+    } else
         for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
             if ((it->beam == beam) && (it->destbeam == destbeam) &&
                 (it->dest.sin_port == dest.sin_port) &&
                 (it->dest.sin_addr.s_addr == dest.sin_addr.s_addr)) {
+
+                if (forking_socket)
+                    sendto(forking_socket, &packet[0], packet.size(), 0,
+                           reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+
                 forking_packets.erase(it);
                 it--;
             }
