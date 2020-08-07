@@ -699,32 +699,29 @@ protected:
 // slow_pulsar_chunk
 //
 // This chunk will house slow pulsar "packetized" data
-// for now, we really only assign the binary_data field.
-// we will allocate via 
 
-ssize_t byte_ceil(const ssize_t bits, const ssize_t nbits=8);
-
-struct sp_header{
-    uint64_t ichunk = 0;
-    // nt out
-    int nt = -1;
-    // time downsampling factor
-    int ntds = 1;
-
-    // nfreq out
-    int nfreq = -1;
-    // frequency downsampling factor
-    int nfds = 1;
-    int nbits = 4;
+struct sp_file_header{
+    uint16_t beam_id = -1;
+    uint16_t nbins = 5;
+    double start = 0.;
+    double end = 0.;
+    int32_t version = 3; // Hard-coded, must agree with spshuff
 
     const ssize_t get_header_size(){
-        return 5 * sizeof(int) + sizeof(uint64_t);
+        return 2 + 2 + 8 + 8 + 4;
     }
-    // TODO add quantization logic/metedata
-    // presumably this will be some finite boundary set per frequency channel
-    // where the number of levels is determined by nbits
-    const ssize_t get_data_size(){
-        return 2 * byte_ceil(nbits * this->nfreq * this->nt);
+};
+
+struct sp_chunk_header{
+    // uint64_t ichunk = 0;
+    uint16_t nfreq = -1;
+    uint16_t ntime = -1;
+    uint64_t frame0_nano = 0;
+    uint64_t fpgaN = -1;
+    uint64_t fpga0 = 0;
+
+    const ssize_t get_header_size(){
+        return 2 + 2 + 8 + 8 + 8;
     }
 };
 
@@ -735,7 +732,11 @@ public:
     slow_pulsar_chunk(const std::shared_ptr<ch_chunk_initializer> ini_params);
     ~slow_pulsar_chunk() {};
 
-    bool commit_chunk(sp_header& header, std::shared_ptr<std::vector<char>> dat);
+    bool commit_chunk(sp_chunk_header& header, std::shared_ptr<std::vector<uint32_t>> idat,
+                      const ssize_t compressed_data_len, std::shared_ptr<std::vector<uint8_t>> mask,
+                      std::shared_ptr<std::vector<float>> means, std::shared_ptr<std::vector<float>> vars);
+
+    sp_file_header file_header;
 
     ssize_t islab = 0;
     ssize_t ibyte_chunk = 0;

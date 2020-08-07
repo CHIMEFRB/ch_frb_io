@@ -29,7 +29,7 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl
+LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl -lspshuff
 
 OFILES = ch_chunk.o \
 	assembled_chunk.o \
