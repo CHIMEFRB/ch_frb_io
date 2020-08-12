@@ -679,6 +679,7 @@ public:
 
     ~ch_chunk();
 
+    // TODO rename this
     virtual void write_msgpack_file(const std::string &filename, bool compress,
                             uint8_t* buffer=NULL) = 0;
     virtual bool is_ready(){return true;};
@@ -701,7 +702,7 @@ protected:
 // This chunk will house slow pulsar "packetized" data
 
 struct sp_file_header{
-    uint16_t beam_id = -1;
+    uint16_t beam_id = 0;
     uint16_t nbins = 5;
     double start = 0.;
     double end = 0.;
@@ -713,11 +714,10 @@ struct sp_file_header{
 };
 
 struct sp_chunk_header{
-    // uint64_t ichunk = 0;
-    uint16_t nfreq = -1;
-    uint16_t ntime = -1;
+    uint16_t nfreq = 0;
+    uint16_t ntime = 0;
     uint64_t frame0_nano = 0;
-    uint64_t fpgaN = -1;
+    uint64_t fpgaN = 0;
     uint64_t fpga0 = 0;
 
     const ssize_t get_header_size(){
@@ -732,7 +732,7 @@ public:
     slow_pulsar_chunk(const std::shared_ptr<ch_chunk_initializer> ini_params);
     ~slow_pulsar_chunk() {};
 
-    bool commit_chunk(sp_chunk_header& header, std::shared_ptr<std::vector<uint32_t>> idat,
+    const int commit_chunk(std::shared_ptr<sp_chunk_header> header, std::shared_ptr<std::vector<uint32_t>> idat,
                       const ssize_t compressed_data_len, std::shared_ptr<std::vector<uint8_t>> mask,
                       std::shared_ptr<std::vector<float>> means, std::shared_ptr<std::vector<float>> vars);
 

@@ -46,16 +46,17 @@ slow_pulsar_chunk::slow_pulsar_chunk(const std::shared_ptr<ch_chunk_initializer>
     // }
 }
 
-bool slow_pulsar_chunk::commit_chunk(sp_chunk_header& header, std::shared_ptr<std::vector<uint32_t>> idat,
+const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> header, std::shared_ptr<std::vector<uint32_t>> idat,
                       const ssize_t compressed_data_len, std::shared_ptr<std::vector<uint8_t>> mask,
                       std::shared_ptr<std::vector<float>> means, std::shared_ptr<std::vector<float>> vars)
 {
 	const ssize_t bytes_slab = this->memory_pool->nbytes_per_slab;
-	const ssize_t size_head = header.get_header_size();
+	const ssize_t size_head = header->get_header_size();
 	// note that this must be explicitly provided as we can only predict
 	// moments of the "sample entropy"
 	const ssize_t size_i = compressed_data_len * sizeof(uint32_t);
-	const ssize_t size_m = mask->size() * sizeof(uint8_t);
+	// const ssize_t size_m = mask->size() * sizeof(uint8_t);
+	const ssize_t size_m = 0;
 	const ssize_t size_freq = means->size() * sizeof(float);
 	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq;
 
@@ -63,12 +64,16 @@ bool slow_pulsar_chunk::commit_chunk(sp_chunk_header& header, std::shared_ptr<st
 	const ssize_t islab = this->islab;
 	const ssize_t islab_post = islab + byte_size;
 
+	if(byte_size > bytes_slab){
+		return 2;
+	}
+
 	if(islab_post > bytes_slab){
-		return false;
+		return 1;
 	}
 
 	// copy header
-	std::memcpy((void*) &(this->memory_slab[islab]), (void*) &header, size_head);
+	std::memcpy((void*) &(this->memory_slab[islab]), (void*) &(*header), size_head);
 	// copy encoded intensity data
 	std::memcpy((void*) &(this->memory_slab[islab + size_head]), (void*) &((*idat)[0]), size_i);
 	// copy raw RFI mask
@@ -80,7 +85,7 @@ bool slow_pulsar_chunk::commit_chunk(sp_chunk_header& header, std::shared_ptr<st
 							(void*) &((*vars)[0]), size_freq);
 	
 	this->islab = islab_post;
-	return true;
+	return 0;
 }
 
 // virtual override
