@@ -55,8 +55,7 @@ const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> heade
 	// note that this must be explicitly provided as we can only predict
 	// moments of the "sample entropy"
 	const ssize_t size_i = compressed_data_len * sizeof(uint32_t);
-	// const ssize_t size_m = mask->size() * sizeof(uint8_t);
-	const ssize_t size_m = 0;
+	const ssize_t size_m = (mask->size() * sizeof(uint8_t)) / 8;
 	const ssize_t size_freq = means->size() * sizeof(float);
 	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq;
 
