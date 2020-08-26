@@ -20,10 +20,15 @@
 #include <iostream>
 #include <mutex>
 #include <condition_variable>
+#include <cstring>
 
 #include <hdf5.h>
 
 #include <arpa/inet.h>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ch_frb_io {
 #if 0
@@ -711,6 +716,18 @@ struct sp_file_header{
     const ssize_t get_header_size(){
         return 2 + 2 + 8 + 8 + 4;
     }
+
+    const ssize_t write_to_file(const int ofile){
+        ssize_t nwritten = 0;
+
+        nwritten += write(ofile, (void*) &(beam_id), 2);
+        nwritten += write(ofile, (void*) &(nbins), 2);
+        nwritten += write(ofile, (void*) &(start), 8);
+        nwritten += write(ofile, (void*) &(end), 8);
+        nwritten += write(ofile, (void*) &(version), 4);
+
+        return nwritten;
+    }
 };
 
 struct sp_chunk_header{
@@ -722,6 +739,31 @@ struct sp_chunk_header{
 
     const ssize_t get_header_size(){
         return 2 + 2 + 8 + 8 + 8;
+    }
+
+    const ssize_t write_to_file(const int ofile){
+        ssize_t nwritten = 0;
+
+        nwritten += write(ofile, (void*) &(nfreq), 2);
+        nwritten += write(ofile, (void*) &(ntime), 2);
+        nwritten += write(ofile, (void*) &(frame0_nano), 8);
+        nwritten += write(ofile, (void*) &(fpgaN), 8);
+        nwritten += write(ofile, (void*) &(fpga0), 8);
+
+        return nwritten;
+    }
+
+    void copy(void* dst){
+        ssize_t ibyte = 0;
+        std::memcpy(dst, (void*) &nfreq, sizeof(uint16_t));
+        ibyte += sizeof(uint16_t);
+        std::memcpy(dst + ibyte, (void*) &ntime, sizeof(uint16_t));
+        ibyte += sizeof(uint16_t);
+        std::memcpy(dst + ibyte, (void*) &frame0_nano, sizeof(uint64_t));
+        ibyte += sizeof(uint64_t);
+        std::memcpy(dst + ibyte, (void*) &fpgaN, sizeof(uint64_t));
+        ibyte += sizeof(uint64_t);
+        std::memcpy(dst + ibyte, (void*) &fpga0, sizeof(uint64_t));
     }
 };
 

@@ -1,6 +1,4 @@
-#include<fcntl.h>
-#include<sys/types.h>
-#include<sys/stat.h>
+#include <sys/types.h>
 
 #include "ch_frb_io_internals.hpp"
 
@@ -55,9 +53,9 @@ const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> heade
 	// note that this must be explicitly provided as we can only predict
 	// moments of the "sample entropy"
 	const ssize_t size_i = compressed_data_len * sizeof(uint32_t);
-	const ssize_t size_m = (mask->size() * sizeof(uint8_t)) / 8;
+	const ssize_t size_m = (mask->size() * sizeof(uint8_t));
 	const ssize_t size_freq = means->size() * sizeof(float);
-	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq;
+	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq + sizeof(long int);
 
 	std::lock_guard<std::mutex> lg(this->slab_mutex);
 	const ssize_t islab = this->islab;
@@ -72,16 +70,22 @@ const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> heade
 	}
 
 	// copy header
-	std::memcpy((void*) &(this->memory_slab[islab]), (void*) &(*header), size_head);
-	// copy encoded intensity data
-	std::memcpy((void*) &(this->memory_slab[islab + size_head]), (void*) &((*idat)[0]), size_i);
-	// copy raw RFI mask
-	std::memcpy((void*) &(this->memory_slab[islab + size_head + size_i]), (void*) &((*mask)[0]), size_m);
+	header->copy((void*) &(this->memory_slab[islab]));
 	// copy means
-	std::memcpy((void*) &(this->memory_slab[islab + size_head + size_i + size_m]), (void*) &((*means)[0]), size_freq);
+	std::memcpy((void*) &(this->memory_slab[islab + size_head]), (void*) &((*means)[0]), size_freq);
 	// copy vars
-	std::memcpy((void*) &(this->memory_slab[islab + size_head + size_i + size_m + size_freq]), 
+	std::memcpy((void*) &(this->memory_slab[islab + size_head + size_freq]), 
 							(void*) &((*vars)[0]), size_freq);
+	// copy raw RFI mask
+	std::memcpy((void*) &(this->memory_slab[islab + size_head + 2 * size_freq]), (void*) &((*mask)[0]), size_m);
+
+	const long int comp_len = (long int) compressed_data_len;
+	//copy compressed data len as long int (python int)
+	std::memcpy((void*) &(this->memory_slab[islab + size_head + 2 * size_freq + size_m]), 
+							(void*) &(comp_len), sizeof(long int));
+	// copy encoded intensity data
+	std::memcpy((void*) &(this->memory_slab[islab + size_head + 2 * size_freq + size_m + sizeof(long int)]),
+							(void*) &((*idat)[0]), size_i);
 	
 	this->islab = islab_post;
 	return 0;
@@ -102,7 +106,7 @@ void slow_pulsar_chunk::write_msgpack_file(const std::string &filename, bool com
 	std::lock_guard<std::mutex> lg(this->slab_mutex);
 	const ssize_t nwrite = this->islab + 1 + this->file_header.get_header_size();
 
-	ssize_t nwritten = write(ofile, (void*) &(this->file_header), this->file_header.get_header_size());
+	ssize_t nwritten = this->file_header.write_to_file(ofile);
 	nwritten += write(ofile, (void*) &(this->memory_slab[0]), this->islab + 1 );
 
 	if(nwritten != nwrite){
