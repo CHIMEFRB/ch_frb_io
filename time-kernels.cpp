@@ -65,6 +65,7 @@ static double time_assemble(std::mt19937 &rng)
     const int nupfreq = 16;
     const int nt_per_packet = 16;
     const int fpga_counts_per_sample = 384;
+    const uint64_t fpga_frame0_ns = 1234;
     const int nchunks = 2;
     const int niter = 5;
 
@@ -95,20 +96,21 @@ static double time_assemble(std::mt19937 &rng)
 	    intensity_packet &p = packets[ichunk*npackets_per_chunk + ipacket];
 	    uint8_t *d = &packet_data[(ichunk*npackets_per_chunk + ipacket) * packet_size];
 
-	    p.protocol_version = 1;
+	    p.protocol_version = 2;
 	    p.data_nbytes = 4 * nupfreq * nt_per_packet;
 	    p.fpga_counts_per_sample = fpga_counts_per_sample;
+        p.fpga_frame0_ns = fpga_frame0_ns;
 	    p.fpga_count = it_c * nt_per_packet * fpga_counts_per_sample;
 	    p.nbeams = 1;
 	    p.nfreq_coarse = 4;
 	    p.nupfreq = nupfreq;
 	    p.ntsamp = nt_per_packet;
 
-	    p.beam_ids = reinterpret_cast<uint16_t *> (d + 24);
-	    p.coarse_freq_ids = reinterpret_cast<uint16_t *> (d + 26);
-	    p.scales = reinterpret_cast<float *> (d + 34);
-	    p.offsets = reinterpret_cast<float *> (d + 50);
-	    p.data = d + 66;
+	    p.beam_ids = reinterpret_cast<uint16_t *> (d + intensity_packet::intensity_fixed_header_length);
+	    p.coarse_freq_ids = reinterpret_cast<uint16_t *> (d + intensity_packet::intensity_fixed_header_length + 2);
+	    p.scales = reinterpret_cast<float *> (d + intensity_packet::intensity_fixed_header_length + 10);
+	    p.offsets = reinterpret_cast<float *> (d + intensity_packet::intensity_fixed_header_length + 26);
+	    p.data = d + intensity_packet::intensity_fixed_header_length + 42;
 
 	    p.beam_ids[0] = 0;
 

@@ -98,7 +98,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 
     // Now assign nfreq_coarse_per_packet, subject to packet size constraints.
     // The constants "c0" and "c1" are defined so that the packet size is c0 + c1 * nfreq_coarse_per_packet.
-    int c0 = 24 + 2*nbeams;
+    int c0 = intensity_packet::intensity_fixed_header_length + 2*nbeams;
     int c1 = 2 + 8*nbeams + nbeams*nupfreq*nt_per_packet;
 
     this->nfreq_coarse_per_packet = (ch_frb_io::constants::max_output_udp_packet_size - c0) / c1;
