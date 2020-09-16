@@ -834,7 +834,7 @@ void intensity_network_stream::_network_thread_body()
                 for (;;) {
                     int packet_nbytes = ::recv(sockfd, packet_data, maxsize, MSG_PEEK | MSG_DONTWAIT);
                     chlog("Flushing end-of-stream packets: peeked at a packet with " << packet_nbytes << " bytes.");
-                    if (packet_nbytes == 24) {
+                    if (packet_nbytes == intensity_packet::intensity_fixed_header_length) {
                         packet_nbytes = ::recv(sockfd, packet_data, maxsize, 0);
                         chlog("dumped a packet with " << packet_nbytes << " bytes");
                     } else
@@ -948,8 +948,8 @@ void intensity_network_stream::_network_thread_one_stream() {
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
 
-	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
-	if (_unlikely(packet_nbytes == 24)) {
+	// If we receive a special "short" packet (length intensity_packet::intensity_fixed_header_length), it indicates end-of-stream.
+	if (_unlikely(packet_nbytes == intensity_packet::intensity_fixed_header_length)) {
 	    event_subcounts[event_type::packet_end_of_stream]++;
 	    if (ini_params.accept_end_of_stream_packets) {
                 chlog("i_n_s: Received end-of-stream packet.");
@@ -1144,7 +1144,7 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
 void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
 
     // end-of-stream packet
-    vector<uint8_t> packet(24, uint8_t(0));
+    vector<uint8_t> packet(intensity_packet::intensity_fixed_header_length, uint8_t(0));
     *((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
     unique_lock<mutex> ulock(forking_mutex);

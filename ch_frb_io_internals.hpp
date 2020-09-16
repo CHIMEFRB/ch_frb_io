@@ -62,11 +62,12 @@ std::string ip_to_string(const sockaddr_in &addr);
 
 
 struct intensity_packet {
-    // "Header fields".   These 24 bytes should have the same ordering and byte count as the 
-    // "on-wire" packet, since we use memcpy(..., 24) to initialize them from the raw packet data.
+    // "Header fields".   These 32 bytes should have the same ordering and byte count as the 
+    // "on-wire" packet, since we use memcpy(..., intensity_fixed_header_length) to initialize them from the raw packet data.
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
+    uint64_t  fpga_frame0_ns;
     uint64_t  fpga_count;
     uint16_t  nbeams;
     uint16_t  nfreq_coarse;
@@ -82,10 +83,12 @@ struct intensity_packet {
     float     *offsets;           // 2D array of shape (nbeam, nfreq_coarse)
     uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
+    /// Length of "header fields"
+    static const int intensity_fixed_header_length = 32;
 
     static inline int header_size(int nbeams, int nfreq_coarse)
     {
-	return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+	return 28 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
     }
 
     static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)

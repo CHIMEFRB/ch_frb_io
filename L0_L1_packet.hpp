@@ -43,7 +43,7 @@
 // ints and IEEE 754 floats.
 //
 // The packet header size in bytes is currently
-//    24 + 2*nbeam + 2*nfreq_coarse + 8*nbeam*nfreq
+//    32 + 2*nbeam + 2*nfreq_coarse + 8*nbeam*nfreq
 //
 // For full CHIME, we expect to use (nbeam, nfreq_coarse, nupfreq, ntsamp) = (8, 4, 16, 16)
 // which gives a 304-byte header and an 8192-byte data segment.
@@ -53,7 +53,7 @@
 //
 
 struct L0_L1_header {
-    // This file describes protocol version 1.
+    // This file describes protocol version 2.
     // A 32-bit protocol number is overkill, but means that all fields below are aligned on their
     // "natural" boundaries (i.e. fields with size Nbytes have byte offsets which are multiples of Nbytes)
     uint32_t    protocol_version;
@@ -67,6 +67,9 @@ struct L0_L1_header {
     // This is the duration of a time sample, in FPGA counts.
     // The duration in seconds is dt = (2.56e-6 * fpga_counts_per_sample)
     uint16_t    fpga_counts_per_sample;
+
+    // This is the time in nanoseconds since Unix epoch of the first FPGA sample (fpga_count=0)
+    uint64_t    fpga_frame0_ns;
 
     // This is the time index (in FPGA counts) of the first time sample in the packet.
     // The packet sender is responsible for "unwrapping" the 32-bit FPGA timestamp to 64 bits.
@@ -96,8 +99,8 @@ struct L0_L1_header {
     // comprising a coarse frequency, and are the same for each of the 16 time samples in
     // a packet.  Thus the scale of offset arrays have shape (nbeam, nfreq_coarse).
 
-    float32     scale[nbeam * nfreq_coarse];   // byte offset (24 + 2*nbeam + 2*nfreq_coarse)
-    float32     offset[nbeam * nfreq_coarse];  // byte offset (24 + 2*nbeam + 2*nfreq_coarse + 2*nbeam*nfreq_coarse)
+    float32     scale[nbeam * nfreq_coarse];   // byte offset (32 + 2*nbeam + 2*nfreq_coarse)
+    float32     offset[nbeam * nfreq_coarse];  // byte offset (32 + 2*nbeam + 2*nfreq_coarse + 2*nbeam*nfreq_coarse)
 
     // The uncompressed data array has shape (nbeam, nfreq_coarse, nupfreq, ntsamp),
     // ordered so that the fastest changing index is the time dimension, i.e. each
