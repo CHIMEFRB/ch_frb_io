@@ -1334,12 +1334,6 @@ void intensity_network_stream::_assembler_thread_body()
                 continue;
             }
 
-            if (this->ini_params.frame0_url.size()) {
-                // After we receive our first packet, we will go fetch the frame0_ctime
-                // via curl.  This is usually fast, so we'll do it in blocking mode.
-                chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
-                _fetch_frame0();    // raises runtime_error on failure
-            }
             chlog("Received first packet.  Beams:" << packet.nbeams);
             for (int i=0; i<packet.nbeams; i++) {
                 int beam = packet.beam_ids[i];
@@ -1617,68 +1611,6 @@ void intensity_network_stream::_assembler_thread_exit()
 
     cout << ss.str().c_str() << endl;
 #endif
-}
-
-
-class CurlStringHolder {
-public:
-    string thestring;
-};
-
-static size_t
-CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    CurlStringHolder* h = (CurlStringHolder*)userp;
-    h->thestring += string((char*)contents, realsize);
-    return realsize;
-}
-
-void intensity_network_stream::_fetch_frame0() {
-    if (ini_params.frame0_url.size() == 0) {
-        chlog("No 'frame0_url' set; skipping.");
-        return;
-    }
-    CURL *curl_handle;
-    CURLcode res;
-    CurlStringHolder holder;
-    // init the curl session
-    curl_handle = curl_easy_init();
-    // specify URL to get
-    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
-    // set timeout
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
-    // set received-data callback
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
-                     CurlWriteMemoryCallback);
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
-    // curl!
-    chlog("Fetching frame0_time from " << ini_params.frame0_url);
-    res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK)
-        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
-    curl_easy_cleanup(curl_handle);
-
-    string frame0_txt = holder.thestring;
-    //chlog("Received frame0 text: " << frame0_txt);
-    Json::Reader frame0_reader;
-    Json::Value frame0_json;
-    if (!frame0_reader.parse(frame0_txt, frame0_json))
-        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
-
-    //chlog("Parsed: " << frame0_json);
-    if (!frame0_json.isObject())
-        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
-
-    string key = "frame0_nano";
-    if (!frame0_json.isMember(key))
-        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
-
-    const Json::Value v = frame0_json[key];
-    if (!v.isIntegral())
-        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
-    frame0_nano = v.asUInt64();
-    chlog("Found frame0_nano: " << frame0_nano);
 }
 
 }  // namespace ch_frb_io
