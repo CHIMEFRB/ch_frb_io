@@ -63,7 +63,6 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
-    frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
     stream_bytes_written(0),
@@ -156,10 +155,6 @@ uint64_t intensity_network_stream::get_first_fpgacount() {
     if (!first_packet_received)
         throw runtime_error("ch_frb_io: get_first_fpgacount called, but first packet has not been received yet.");
     return first_fpgacount;
-}
-
-uint64_t intensity_network_stream::get_frame0_nano() {
-    return frame0_nano;
 }
 
 shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
@@ -283,7 +278,6 @@ void intensity_network_stream::reset_stream() {
         this->beam_ids.clear();
         this->beam_to_assembler.clear();
         this->first_fpgacount = 0;
-        this->frame0_nano = 0;
         {
             ulock_t slock(this->stream_lock);
             this->stream_beam_ids.clear();
@@ -308,7 +302,6 @@ void intensity_network_stream::reset_stream() {
         /// shut down assembler thread
         /// reset first_fpgacount
         /// clear beam_to_assembmler
-        /// reset frame0_nano ?
         /// reset event counts??
         // shut down streaming
         // shut down forking
@@ -587,7 +580,6 @@ intensity_network_stream::get_statistics() {
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
-    m["frame0_nano"]            = frame0_nano;
     m["fpga_count"]             = 0;    // XXX FIXME XXX
     m["network_thread_waiting_usec"] = network_thread_waiting_usec;
     m["network_thread_working_usec"] = network_thread_working_usec;
@@ -1355,7 +1347,6 @@ void intensity_network_stream::_assembler_thread_body()
                 if ((beam < 0) || (beam > constants::max_allowed_beam_id))
                     throw runtime_error("ch_frb_io: bad beam_id received in first packet");
                 auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id);
-                assembler->set_frame0(frame0_nano);
                 assemblers.push_back(assembler);
                 beam_ids.push_back(beam);
                 beam_to_assembler[beam] = assembler;

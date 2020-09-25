@@ -448,8 +448,6 @@ public:
     // the given beam id.
     // Raises runtime_error if the first packet has not been received yet.
     uint64_t get_first_fpgacount();
-    
-    uint64_t get_frame0_nano();
 
     void add_first_packet_listener(first_packet_listener f);
     
@@ -577,9 +575,6 @@ protected:
     // Written by assembler thread, read by outside thread
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
-
-    // Initialized to zero by constructor, set to nonzero value by assembler thread when first packet is received.
-    std::atomic<uint64_t> frame0_nano;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
