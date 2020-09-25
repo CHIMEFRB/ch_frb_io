@@ -731,9 +731,6 @@ public:
 	bool force_reference = false;
 	bool force_fast = false;
 
-        // "ctime" in nanoseconds of FGPAcount zero
-        uint64_t frame0_nano = 0;
-
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
@@ -750,7 +747,7 @@ public:
     const int stream_id = 0;
     const uint64_t ichunk = 0;
     // "ctime" in nanoseconds of FGPAcount zero
-    const uint64_t frame0_nano = 0;
+    uint64_t frame0_nano = 0;
 
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)

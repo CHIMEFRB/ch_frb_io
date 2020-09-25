@@ -924,6 +924,11 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
     // Offset relative to beginning of packet
     uint64_t t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - isample;
 
+    // Pull ctime (in nanoseconds) corresponding to FPGAcount 0
+    // from the packet if we don't have it already.
+    if (frame0_nano == 0)
+        frame0_nano = packet.fpga_frame0_ns;
+
     for (int f = 0; f < packet.nfreq_coarse; f++) {
 	int coarse_freq_id = packet.coarse_freq_ids[f];
 
