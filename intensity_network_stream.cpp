@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <iostream>
 
-#include <curl/curl.h>
 #include <json/json.h>
 
 #include "ch_frb_io_internals.hpp"
