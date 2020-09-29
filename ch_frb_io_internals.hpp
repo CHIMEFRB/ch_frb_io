@@ -88,7 +88,7 @@ struct intensity_packet {
 
     static inline int header_size(int nbeams, int nfreq_coarse)
     {
-	return 28 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+	return intensity_fixed_header_length + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
     }
 
     static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
