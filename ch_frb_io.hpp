@@ -710,7 +710,7 @@ public:
     const uint64_t fpga_begin = 0;    // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     uint64_t fpga_end = 0;      // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
     // "ctime" in nanoseconds of FGPAcount zero
-    const uint64_t frame0_nano = 0;
+    uint64_t frame0_nano = 0;
 
     const uint64_t ichunk = 0;
     const int beam_id = 0;
