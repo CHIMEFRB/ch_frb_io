@@ -59,6 +59,7 @@ CPP += -Ibitshuffle
 INCFILES=ch_frb_io.hpp \
         ch_frb_io_internals.hpp \
 	assembled_chunk_msgpack.hpp \
+	msgpack_binary_vector.hpp \
 	bitshuffle/bitshuffle.h bitshuffle/bitshuffle_core.h \
 	bitshuffle/bitshuffle_internals.h bitshuffle/iochain.h \
 	chlog.hpp
@@ -74,7 +75,8 @@ TEST_BINARIES = test-intensity-hdf5-file \
 	test-log \
 	test-weakptr \
 	time-assembled-chunk-write \
-	time-kernels
+	time-kernels \
+	packet-timing-debug
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 
@@ -100,6 +102,9 @@ clean:
 
 libch_frb_io.so: $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)
+
+packet-timing-debug: packet-timing-debug.cpp libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io

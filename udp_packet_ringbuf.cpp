@@ -8,6 +8,10 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
 
 udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_per_list_, int max_nbytes_per_list_)
     : ringbuf_capacity(ringbuf_capacity_), 
@@ -20,27 +24,15 @@ udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_p
     this->ringbuf.resize(ringbuf_capacity);
     for (int i = 0; i < ringbuf_capacity; i++)
 	ringbuf[i] = make_unique<udp_packet_list> (this->max_npackets_per_list, this->max_nbytes_per_list);
-
-    pthread_mutex_init(&this->lock, NULL);
-    pthread_cond_init(&this->cond_packets_added, NULL);
-    pthread_cond_init(&this->cond_packets_removed, NULL);
 }
 
-
-udp_packet_ringbuf::~udp_packet_ringbuf()
-{
-    pthread_mutex_destroy(&lock);
-    pthread_cond_destroy(&cond_packets_added);
-    pthread_cond_destroy(&cond_packets_removed);
-}
 
 void udp_packet_ringbuf::get_size(int* currsize, int* maxsize) {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
     if (currsize)
         *currsize = ringbuf_size;
     if (maxsize)
         *maxsize = ringbuf_capacity;
-    pthread_mutex_unlock(&this->lock);
 }
 
 bool udp_packet_ringbuf::put_packet_list(unique_ptr<udp_packet_list> &p, bool is_blocking)
@@ -48,32 +40,28 @@ bool udp_packet_ringbuf::put_packet_list(unique_ptr<udp_packet_list> &p, bool is
     if (!p)
 	throw runtime_error("ch_frb_io: udp_packet_ringbuf::put_packet_list() was called with empty pointer");
 
-    pthread_mutex_lock(&this->lock);
+    ulock_t lock(mutx);
 
     for (;;) {
-	if (stream_ended) {
-	    pthread_mutex_unlock(&this->lock);
+	if (stream_ended)
 	    throw runtime_error("ch_frb_io: internal error: udp_packet_ringbuf::put_packet_list() called after end of stream");
-	}
 
 	if (ringbuf_size < ringbuf_capacity) {
 	    int i = (ringbuf_pos + ringbuf_size) % ringbuf_capacity;
 	    std::swap(this->ringbuf[i], p);
 	    this->ringbuf_size++;
-	
-	    pthread_cond_broadcast(&this->cond_packets_added);
-	    pthread_mutex_unlock(&this->lock);
+
+            cond_packets_added.notify_all();
 	    p->reset();
 	    return true;
 	}
 
 	if (!is_blocking) {
-	    pthread_mutex_unlock(&this->lock);
 	    p->reset();
 	    return false;
 	}
 
-	pthread_cond_wait(&this->cond_packets_removed, &this->lock);
+        cond_packets_removed.wait(lock);
     }
 }
 
@@ -84,7 +72,8 @@ bool udp_packet_ringbuf::get_packet_list(unique_ptr<udp_packet_list> &p)
 	throw runtime_error("ch_frb_io: udp_packet_ringbuf::get_packet_list() was called with empty pointer");
 
     p->reset();
-    pthread_mutex_lock(&this->lock);
+
+    ulock_t lock(mutx);
 
     for (;;) {
 	if (ringbuf_size > 0) {
@@ -93,36 +82,30 @@ bool udp_packet_ringbuf::get_packet_list(unique_ptr<udp_packet_list> &p)
 	    this->ringbuf_pos++;
 	    this->ringbuf_size--;
 
-	    pthread_cond_broadcast(&this->cond_packets_removed);
-	    pthread_mutex_unlock(&this->lock);
+            cond_packets_removed.notify_all();
 	    return true;
 	}
 
-	if (stream_ended) {
-	    pthread_mutex_unlock(&this->lock);
+	if (stream_ended)
 	    return false;
-	}
 
-	pthread_cond_wait(&this->cond_packets_added, &this->lock);
+        cond_packets_added.wait(lock);
     }
 }
 
 
 void udp_packet_ringbuf::end_stream()
 {
-    pthread_mutex_lock(&this->lock);
+    ulock_t lock(mutx);
     this->stream_ended = true;
-    pthread_cond_broadcast(&this->cond_packets_added);
-    pthread_cond_broadcast(&this->cond_packets_removed);
-    pthread_mutex_unlock(&this->lock);
+    cond_packets_added.notify_all();
+    cond_packets_removed.notify_all();
 }
-
 
 bool udp_packet_ringbuf::is_alive()
 {
-    pthread_mutex_lock(&this->lock);
+    guard_t lock(mutx);
     bool ret = !this->stream_ended;
-    pthread_mutex_unlock(&this->lock);
     return ret;
 }
 

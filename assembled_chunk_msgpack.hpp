@@ -184,12 +184,12 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
 	ini_params.fpga_counts_per_sample = fpga_counts_per_sample;
 	ini_params.binning = binning;
 	ini_params.ichunk = ichunk;
-        ini_params.frame0_nano = frame0_nano;
 
         if (version == 2)
             ini_params.nrfifreq = arr[18].as<int>();
 
         ch = ch_frb_io::assembled_chunk::make(ini_params);
+        ch->frame0_nano = frame0_nano;
 
         if (ch->nt_coarse != nt_coarse)
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nt_coarse mismatch");

@@ -98,7 +98,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 
     // Now assign nfreq_coarse_per_packet, subject to packet size constraints.
     // The constants "c0" and "c1" are defined so that the packet size is c0 + c1 * nfreq_coarse_per_packet.
-    int c0 = 24 + 2*nbeams;
+    int c0 = intensity_packet::intensity_fixed_header_length + 2*nbeams;
     int c1 = 2 + 8*nbeams + nbeams*nupfreq*nt_per_packet;
 
     this->nfreq_coarse_per_packet = (ch_frb_io::constants::max_output_udp_packet_size - c0) / c1;
@@ -402,7 +402,7 @@ static void spawn_processing_thread(const shared_ptr<unit_test_instance> &tp, in
 static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
     ch_frb_io::intensity_network_stream::initializer initializer;
-    initializer.beam_ids = tp->recv_beam_ids;
+    initializer.nbeams = tp->recv_beam_ids.size();
     initializer.nupfreq = tp->nupfreq;
     initializer.nt_per_packet = tp->nt_per_packet;
     initializer.fpga_counts_per_sample = tp->fpga_counts_per_sample;

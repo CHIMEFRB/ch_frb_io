@@ -51,6 +51,10 @@ namespace ch_frb_io {
 #endif
 
 
+// in misc.cpp
+std::string ip_to_string(const sockaddr_in &addr);
+
+
 // -------------------------------------------------------------------------------------------------
 //
 // struct intensity_packet: a lightweight struct representing one UDP packet.
@@ -58,16 +62,19 @@ namespace ch_frb_io {
 
 
 struct intensity_packet {
-    // "Header fields".   These 24 bytes should have the same ordering and byte count as the 
-    // "on-wire" packet, since we use memcpy(..., 24) to initialize them from the raw packet data.
+    // "Header fields".   These 32 bytes should have the same ordering and byte count as the 
+    // "on-wire" packet, since we use memcpy(..., intensity_fixed_header_length) to initialize them from the raw packet data.
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
+    uint64_t  fpga_frame0_ns;
     uint64_t  fpga_count;
     uint16_t  nbeams;
     uint16_t  nfreq_coarse;
     uint16_t  nupfreq;
     uint16_t  ntsamp;
+
+    sockaddr_in sender;
 
     // "Pointer" fields
     uint16_t  *beam_ids;          // 1D array of length nbeams
@@ -76,10 +83,12 @@ struct intensity_packet {
     float     *offsets;           // 2D array of shape (nbeam, nfreq_coarse)
     uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
+    /// Length of "header fields"
+    static const int intensity_fixed_header_length = 32;
 
     static inline int header_size(int nbeams, int nfreq_coarse)
     {
-	return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+	return intensity_fixed_header_length + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
     }
 
     static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
@@ -140,6 +149,11 @@ struct intensity_packet {
 	       const float *weights, int beam_wstride, int freq_wstride, 
 	       float wt_cutoff);
 
+    // sets up my pointers to point into the given data array (which
+    // must be large enough to hold the data); returns the number of
+    // bytes used.  This allows the "dest" array to be send as the
+    // data packet.
+    int set_pointers(uint8_t *dest);
 
     // Currently used only for debugging
     int find_coarse_freq_id(int id) const;
@@ -172,6 +186,8 @@ struct udp_packet_list {
     std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
     std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
 
+    std::vector<sockaddr_in> sender; // of length max_npackets
+    
     // Bare pointers.
     uint8_t *data_start = nullptr;    // points to &buf[0]
     uint8_t *data_end = nullptr;      // points to &buf[curr_nbytes]
@@ -185,7 +201,7 @@ struct udp_packet_list {
 
     // To add a packet, we copy its data to the udp_packet_list::data_end pointer, then call add_packet()
     // to update the rest of the udp_packet_list fields consistently.
-    void add_packet(int packet_nbytes);
+    void add_packet(int packet_nbytes, const sockaddr_in &sender);
 
     // Doesn't deallocate buffers or change the max_* fields, but sets the current packet count to zero.
     void reset();
@@ -203,9 +219,9 @@ struct udp_packet_ringbuf : noncopyable {
     const int max_npackets_per_list;
     const int max_nbytes_per_list;
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond_packets_added;
-    pthread_cond_t cond_packets_removed;
+    std::mutex mutx;
+    std::condition_variable cond_packets_added;
+    std::condition_variable cond_packets_removed;
     bool stream_ended = false;
 
     int ringbuf_size = 0;
@@ -213,7 +229,6 @@ struct udp_packet_ringbuf : noncopyable {
     std::vector<std::unique_ptr<udp_packet_list> > ringbuf;
 
     udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list);
-    ~udp_packet_ringbuf();
     
     // Note!  The pointer 'p' is _swapped_ with an empty udp_packet_list from the ring buffer.
     // In other words, when put_packet_list() returns, the argument 'p' points to an empty udp_packet_list.
@@ -254,10 +269,11 @@ public:
     std::atomic<uint64_t> max_fpga_retrieved;
     // The fpgacount of the first chunk produced by this stream
     std::atomic<uint64_t> first_fpgacount;
-    
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
-    ~assembled_chunk_ringbuf();
+    // Set to 'true' in the first call to put_unassembled_packet().
+    std::atomic<bool> first_packet_received;
+
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -283,8 +299,6 @@ public:
     // Moves any remaining active chunks into the ring buffer, sets 'doneflag', initializes 'final_fpga'.
     void end_stream(int64_t *event_counts);
 
-    void set_frame0(uint64_t frame0_nano);
-    
     // Debugging: inject the given chunk
     bool inject_assembled_chunk(assembled_chunk* chunk);
 
@@ -340,15 +354,10 @@ public:
 
 protected:
     const intensity_network_stream::initializer ini_params;
-    const int beam_id;
     const int stream_id;   // only used in assembled_chunk::format_filename().
+    const int beam_id;
 
-    uint64_t frame0_nano; // nanosecond time() value for fgpacount zero
-    
     output_device_pool output_devices;
-
-    // Set to 'true' in the first call to put_unassembled_packet().
-    bool first_packet_received = false;
 
     // Helper function called in assembler thread, to add a new assembled_chunk to the ring buffer.
     // Resets 'chunk' to a null pointer.
@@ -376,10 +385,10 @@ protected:
     char pad[constants::cache_line_size];
 
     // All fields below are protected by the lock
-    pthread_mutex_t lock;
+    std::mutex mutx;
 
     // Processing thread waits here if the ring buffer is empty.
-    pthread_cond_t cond_assembled_chunks_added;
+    std::condition_variable cond_assembled_chunks_added;
     
     // Telescoping ring buffer.
     // All ringbuf* vectors have length num_downsampling_levels.

@@ -307,6 +307,8 @@ struct packet_counts {
 
 class intensity_network_stream : noncopyable {
 public:
+
+    typedef std::function<void(std::vector<int> beam_id)> first_packet_listener;
     
     // The 'struct initializer' is used to construct the stream object.  A few notes:
     //
@@ -327,7 +329,8 @@ public:
     //     leaves the top level of the telescoping ring buffer) then an exception will be thrown.
 
     struct initializer {
-	std::vector<int> beam_ids;
+        int nbeams;
+
 	std::shared_ptr<memory_slab_pool> memory_pool;
 	std::vector<std::shared_ptr<output_device>> output_devices;
 
@@ -343,10 +346,6 @@ public:
 	// that if nt_align is enabled, then some packets may be dropped, and these will be
 	// treated as assembler misses.
 	int nt_align = 0;
-
-	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
-        std::string frame0_url = "";
-        int frame0_timeout = 3000;
 
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
@@ -438,6 +437,21 @@ public:
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
+    void reset_stream();
+
+    void flush_end_of_stream();
+    
+    void wait_for_first_packet();
+
+    std::vector<int> get_beam_ids();
+
+    // Returns the first fpgacount of the first chunk sent downstream by
+    // the given beam id.
+    // Raises runtime_error if the first packet has not been received yet.
+    uint64_t get_first_fpgacount();
+
+    void add_first_packet_listener(first_packet_listener f);
+    
     // This is the main routine called by the processing threads, to read data from one beam
     // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
@@ -471,10 +485,6 @@ public:
     // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(int beam, uint64_t fpga_counts, bool toplevel=true);
 
-    // Returns the first fpgacount of the first chunk sent downstream by
-    // the given beam id.
-    uint64_t get_first_fpga_count(int beam);
-
     // Returns the last FPGA count processed by each of the assembler,
     // (in the same order as the "beam_ids" array), flushed downstream,
     // and retrieved by downstream callers.
@@ -500,6 +510,11 @@ public:
 
     // For debugging/testing: pretend a packet has just arrived.
     void fake_packet_from(const struct sockaddr_in& sender, int nbytes);
+
+    void start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest);
+    void stop_forking_packets (int beam, int destbeam, const struct sockaddr_in& dest);
+    void pause_forking_packets();
+    void resume_forking_packets();
 
     // stream_to_files(): for streaming incoming data to disk.
     //
@@ -536,6 +551,14 @@ protected:
     // Constant after construction, so not protected by lock
     std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
 
+    std::vector<first_packet_listener> first_packet_listeners;
+
+    std::vector<int> beam_ids;
+
+    uint64_t first_fpgacount;
+    
+    std::map<int, std::shared_ptr<assembled_chunk_ringbuf> > beam_to_assembler;
+
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
@@ -553,9 +576,6 @@ protected:
     // Written by assembler thread, read by outside thread
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
-
-    // Initialized by assembler thread when first packet is received, constant thereafter.
-    uint64_t frame0_nano = 0;  // nanosecond time() value for fgpacount zero.
 
     char _pad1b[constants::cache_line_size];
 
@@ -586,30 +606,45 @@ protected:
     // but doesn't mean that it has actually shut down yet, it may still be reading packets.
     // So far it hasn't been necessary to include a 'stream_ended' flag in the state model.
 
-    pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;       // threads wait here for state to change
-
+    std::mutex state_mutex;
+    std::condition_variable cond_state_changed;
+    
     bool stream_started = false;             // set asynchonously by calling start_stream()
+    bool first_packet_received = false;
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
     bool threads_joined = false;             // set when both threads (network + assembler) are joined
+    bool flush_end_of_stream_requested = false;
+    bool stream_restart = false;
+
     char _pad4[constants::cache_line_size];
 
-    pthread_mutex_t event_lock;
+    std::mutex event_mutex;
     std::vector<int64_t> cumulative_event_counts;
     std::shared_ptr<packet_counts> perhost_packets;
 
-    pthread_mutex_t packet_history_lock;
+    std::mutex packet_history_mutex;
     std::map<double, std::shared_ptr<packet_counts> > packet_history;
     
     // Streaming-related data (arguments to stream_to_files()).
-    std::mutex stream_lock;  // FIXME need to convert pthread_mutex to std::mutex everywhere
+    std::mutex stream_lock;
     std::string stream_filename_pattern;
     std::vector<int> stream_beam_ids;
     int stream_priority;
     bool stream_rfi_mask;
     int stream_chunks_written;
     size_t stream_bytes_written;
+
+    struct packetfork {
+        int beam;
+        int destbeam;
+        struct sockaddr_in dest;
+    };
+
+    std::mutex forking_mutex;
+    std::vector<packetfork> forking_packets;
+    int forking_socket = 0;
+    std::atomic<bool> forking_paused;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
@@ -620,20 +655,20 @@ protected:
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
     void _update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts);
 
+    std::shared_ptr<assembled_chunk_ringbuf> _assembler_for_beam(int beam_id);
+
     void network_thread_main();
     void assembler_thread_main();
 
     // Private methods called by the network thread.    
     void _network_thread_body();
+    void _network_thread_one_stream();
     void _network_thread_exit();
     void _put_unassembled_packets();
 
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
-    // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received.
-    // NOTE that one must call curl_global_init() before, and curl_global_cleanup() after; in chime-frb-l1 we do this in the top-level main() method.
-    void _fetch_frame0();
 };
 
 // struct ch_chunk_initializer{
@@ -925,6 +960,8 @@ public:
     std::atomic<bool> has_rfi_mask;
 
     std::atomic<int> packets_received;
+  // how many assembler misses occurred while this chunk was active_chunk0?
+    std::atomic<int> packets_missed;
 
     // Temporary buffers used during downsampling.
     float *ds_w2 = nullptr;    // 1d array of length (nt_coarse/2)
@@ -1281,15 +1318,15 @@ protected:
     std::string hostname;
     uint16_t udp_port = constants::default_udp_port;
     
-    pthread_mutex_t statistics_lock;
+    std::mutex statistics_lock;
     int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
     int64_t npackets_sent = 0;
     int64_t nbytes_sent = 0;
 
     // State model.
-    pthread_t network_thread;
-    pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;
+    std::thread network_thread;
+    std::mutex state_lock;
+    std::condition_variable cond_state_changed;
     bool network_thread_started = false;
     bool network_thread_joined = false;
 
@@ -1303,8 +1340,8 @@ protected:
     // for intensity_network_ostream::make(), but can't be called otherwise.
     intensity_network_ostream(const initializer &ini_params);
 
-    static void *network_pthread_main(void *opaque_args);
-
+    void _network_thread_main();
+    
     void _network_thread_body();
 
     // For testing purposes (eg, can create a subclass that randomly drops packets), a wrapper on the underlying packet send() function.

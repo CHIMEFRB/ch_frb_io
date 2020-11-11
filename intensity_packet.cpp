@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
+#include "chlog.hpp"
 
 using namespace std;
 
@@ -19,7 +20,7 @@ namespace ch_frb_io {
 // Does a bunch of sanity checks and returns 'true' if packet is good, 'false' if bad.
 //
 // Explicitly, the following checks are performed:
-//   - protocol version == 1
+//   - protocol version == 2
 //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to integer overflows
 //   - packet and data byte counts are correct
 //   - coarse_freq_ids are in range
@@ -29,24 +30,36 @@ namespace ch_frb_io {
 
 bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
 {
-    if (_unlikely(src_nbytes < 24))
+    if (_unlikely(src_nbytes < intensity_fixed_header_length)) {
+        chlog("packet nbytes < " << intensity_packet::intensity_fixed_header_length);
 	return false;
-    if (_unlikely(src_nbytes > constants::max_input_udp_packet_size))
+    }
+    if (_unlikely(src_nbytes > constants::max_input_udp_packet_size)) {
+        chlog("packet nbytes > " << constants::max_input_udp_packet_size);
 	return false;
+    }
 
-    memcpy(this, src, 24);
+    memcpy(this, src, intensity_fixed_header_length);
 
-    if (_unlikely(protocol_version != 1))
+    if (_unlikely(protocol_version != 2)) {
+        chlog("packet protocol version bad");
 	return false;
-    if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0)))
+    }
+    if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0))) {
+        chlog("packet ntsamp bad");
 	return false;
-    if (_unlikely(fpga_counts_per_sample == 0))
+    }
+    if (_unlikely(fpga_counts_per_sample == 0)) {
+        chlog("packet fpga_counts_per_sample bad");
 	return false;
+    }
 
     // Note conversions to uint64_t, to prevent integer overflow
     uint64_t fpga_counts_per_packet = uint64_t(fpga_counts_per_sample) * uint64_t(ntsamp);
-    if (_unlikely(fpga_count % fpga_counts_per_packet != 0))
+    if (_unlikely(fpga_count % fpga_counts_per_packet != 0)) {
+        chlog("packet fpga_count bad");
 	return false;
+    }
 	
     uint64_t n1 = uint64_t(nbeams);
     uint64_t n2 = uint64_t(nfreq_coarse);
@@ -54,27 +67,49 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
     uint64_t n4 = uint64_t(ntsamp);
 
     // Expected header, data size
-    uint64_t nh = 24 + 2*n1 + 2*n2 + 8*n1*n2;
+    uint64_t nh = intensity_fixed_header_length + 2*n1 + 2*n2 + 8*n1*n2;
     uint64_t nd = n1 * n2 * n3 * n4;
 
-    if (_unlikely(uint64_t(src_nbytes) != nh+nd))
+    if (_unlikely(uint64_t(src_nbytes) != nh+nd)) {
+        chlog("packet src_nbytes bad");
 	return false;
-    if (_unlikely(uint64_t(data_nbytes) != nd))
+    }
+    if (_unlikely(uint64_t(data_nbytes) != nd)) {
+        chlog("packet data_nbytes bad");
 	return false;
+    }
 
-    this->beam_ids = (uint16_t *) (src + 24);
-    this->coarse_freq_ids = (uint16_t *) (src + 24 + 2*n1);
-    this->scales = (float *) (src + 24 + 2*n1 + 2*n2);
-    this->offsets = (float *) (src + 24 + 2*n1 + 2*n2 + 4*n1*n2);
+    this->beam_ids = (uint16_t *) (src + intensity_fixed_header_length);
+    this->coarse_freq_ids = (uint16_t *) (src + intensity_fixed_header_length + 2*n1);
+    this->scales = (float *) (src + intensity_fixed_header_length + 2*n1 + 2*n2);
+    this->offsets = (float *) (src + intensity_fixed_header_length + 2*n1 + 2*n2 + 4*n1*n2);
     this->data = (uint8_t *) (src + nh);
 
     for (int i = 0; i < nfreq_coarse; i++)
-	if (_unlikely(coarse_freq_ids[i] >= constants::nfreq_coarse_tot))
+	if (_unlikely(coarse_freq_ids[i] >= constants::nfreq_coarse_tot)) {
+            chlog("packet coarse_freq_ids bad");
 	    return false;
+        }
 
     return true;
 }
 
+int intensity_packet::set_pointers(uint8_t *dst) {
+    int nb = this->nbeams;
+    int nf = this->nfreq_coarse;
+    int nu = this->nupfreq;
+    int nt = this->ntsamp;
+
+    memcpy(dst, this, intensity_fixed_header_length);
+
+    this->beam_ids = (uint16_t *)(dst + intensity_fixed_header_length);
+    this->coarse_freq_ids = (uint16_t *)(dst + intensity_fixed_header_length + 2*nb);
+    this->scales  = (float *) (dst + intensity_fixed_header_length + 2*nb + 2*nf);
+    this->offsets = (float *) (dst + intensity_fixed_header_length + 2*nb + 2*nf + 4*nb*nf);
+    this->data = dst + intensity_fixed_header_length + 2*nb + 2*nf + 8*nb*nf;
+
+    return intensity_fixed_header_length + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
+}
 
 // Encodes a floating-point array of intensities into raw packet data, before sending packet.
 // The precise semantics aren't very intuitive, see extended comment in ch_frb_io_internals.hpp for details!
@@ -86,19 +121,22 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
     int nu = this->nupfreq;
     int nt = this->ntsamp;
 
-    memcpy(dst, this, 24);
-    memcpy(dst + 24, this->beam_ids, 2*nb);
-    memcpy(dst + 24 + 2*nb, this->coarse_freq_ids, 2*nf);
+    // similar but not exactly the same as set_pointers()...
+    memcpy(dst, this, intensity_fixed_header_length);
+    memcpy(dst + intensity_fixed_header_length, this->beam_ids, 2*nb);
+    memcpy(dst + intensity_fixed_header_length + 2*nb, this->coarse_freq_ids, 2*nf);
 
-    this->scales = (float *) (dst + 24 + 2*nb + 2*nf);
-    this->offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
-    this->data = dst + 24 + 2*nb + 2*nf + 8*nb*nf;
+    this->scales  = (float *) (dst + intensity_fixed_header_length + 2*nb + 2*nf);
+    this->offsets = (float *) (dst + intensity_fixed_header_length + 2*nb + 2*nf + 4*nb*nf);
+    this->data = dst + intensity_fixed_header_length + 2*nb + 2*nf + 8*nb*nf;
+
+    int nbytes = intensity_fixed_header_length + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
 
     for (int b = 0; b < nb; b++) {
 	for (int f = 0; f < nf; f++) {
 	    uint8_t *sub_data = data + (b*nf+f) * (nu*nt);
 	    const float *sub_int = intensity + b*beam_istride + f*nu*freq_istride;
-	    const float *sub_wt = weights + b*beam_wstride + f*nu*freq_wstride;
+	    const float *sub_wt  = weights   + b*beam_wstride + f*nu*freq_wstride;
 
 	    float acc0 = 0.0;
 	    float acc1 = 0.0;
@@ -116,7 +154,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    }
 		    
 	    if (acc0 <= 0.0) {
-		this->scales[b*nf+f] = 1.0;
+		this->scales [b*nf+f] = 1.0;
 		this->offsets[b*nf+f] = 0.0;
 		memset(sub_data, 0, nu*nt);
 		continue;
@@ -135,7 +173,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    float scale = sqrt(var) / 25.;
 	    float offset = -128.*scale + mean;   // 0x80 -> mean
 
-	    this->scales[b*nf+f] = scale;
+	    this->scales [b*nf+f] = scale;
 	    this->offsets[b*nf+f] = offset;
 
 	    for (int u = 0; u < nu; u++) {
@@ -151,8 +189,7 @@ int intensity_packet::encode(uint8_t *dst, const float *intensity, int beam_istr
 	    }
 	}
     }
-
-    return 24 + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
+    return nbytes;
 }
 
 
@@ -177,7 +214,7 @@ bool intensity_packet::contains_coarse_freq_id(int id) const
 void test_packet_offsets(std::mt19937 &rng)
 {
     cerr << "test_packet_offsets()...";
-    vector<uint8_t> buf(24, 0);
+    vector<uint8_t> buf(intensity_packet::intensity_fixed_header_length, 0);
 
     for (int iouter = 0; iouter < 1000; iouter++) {
 	intensity_packet p;
@@ -186,6 +223,7 @@ void test_packet_offsets(std::mt19937 &rng)
 	uint32_t protocol_version = std::uniform_int_distribution<uint32_t>()(rng);
 	int16_t data_nbytes = std::uniform_int_distribution<int16_t>()(rng);
 	uint16_t fpga_counts_per_sample = std::uniform_int_distribution<uint16_t>()(rng);
+	uint64_t fpga_frame0_ns = std::uniform_int_distribution<uint64_t>()(rng);
 	uint64_t fpga_count = std::uniform_int_distribution<uint64_t>()(rng);
 	uint16_t nbeams = std::uniform_int_distribution<uint16_t>()(rng);
 	uint16_t nfreq_coarse = std::uniform_int_distribution<uint16_t>()(rng);
@@ -195,17 +233,19 @@ void test_packet_offsets(std::mt19937 &rng)
 	*((uint32_t *) &buf[0]) = protocol_version;
 	*((int16_t *) &buf[4]) = data_nbytes;
 	*((uint16_t *) &buf[6]) = fpga_counts_per_sample;
-	*((uint64_t *) &buf[8]) = fpga_count;
-	*((uint16_t *) &buf[16]) = nbeams;
-	*((uint16_t *) &buf[18]) = nfreq_coarse;
-	*((uint16_t *) &buf[20]) = nupfreq;
-	*((uint16_t *) &buf[22]) = ntsamp;
+	*((uint64_t *) &buf[8]) = fpga_frame0_ns;
+	*((uint64_t *) &buf[16]) = fpga_count;
+	*((uint16_t *) &buf[24]) = nbeams;
+	*((uint16_t *) &buf[26]) = nfreq_coarse;
+	*((uint16_t *) &buf[28]) = nupfreq;
+	*((uint16_t *) &buf[32]) = ntsamp;
 
-	memcpy(&p, &buf[0], 24);
+	memcpy(&p, &buf[0], intensity_packet::intensity_fixed_header_length);
 
 	assert(p.protocol_version == protocol_version);
 	assert(p.data_nbytes == data_nbytes);
 	assert(p.fpga_counts_per_sample == fpga_counts_per_sample);
+	assert(p.fpga_frame0_ns == fpga_frame0_ns);
 	assert(p.fpga_count == fpga_count);
 	assert(p.nbeams == nbeams);
 	assert(p.nfreq_coarse == nfreq_coarse);
