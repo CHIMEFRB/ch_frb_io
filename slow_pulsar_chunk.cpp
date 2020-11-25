@@ -52,11 +52,16 @@ const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> heade
 	const ssize_t size_head = header->get_header_size();
 	// note that this must be explicitly provided as we can only predict
 	// moments of the sample entropy
-	const ssize_t size_i = compressed_data_len * sizeof(uint32_t);
-	const ssize_t size_m = (mask->size() * sizeof(uint8_t));
-	const ssize_t size_freq = means->size() * sizeof(float);
-	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq + sizeof(long int);
 
+	// pull some constants from the chunk header
+	const ssize_t nfreq = header->nfreq;
+	const ssize_t nsamp = nfreq * header->ntime;
+
+	const ssize_t size_i = compressed_data_len * sizeof(uint32_t);
+	const ssize_t size_m = nsamp * sizeof(uint8_t);
+	const ssize_t size_freq = nfreq * sizeof(float);
+	const ssize_t byte_size = size_head + size_i + size_m + 2 * size_freq + sizeof(long int);
+	
 	std::lock_guard<std::mutex> lg(this->slab_mutex);
 	const ssize_t islab = this->islab;
 	const ssize_t islab_post = islab + byte_size;
