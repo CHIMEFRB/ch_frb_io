@@ -42,11 +42,11 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
     memcpy(this, src, intensity_fixed_header_length);
 
     if (_unlikely(protocol_version != 2)) {
-        chlog("packet protocol version bad");
+        chlog("packet protocol version bad: " << protocol_version);
 	return false;
     }
     if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0))) {
-        chlog("packet ntsamp bad");
+        chlog("packet ntsamp bad: " << ntsamp);
 	return false;
     }
     if (_unlikely(fpga_counts_per_sample == 0)) {
