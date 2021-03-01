@@ -526,10 +526,13 @@ public:
     //    
     //   'priority': see write_chunk_request::priority below
     //
+    //   'max_chunks': maximum number of 1-seconds chunks of data to stream to disk;
+    //                 zero for no limit.
+    //
     // Throws an exception if anything goes wrong!  When called from an RPC thread, caller will want to
     // wrap in try..except, and use exception::what() to get the error message.
 
-    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_rfi);
+    void stream_to_files(const std::string &filename_pattern, const std::vector<int> &beam_ids, int priority, bool need_rfi, int max_chunks);
 
     void get_streaming_status(std::string &filename_pattern,
                               std::vector<int> &beam_ids,

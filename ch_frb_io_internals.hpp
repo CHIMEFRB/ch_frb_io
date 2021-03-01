@@ -305,8 +305,10 @@ public:
     // For debugging/testing: stream data to disk.  
     //   'filename pattern': see assembled_chunk::format_filename (empty string to turn off streaming)
     //   'priority': see write_chunk_request::priority
+    //   'max_chunks': maximum number of (1-second) chunks of data to stream to disk,
+    //      zero for no limit.
     void stream_to_files(const std::string &filename_pattern, int priority,
-                         bool need_rfi);
+                         bool need_rfi, int max_chunks);
 
     // Callback from the write thread when a stream_to_files() write finishes
     void chunk_streamed(const std::string &filename);
@@ -409,11 +411,14 @@ protected:
     }
 
     // Are we streaming data to disk?  (Note: these fields require the lock for either read or write access.)
+    // Empty string: not streaming
     std::string stream_pattern;
     int stream_priority = 0;
     bool stream_rfi_mask = false;
     int stream_chunks_written = 0;
     size_t stream_bytes_written = 0;
+    int stream_chunks_queued = 0;
+    int stream_max_chunks = 0;
 
     bool doneflag = false;
     uint64_t final_fpga = 0;   // last fpga count which has an assembled_chunk, only initialized when 'doneflag' is set to true.

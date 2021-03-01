@@ -334,7 +334,7 @@ void intensity_network_stream::join_threads()
 }
 
 
-void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &stream_beam_ids, int priority, bool need_rfi)
+void intensity_network_stream::stream_to_files(const string &filename_pattern, const vector<int> &stream_beam_ids, int priority, bool need_rfi, int max_chunks)
 {
     // Throw exception if 'beam_ids' argument contains a beam_id which is not
     // actually processed by this stream.
@@ -359,11 +359,12 @@ void intensity_network_stream::stream_to_files(const string &filename_pattern, c
 
     // We're going to set the streaming status for *all* our assemblers -- clearing those
     // not in stream_beam_ids.
-    for (int ibeam = 0; ibeam < (int)this->beam_ids.size(); ibeam++) {
+    for (size_t ibeam = 0; ibeam < this->beam_ids.size(); ibeam++) {
 	if (vcontains(stream_beam_ids, this->beam_ids[ibeam]))
-	    assemblers[ibeam]->stream_to_files(filename_pattern, priority, need_rfi);
+	    assemblers[ibeam]->stream_to_files(filename_pattern, priority, need_rfi,
+                                               max_chunks);
 	else
-	    assemblers[ibeam]->stream_to_files("", 0, false);
+	    assemblers[ibeam]->stream_to_files("", 0, false, 0);
     }
 }
 
