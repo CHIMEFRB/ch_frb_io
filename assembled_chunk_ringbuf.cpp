@@ -229,13 +229,15 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t *ringbuf_fpga_next,
 }
 
 
-void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority, bool need_rfi)
+void assembled_chunk_ringbuf::stream_to_files(const string &filename_pattern, int priority, bool need_rfi, int max_chunks)
 {
     guard_t lock(mutx);
     this->stream_pattern = filename_pattern;
     this->stream_priority = priority;
     this->stream_rfi_mask = need_rfi;
+    this->stream_max_chunks = max_chunks;
     this->stream_chunks_written = 0;
+    this->stream_chunks_queued = 0;
     this->stream_bytes_written = 0;
 }
 
@@ -487,16 +489,25 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 
     // Make thread-local copies with lock held.
     string loc_stream_pattern = this->stream_pattern;
-    int loc_stream_priority = this->stream_priority;
-    bool loc_stream_rfi_mask = this->stream_rfi_mask;
-    
+    int  loc_stream_priority  = this->stream_priority;
+    bool loc_stream_rfi_mask  = this->stream_rfi_mask;
+    // check if this is the last chunk we should stream before dropping the lock.
+    if (loc_stream_pattern.size() > 0) {
+        this->stream_chunks_queued++;
+        if (this->stream_max_chunks &&
+            (this->stream_chunks_queued >= this->stream_max_chunks)) {
+            chlog("Streaming: reached maximum number of chunks to stream for beam "
+                  << beam_id);
+            this->stream_pattern = "";
+        }
+    }
+
     this->cond_assembled_chunks_added.notify_all();
     lock.unlock();
 
     // Stream new chunk to disk (if 'stream_pattern' is a nonempty string).
     // It's better to do this processing without the lock held, we just need to use
     // 'loc_stream_pattern' and 'loc_stream_priority' here, for thread-safety.
-
     if (loc_stream_pattern.size() > 0) {
 	shared_ptr<streaming_write_chunk_request> wreq = make_shared<streaming_write_chunk_request> ();
 	wreq->filename = pushlist[0]->format_filename(loc_stream_pattern);
@@ -507,7 +518,6 @@ bool assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
             wreq->udelay = 1000000;
 	wreq->chunk = pushlist[0];	
         wreq->assembler = shared_from_this();
-        
 	// return value from enqueue_write_request() is ignored.
 	output_devices.enqueue_write_request(wreq);
     }
