@@ -3,6 +3,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <string>
 #include <unordered_map>
 #include "ch_frb_io_internals.hpp"
@@ -40,17 +41,41 @@ int main() {
 
   //int udp_port = 6677;
   int udp_port = 1313;
-  // cf1n1
-  string ipaddr = "10.6.201.11";
+
+  // We used to just hard-code the ipaddr....
+  // string ipaddr = "10.6.201.11";  // cf1n1
+  // err = inet_pton(AF_INET, ipaddr.c_str(), &server_address.sin_addr);
+  // if (err <= 0)
+  //   throw runtime_error(ipaddr + ": inet_pton() failed (note that no DNS lookup is done, the argument must be a numerical IP address)");
 
   struct sockaddr_in server_address;
   memset(&server_address, 0, sizeof(server_address));
+
+  // instead, now do this overly-elaborate dance...
+  char hostname[1024];
+  hostname[1023] = '\0';
+  if (gethostname(hostname, 1023) < 0)
+    throw runtime_error(string("ch_frb_io: gethostname failed: ") + strerror(errno));
+  chlog("hostname: " << string(hostname));
+  struct addrinfo hints, *info, *p;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_CANONNAME;
+  if (getaddrinfo(hostname, "http", &hints, &info) != 0)
+      throw runtime_error(string("getaddrinfo failed: ") + strerror(errno));
+  for (p = info; p != NULL; p = p->ai_next) {
+      //chlog("hostname: " << p->ai_canonname);
+      if (p->ai_family == AF_INET) {
+          memcpy(&server_address, p->ai_addr, sizeof(server_address));
+          break;
+      }
+  }
+  freeaddrinfo(info);
+  string ipaddr = string(inet_ntoa(server_address.sin_addr));
+
   server_address.sin_family = AF_INET;
   server_address.sin_port = htons(udp_port);
-
-  err = inet_pton(AF_INET, ipaddr.c_str(), &server_address.sin_addr);
-  if (err <= 0)
-    throw runtime_error(ipaddr + ": inet_pton() failed (note that no DNS lookup is done, the argument must be a numerical IP address)");
 
   err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
   if (err < 0)
