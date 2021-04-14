@@ -29,10 +29,12 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl
+LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl -lspshuff
 
-OFILES = assembled_chunk.o \
+OFILES = ch_chunk.o \
+	assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
+	slow_pulsar_chunk.o \
 	avx2_kernels.o \
 	hdf5.o \
 	intensity_hdf5_file.o \
@@ -123,10 +125,10 @@ test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 time-assembled-chunk-write: time-assembled-chunk-write.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lspshuff
 
 time-kernels: time-kernels.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lspshuff
 
 test-log: test-log.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lzmq

@@ -50,7 +50,7 @@ void output_device::io_thread_main()
 	if (!w)
 	    break;
 
-	shared_ptr<assembled_chunk> chunk = w->chunk;
+	shared_ptr<ch_chunk> chunk = w->chunk;
 	string error_message;
 	string link_src;
 
@@ -115,7 +115,7 @@ void output_device::io_thread_main()
 
 
 // Called by an "external" thread (assembler thread or RPC thread).
-bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> &req)
+bool output_device::enqueue_write_request(shared_ptr<write_chunk_request> req)
 {
     if (!req)
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req is null");
@@ -126,16 +126,17 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     if (!is_prefix(this->ini_params.device_name, req->filename))
 	throw runtime_error("ch_frb_io::output_device::enqueue_write_request(): req->filename, device_name mismatch");
     
-    if (req->need_rfi_mask && (req->chunk->nrfifreq <= 0)) {
+    // FIXME(?) does this need to be changed given we removed need_rfi_mask and has_rfi_mask
+ //    if (req->need_wait && (req->chunk->nrfifreq <= 0)) {
 
-	// I decided to throw an exception here, instead of returning false,
-	// so that we get a "verbose" error message instead of an undiagnosed failure.
-	// (The L1 server is responsible for not crashing, either by catching the exception
-	// or by checking this error condition in advance.)
+	// // I decided to throw an exception here, instead of returning false,
+	// // so that we get a "verbose" error message instead of an undiagnosed failure.
+	// // (The L1 server is responsible for not crashing, either by catching the exception
+	// // or by checking this error condition in advance.)
     
-	throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_rfi_mask=true,"
-			    " but this server instance is not saving the RFI mask");
-    }
+	// throw runtime_error("ch_frb_io: enqueue_write_request() was called with need_wait=true,"
+	// 		    " but this server instance is not saving the RFI mask");
+ //    }
 
     unique_lock<std::mutex> ulock(_lock);
 
@@ -144,9 +145,9 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	return false;
     }
 
-    if (req->need_rfi_mask && !req->chunk->has_rfi_mask) {
-        _awaiting_rfi.push_back(req);
-        req->status_changed(false, true, "AWAITING_RFI", "Waiting for RFI mask to be computed");
+    if (req->need_wait && !req->chunk->is_ready()) {
+        _awaiting.push_back(req);
+        req->status_changed(false, true, "AWAITING", "Waiting for further computation (e.g. RFI mask)");
     } else {
         _write_reqs.push(req);
         req->status_changed(false, true, "QUEUED", "Queued for writing");
@@ -154,7 +155,7 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
     }
 
     int n = _write_reqs.size();
-    int na = _awaiting_rfi.size();
+    int na = _awaiting.size();
     ulock.unlock();
     
     if (ini_params.verbosity >= 3) {
@@ -163,7 +164,7 @@ bool output_device::enqueue_write_request(const shared_ptr<write_chunk_request> 
 	      + ", chunk " + to_string(req->chunk->ichunk) 
 	      + ", FPGA counts " + to_string(req->chunk->fpga_begin)
 	      + ", write_queue_size=" + to_string(n)
-              + ", awaiting_rfi_size=" + to_string(na));
+              + ", awaiting_size=" + to_string(na));
     }
 
     return true;
@@ -178,7 +179,7 @@ int output_device::count_queued_write_requests() {
 
 // This gets called by the chime_mask_counter class in rf_pipelines
 // to tell us that a chunk's RFI mask has been filled in.
-void output_device::filled_rfi_mask(const std::shared_ptr<assembled_chunk> &chunk) {
+void output_device::notify_ready(const std::shared_ptr<ch_chunk> &chunk) {
     // FIXME? -- simplest approach -- tell i/o thread(s) waiting on the
     // queue not being empty that something may have happened!
     unique_lock<std::mutex> ulock(_lock);
@@ -194,19 +195,19 @@ shared_ptr<write_chunk_request> output_device::pop_write_request()
     for (;;) {
         // Check whether any chunks that were waiting for RFI masks to be
         // filled in have been.
-        for (auto req=_awaiting_rfi.begin(); req!=_awaiting_rfi.end(); req++) {
-            if ((*req)->chunk->has_rfi_mask) {
+        for (auto req=_awaiting.begin(); req!=_awaiting.end(); req++) {
+            if ((*req)->chunk->is_ready()) {
                 cout << "Chunk " << (*req)->filename << " got its RFI mask!" << endl;
                 _write_reqs.push((*req));
                 (*req)->status_changed(false, true, "QUEUED", "RFI mask received; queued for writing");
                 auto toerase = req;
                 req--;
-                _awaiting_rfi.erase(toerase);
+                _awaiting.erase(toerase);
             }
         }
 	if (!_write_reqs.empty())
 	    break;
-	if (end_stream_called && _awaiting_rfi.empty())
+	if (end_stream_called && _awaiting.empty())
 	    return shared_ptr<write_chunk_request> ();
 	_cond.wait(ulock);
     }
@@ -241,13 +242,13 @@ void output_device::end_stream(bool wait)
     if (!wait) {
 	while (!_write_reqs.empty())
 	    _write_reqs.pop();
-	_awaiting_rfi.clear();
+	_awaiting.clear();
 	_cond.notify_all();
 	return;
     }
 
     // If 'wait' is true, wait for pending writes to complete before returning.
-    while (!_write_reqs.empty() || !_awaiting_rfi.empty())
+    while (!_write_reqs.empty() || !_awaiting.empty())
 	_cond.wait(ulock);
 }
 
