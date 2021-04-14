@@ -29,7 +29,7 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl -lspshuff
+LIBS = -lhdf5 -llz4 -lzmq -ljsoncpp -lcurl
 
 OFILES = ch_chunk.o \
 	assembled_chunk.o \
@@ -125,10 +125,10 @@ test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 time-assembled-chunk-write: time-assembled-chunk-write.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lspshuff
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 time-kernels: time-kernels.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lspshuff
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-log: test-log.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io -lzmq
