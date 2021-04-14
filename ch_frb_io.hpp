@@ -749,7 +749,7 @@ struct sp_file_header{
     uint16_t nbins = 5;
     double start = 0.;
     double end = 0.;
-    int32_t version = 3; // Hard-coded, must agree with spshuff
+    int32_t version = 5; // Hard-coded, must agree with spshuff
 
     const ssize_t get_header_size(){
         return 2 + 2 + 8 + 8 + 4;
@@ -812,7 +812,7 @@ public:
     slow_pulsar_chunk(const std::shared_ptr<ch_chunk_initializer> ini_params);
     ~slow_pulsar_chunk() {};
 
-    const int commit_chunk(std::shared_ptr<sp_chunk_header> header, std::shared_ptr<std::vector<uint32_t>> idat,
+    const int commit_chunk(std::shared_ptr<sp_chunk_header> header, std::shared_ptr<std::vector<uint8_t>> idat,
                       const ssize_t compressed_data_len, std::shared_ptr<std::vector<uint8_t>> mask,
                       std::shared_ptr<std::vector<float>> means, std::shared_ptr<std::vector<float>> vars);
 
