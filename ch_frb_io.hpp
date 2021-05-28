@@ -432,6 +432,8 @@ public:
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
+    bool is_stream_ended();
+
     void reset_stream();
 
     void flush_end_of_stream();

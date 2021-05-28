@@ -254,6 +254,11 @@ void intensity_network_stream::end_stream()
     this->cond_state_changed.notify_all();
 }
 
+bool intensity_network_stream::is_stream_ended() {
+    ulock_t lock(this->state_mutex);
+    return this->stream_end_requested;
+}
+
 void intensity_network_stream::flush_end_of_stream() {
     ulock_t lock(this->state_mutex);
     this->flush_end_of_stream_requested = true;
