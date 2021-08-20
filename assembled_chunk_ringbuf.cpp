@@ -348,11 +348,11 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
                     guard_t lock(mutx);
                     bool foundit = false;
                     for (auto it : assembler_miss_senders) {
-                        if ((std::get<0>(*it) == sender) &&
-                            (std::get<1>(*it) == packet_ichunk)) {
+                        if ((std::get<0>(it) == sender) &&
+                            (std::get<1>(it) == packet_ichunk)) {
                             foundit = true;
-                            if (sec > std::get<2>(*it))
-                                std::get<2>(*it) = sec;
+                            if (sec > std::get<2>(it))
+                                std::get<2>(it) = sec;
                             break;
                         }
                     }
