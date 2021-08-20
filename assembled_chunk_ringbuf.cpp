@@ -14,7 +14,8 @@ typedef std::lock_guard<std::mutex> guard_t;
 // This is also a scoped lock that supports use of a condition variable.
 typedef std::unique_lock<std::mutex> ulock_t;
 
-assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_) :
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_,
+                                                 int max_assembler_miss_senders) :
     max_fpga_flushed(0),
     max_fpga_retrieved(0),
     first_fpgacount(0),
@@ -22,7 +23,9 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     ini_params(ini_params_),
     stream_id(stream_id_),
     beam_id(beam_id_),
-    output_devices(ini_params.output_devices)
+    output_devices(ini_params.output_devices),
+    track_assembler_misses(max_assembler_miss_senders > 0),
+    max_assembler_miss_size(max_assembler_miss_senders)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
@@ -294,6 +297,13 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
          << " packets received, " << active_chunk0->packets_missed << " missed) -- sender " << ip_to_string(packet.sender));
          */
 
+        // Store the time when we flushed this chunk.
+        if (this->track_assembler_misses) {
+            this->chunk_flush_times[active_chunk0->ichunk] = xgettimeofday();
+            if (this->chunk_flush_times.size() > this->max_assembler_miss_size)
+                this->chunk_flush_times.erase(this->chunk_flush_times.begin());
+        }
+
 	this->_put_assembled_chunk(active_chunk0, event_counts);
 
         // After _put_assembled_chunk(), active_chunk0 has been reset to a null pointer.
@@ -312,13 +322,70 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	active_chunk1->add_packet(packet);
     }
     else {
-      //chlog("Assembler miss (packet_ichunk " << packet_ichunk << " vs active " << active_chunk0->ichunk << " and " << active_chunk1->ichunk
-      //<< "), from " << ip_to_string(packet.sender));
+        //chlog("Assembler miss (packet_ichunk " << packet_ichunk << " vs active " << active_chunk0->ichunk << " and " << active_chunk1->ichunk
+        //<< "), from " << ip_to_string(packet.sender));
+
+        // Assembler miss: save:
+        // - sender IP
+        // - by how much time did it miss the assembly window?
+
+        // but we only want to save the lateness of the *last* packet
+        // for each assembled chunk.
+
+        // For that latter, we need a map (ring buffer) from
+        // packet_ichunk to the time when that chunk was sent
+        // downstream.
+        if (this->track_assembler_misses) {
+            string sender = ip_to_string(packet.sender);
+            auto it = this->chunk_flush_times.find(packet_ichunk);
+            if (it == this->chunk_flush_times.end()) {
+                chlog("Assembler miss (packet_ichunk " << packet_ichunk << ", sender " << sender << ") not found in chunk-flush-times map");
+            } else {
+                struct timeval t0 = it->second;
+                struct timeval now = xgettimeofday();
+                double sec = usec_between(t0, now) * 1e-6;
+                {
+                    guard_t lock(mutx);
+                    bool foundit = false;
+                    for (auto it : assembler_miss_senders) {
+                        if ((std::get<0>(*it) == sender) &&
+                            (std::get<1>(*it) == packet_ichunk)) {
+                            foundit = true;
+                            if (sec > std::get<2>(*it))
+                                std::get<2>(*it) = sec;
+                            break;
+                        }
+                    }
+                    if (!foundit) {
+                        assembler_miss_senders.push_back(make_tuple(sender, packet_ichunk, sec));
+                        if (assembler_miss_senders.size() > this->max_assembler_miss_size)
+                            assembler_miss_senders.erase(assembler_miss_senders.begin());
+                    }
+                }
+            }
+        }
+
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
 	active_chunk0->packets_missed++;
 	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
     }
+}
+
+vector<tuple<string, uint64_t, double> > assembled_chunk_ringbuf::get_assembler_miss_senders(size_t nlast) {
+    guard_t lock(mutx);
+    size_t n = (nlast ? nlast : assembler_miss_senders.size());
+    vector<tuple<string, uint64_t, double> > rtn;
+    rtn.reserve(n);
+    auto it = assembler_miss_senders.end();
+    // I would do for(i=n; i>=0; i--) but size_t is unsigned!
+    size_t i = n-1;
+    for (size_t count=0; count<n; count++) {
+        it--;
+        rtn[i] = *it;
+        i--;
+    }
+    return rtn;
 }
 
 struct streaming_write_chunk_request : public write_chunk_request {
