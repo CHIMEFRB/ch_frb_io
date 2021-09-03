@@ -816,6 +816,14 @@ public:
                       const ssize_t compressed_data_len, std::shared_ptr<std::vector<uint8_t>> mask,
                       std::shared_ptr<std::vector<float>> means, std::shared_ptr<std::vector<float>> vars);
 
+    // Inherits the following members from ch_chunk base class:
+    //   int fpga_counts_per_sample;   // no binning factor applied here
+    //   uint64_t fpga_begin;          // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    //   uint64_t fpga_end;            // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    //   uint64_t frame0_nano;         // "ctime" in nanoseconds of FGPAcount zero
+    //   uint64_t ichunk;
+    //   int beam_id;
+
     sp_file_header file_header;
 
     ssize_t islab = 0;
@@ -874,6 +882,15 @@ public:
         bool force_fast = false;
         initializer() : ch_chunk_initializer() {};
     };
+
+    // Inherits the following members from ch_chunk base class:
+    //   int fpga_counts_per_sample;   // no binning factor applied here
+    //   uint64_t fpga_begin;          // equal to ichunk * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    //   uint64_t fpga_end;            // equal to (ichunk+binning) * constants::nt_per_assembled_chunk * fpga_counts_per_sample
+    //   uint64_t frame0_nano;         // "ctime" in nanoseconds of FGPAcount zero
+    //   uint64_t ichunk;
+    //   int beam_id;
+
     // Parameters specified at construction.
     const int nupfreq = 0;
     const int nrfifreq = 0;
