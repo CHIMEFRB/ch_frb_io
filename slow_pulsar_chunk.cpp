@@ -96,6 +96,22 @@ const int slow_pulsar_chunk::commit_chunk(std::shared_ptr<sp_chunk_header> heade
 							(void*) &((*idat)[0]), size_i);
 	
 	this->islab = islab_post;
+
+	// This logic ensures that:
+	//   - this->file_header.start is the start time of the first chunk in the file
+	//   - this->file_header.end is the end time of the last chunk in the file
+	//
+	// (Previously in rf_pipelines::chime_slow_pulsar_writer::_process_chunk())
+
+	const ssize_t fpga_nano = 2560;
+	const double tnow = (header->fpga0 * fpga_nano + header->frame0_nano) * 1e-9;
+	const double tend = tnow + (header->fpgaN * fpga_nano * 1e-9);
+
+	if (this->file_header.start == 0.0)
+	    this->file_header.start = tnow;
+
+	this->file_header.end = tend;
+	
 	return 0;
 }
 
