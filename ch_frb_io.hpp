@@ -798,16 +798,17 @@ struct sp_chunk_header{
     }
 
     void copy(void* dst){
+        uint8_t* bdest = static_cast<uint8_t*>(dst);
         ssize_t ibyte = 0;
-        std::memcpy(dst, (void*) &nfreq, sizeof(uint16_t));
+        std::memcpy(bdest, (void*) &nfreq, sizeof(uint16_t));
         ibyte += sizeof(uint16_t);
-        std::memcpy(dst + ibyte, (void*) &ntime, sizeof(uint16_t));
+        std::memcpy(bdest + ibyte, (void*) &ntime, sizeof(uint16_t));
         ibyte += sizeof(uint16_t);
-        std::memcpy(dst + ibyte, (void*) &frame0_nano, sizeof(uint64_t));
+        std::memcpy(bdest + ibyte, (void*) &frame0_nano, sizeof(uint64_t));
         ibyte += sizeof(uint64_t);
-        std::memcpy(dst + ibyte, (void*) &fpgaN, sizeof(uint64_t));
+        std::memcpy(bdest + ibyte, (void*) &fpgaN, sizeof(uint64_t));
         ibyte += sizeof(uint64_t);
-        std::memcpy(dst + ibyte, (void*) &fpga0, sizeof(uint64_t));
+        std::memcpy(bdest + ibyte, (void*) &fpga0, sizeof(uint64_t));
     }
 };
 

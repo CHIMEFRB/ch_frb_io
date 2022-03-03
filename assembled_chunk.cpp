@@ -95,11 +95,11 @@ struct memory_slab_layout {
 
 assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params) :
     ch_chunk(ini_params),
-    binning(ini_params.binning),
     nupfreq(ini_params.nupfreq),
     nrfifreq(ini_params.nrfifreq),
     nt_per_packet(ini_params.nt_per_packet),
     stream_id(ini_params.stream_id),
+    binning(ini_params.binning),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
