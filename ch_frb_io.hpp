@@ -437,6 +437,8 @@ public:
     void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
     void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
+    bool is_stream_ended();
+
     void reset_stream();
 
     void flush_end_of_stream();
@@ -502,7 +504,11 @@ public:
     // Returns the set of packet rates with timestamps overlapping *start* to *end*.
     // If *start* is zero, treat as NOW.  If *start* or *end* are negative, NOW - that many seconds.
     std::vector<std::shared_ptr<packet_counts> > get_packet_rate_history(double start, double end, double period);
-    
+
+    // Returns the lastest N senders of packets that caused an assembler miss.
+    // The tuples are IP address, assembled chunk number, and seconds late of packet.
+    std::vector<std::tuple<std::string, uint64_t, double> > get_assembler_miss_senders(size_t nlast=0);
+
     // For debugging/testing purposes: pretend that the given
     // assembled_chunk has just arrived.  Returns true if there was
     // room in the ring buffer for the new chunk.

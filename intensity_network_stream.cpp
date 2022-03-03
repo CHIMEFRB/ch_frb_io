@@ -254,6 +254,11 @@ void intensity_network_stream::end_stream()
     this->cond_state_changed.notify_all();
 }
 
+bool intensity_network_stream::is_stream_ended() {
+    ulock_t lock(this->state_mutex);
+    return this->stream_end_requested;
+}
+
 void intensity_network_stream::flush_end_of_stream() {
     ulock_t lock(this->state_mutex);
     this->flush_end_of_stream_requested = true;
@@ -743,6 +748,12 @@ intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
             R.push_back(assembler->get_ringbuf_snapshot(min_fpga_counts, max_fpga_counts));
     }
     return R;
+}
+
+vector<tuple<string, uint64_t, double> > intensity_network_stream::get_assembler_miss_senders(size_t nlast) {
+    if (this->assemblers.size())
+        return this->assemblers[0]->get_assembler_miss_senders(nlast);
+    return vector<tuple<string, uint64_t, double> >();
 }
 
 
@@ -1340,7 +1351,8 @@ void intensity_network_stream::_assembler_thread_body()
                 chlog("  beam: " << beam);
                 if ((beam < 0) || (beam > constants::max_allowed_beam_id))
                     throw runtime_error("ch_frb_io: bad beam_id received in first packet");
-                auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id);
+                int n_misses = (i == 0 ? 1000 : 0);
+                auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id, n_misses);
                 assemblers.push_back(assembler);
                 beam_ids.push_back(beam);
                 beam_to_assembler[beam] = assembler;
