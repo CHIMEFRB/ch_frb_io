@@ -11,6 +11,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <memory>
+#include <list>
 
 #include <errno.h>
 #include <unistd.h>
@@ -273,7 +274,7 @@ public:
     // Set to 'true' in the first call to put_unassembled_packet().
     std::atomic<bool> first_packet_received;
 
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id, int max_assembler_miss_senders=0);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -292,7 +293,6 @@ public:
     // also print a warning or throw an exception.)
     //
     // Warning: only safe to call from assembler thread!
-
     void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
     
     // Called by the assembler thread, when it exits.
@@ -329,7 +329,6 @@ public:
     // Returns an empty pointer iff stream has ended, and chunk is requested past end-of-stream.
     // If anything else goes wrong, an exception will be thrown.
     std::shared_ptr<assembled_chunk> find_assembled_chunk(uint64_t fpga_counts, bool top_level_only=false);
-                                                          
 
     // The return value is a vector of (chunk, where) pairs, where 'where' is of type enum l1_ringbuf_level (defined in ch_frb_io.hpp)
     std::vector<std::pair<std::shared_ptr<assembled_chunk>, uint64_t>> get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
@@ -353,6 +352,9 @@ public:
                           uint64_t* ringbuf_fpga_min,
                           uint64_t* ringbuf_fpga_max,
                           int level=0);
+
+    // Returns the lastest N senders of packets that caused an assembler miss.
+    std::vector<std::tuple<std::string, uint64_t, double> > get_assembler_miss_senders(size_t nlast=0);
 
 protected:
     const intensity_network_stream::initializer ini_params;
@@ -422,6 +424,17 @@ protected:
 
     bool doneflag = false;
     uint64_t final_fpga = 0;   // last fpga count which has an assembled_chunk, only initialized when 'doneflag' is set to true.
+
+    // Are we tracking which L0 nodes are causing assembler misses?
+    bool track_assembler_misses = false;
+    // Max size of the following two ring buffers
+    int max_assembler_miss_size = 0;
+    // Ring buffer of packet_ichunk -> time when the chunk was flushed
+    std::map<uint64_t, struct timeval> chunk_flush_times;
+    // Ring buffer of L0 nodes causing assembler misses
+    // (ip, packet_ichunk, double late_seconds)
+    std::list<std::tuple<std::string, uint64_t, double> > assembler_miss_senders;
+
 };
 
 

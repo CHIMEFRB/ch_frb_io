@@ -750,6 +750,12 @@ intensity_network_stream::get_ringbuf_snapshots(const vector<int> &beams,
     return R;
 }
 
+vector<tuple<string, uint64_t, double> > intensity_network_stream::get_assembler_miss_senders(size_t nlast) {
+    if (this->assemblers.size())
+        return this->assemblers[0]->get_assembler_miss_senders(nlast);
+    return vector<tuple<string, uint64_t, double> >();
+}
+
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -1345,7 +1351,8 @@ void intensity_network_stream::_assembler_thread_body()
                 chlog("  beam: " << beam);
                 if ((beam < 0) || (beam > constants::max_allowed_beam_id))
                     throw runtime_error("ch_frb_io: bad beam_id received in first packet");
-                auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id);
+                int n_misses = (i == 0 ? 1000 : 0);
+                auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id, n_misses);
                 assemblers.push_back(assembler);
                 beam_ids.push_back(beam);
                 beam_to_assembler[beam] = assembler;
