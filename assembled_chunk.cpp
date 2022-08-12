@@ -102,7 +102,7 @@ assembled_chunk::assembled_chunk(const assembled_chunk::initializer &ini_params)
     binning(ini_params.binning),
     stream_id(ini_params.stream_id),
     ichunk(ini_params.ichunk),
-    frame0_nano(ini_params.frame0_nano),
+    frame0_nano(0),
     nt_coarse(_nt_c(nt_per_packet)),
     nscales(constants::nfreq_coarse_tot * nt_coarse),
     ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
@@ -326,6 +326,11 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
     // Offset relative to beginning of packet
     uint64_t t0 = packet_t0 - isample;
     
+    // Pull ctime (in nanoseconds) corresponding to FPGAcount 0
+    // from the packet if we don't have it already.
+    if (frame0_nano == 0)
+        frame0_nano = packet.fpga_frame0_ns;
+
     // The runtime checks in intensity_network_stream::_process_packet() should
     // ensure that the following checks are redundant.  I decided to include the 
     // redundant checks here in the "generic" assembled_chunk::add_packet(), but 

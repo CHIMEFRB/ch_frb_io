@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <iostream>
 
-#include <curl/curl.h>
 #include <json/json.h>
 
 #include "ch_frb_io_internals.hpp"
@@ -63,7 +62,6 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     network_thread_working_usec(0),
     assembler_thread_waiting_usec(0),
     assembler_thread_working_usec(0),
-    frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
     stream_bytes_written(0),
@@ -156,10 +154,6 @@ uint64_t intensity_network_stream::get_first_fpgacount() {
     if (!first_packet_received)
         throw runtime_error("ch_frb_io: get_first_fpgacount called, but first packet has not been received yet.");
     return first_fpgacount;
-}
-
-uint64_t intensity_network_stream::get_frame0_nano() {
-    return frame0_nano;
 }
 
 shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
@@ -283,7 +277,6 @@ void intensity_network_stream::reset_stream() {
         this->beam_ids.clear();
         this->beam_to_assembler.clear();
         this->first_fpgacount = 0;
-        this->frame0_nano = 0;
         {
             ulock_t slock(this->stream_lock);
             this->stream_beam_ids.clear();
@@ -308,7 +301,6 @@ void intensity_network_stream::reset_stream() {
         /// shut down assembler thread
         /// reset first_fpgacount
         /// clear beam_to_assembmler
-        /// reset frame0_nano ?
         /// reset event counts??
         // shut down streaming
         // shut down forking
@@ -587,7 +579,6 @@ intensity_network_stream::get_statistics() {
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
-    m["frame0_nano"]            = frame0_nano;
     m["fpga_count"]             = 0;    // XXX FIXME XXX
     m["network_thread_waiting_usec"] = network_thread_waiting_usec;
     m["network_thread_working_usec"] = network_thread_working_usec;
@@ -834,7 +825,7 @@ void intensity_network_stream::_network_thread_body()
                 for (;;) {
                     int packet_nbytes = ::recv(sockfd, packet_data, maxsize, MSG_PEEK | MSG_DONTWAIT);
                     chlog("Flushing end-of-stream packets: peeked at a packet with " << packet_nbytes << " bytes.");
-                    if (packet_nbytes == 24) {
+                    if (packet_nbytes == intensity_packet::intensity_fixed_header_length) {
                         packet_nbytes = ::recv(sockfd, packet_data, maxsize, 0);
                         chlog("dumped a packet with " << packet_nbytes << " bytes");
                     } else
@@ -948,8 +939,8 @@ void intensity_network_stream::_network_thread_one_stream() {
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
 
-	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
-	if (_unlikely(packet_nbytes == 24)) {
+	// If we receive a special "short" packet (length intensity_packet::intensity_fixed_header_length), it indicates end-of-stream.
+	if (_unlikely(packet_nbytes == intensity_packet::intensity_fixed_header_length)) {
 	    event_subcounts[event_type::packet_end_of_stream]++;
 	    if (ini_params.accept_end_of_stream_packets) {
                 chlog("i_n_s: Received end-of-stream packet.");
@@ -1144,7 +1135,7 @@ void intensity_network_stream::start_forking_packets(int beam, int destbeam, con
 void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
 
     // end-of-stream packet
-    vector<uint8_t> packet(24, uint8_t(0));
+    vector<uint8_t> packet(intensity_packet::intensity_fixed_header_length, uint8_t(0));
     *((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
     unique_lock<mutex> ulock(forking_mutex);
@@ -1342,12 +1333,6 @@ void intensity_network_stream::_assembler_thread_body()
                 continue;
             }
 
-            if (this->ini_params.frame0_url.size()) {
-                // After we receive our first packet, we will go fetch the frame0_ctime
-                // via curl.  This is usually fast, so we'll do it in blocking mode.
-                chlog("Retrieving frame0_ctime from " << this->ini_params.frame0_url);
-                _fetch_frame0();    // raises runtime_error on failure
-            }
             chlog("Received first packet.  Beams:" << packet.nbeams);
             for (int i=0; i<packet.nbeams; i++) {
                 int beam = packet.beam_ids[i];
@@ -1355,7 +1340,6 @@ void intensity_network_stream::_assembler_thread_body()
                 if ((beam < 0) || (beam > constants::max_allowed_beam_id))
                     throw runtime_error("ch_frb_io: bad beam_id received in first packet");
                 auto assembler = make_shared<assembled_chunk_ringbuf>(ini_params, beam, ini_params.stream_id);
-                assembler->set_frame0(frame0_nano);
                 assemblers.push_back(assembler);
                 beam_ids.push_back(beam);
                 beam_to_assembler[beam] = assembler;
@@ -1626,68 +1610,6 @@ void intensity_network_stream::_assembler_thread_exit()
 
     cout << ss.str().c_str() << endl;
 #endif
-}
-
-
-class CurlStringHolder {
-public:
-    string thestring;
-};
-
-static size_t
-CurlWriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    CurlStringHolder* h = (CurlStringHolder*)userp;
-    h->thestring += string((char*)contents, realsize);
-    return realsize;
-}
-
-void intensity_network_stream::_fetch_frame0() {
-    if (ini_params.frame0_url.size() == 0) {
-        chlog("No 'frame0_url' set; skipping.");
-        return;
-    }
-    CURL *curl_handle;
-    CURLcode res;
-    CurlStringHolder holder;
-    // init the curl session
-    curl_handle = curl_easy_init();
-    // specify URL to get
-    curl_easy_setopt(curl_handle, CURLOPT_URL, ini_params.frame0_url.c_str());
-    // set timeout
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT_MS, ini_params.frame0_timeout);
-    // set received-data callback
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,
-                     CurlWriteMemoryCallback);
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)(&holder));
-    // curl!
-    chlog("Fetching frame0_time from " << ini_params.frame0_url);
-    res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK)
-        throw runtime_error("ch_frb_io: fetch_frame0 failed: " + string(curl_easy_strerror(res)));
-    curl_easy_cleanup(curl_handle);
-
-    string frame0_txt = holder.thestring;
-    //chlog("Received frame0 text: " << frame0_txt);
-    Json::Reader frame0_reader;
-    Json::Value frame0_json;
-    if (!frame0_reader.parse(frame0_txt, frame0_json))
-        throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
-
-    //chlog("Parsed: " << frame0_json);
-    if (!frame0_json.isObject())
-        throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
-
-    string key = "frame0_nano";
-    if (!frame0_json.isMember(key))
-        throw runtime_error("ch_frb_io: 'frame0' did not contain key '" + key + "'");
-
-    const Json::Value v = frame0_json[key];
-    if (!v.isIntegral())
-        throw runtime_error("ch_frb_io: expected 'frame0[frame0_nano]' to be integral.");
-    frame0_nano = v.asUInt64();
-    chlog("Found frame0_nano: " << frame0_nano);
 }
 
 }  // namespace ch_frb_io

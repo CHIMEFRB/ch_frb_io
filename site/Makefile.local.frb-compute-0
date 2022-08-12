@@ -21,9 +21,6 @@ ZMQ_LFLAGS ?= $(shell pkg-config --libs   libzmq)
 JSON_CFLAGS ?= $(shell pkg-config --cflags jsoncpp)
 JSON_LFLAGS ?= $(shell pkg-config --libs   jsoncpp)
 
-CURL_CFLAGS ?= $(shell pkg-config --cflags libcurl)
-CURL_LFLAGS ?= $(shell pkg-config --libs   libcurl)
-
 #
 # C++ command line
 # Must support c++11
@@ -47,7 +44,7 @@ ifeq ($(COVERAGE), yes)
     OPT_FLAGS += -fprofile-arcs -ftest-coverage
 endif
 
-CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) $(HDF5_CFLAGS) $(MSGPACK_CFLAGS) $(ZMQ_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR) $(HDF5_CFLAGS) $(MSGPACK_CFLAGS) $(ZMQ_CFLAGS) $(JSON_CFLAGS)
 
-CPP_LFLAGS := -L. -L$(LIBDIR) $(HDF5_LFLAGS) $(MSGPACK_LFLAGS) $(ZMQ_LFLAGS) $(JSON_LFLAGS) $(CURL_LFLAGS)
+CPP_LFLAGS := -L. -L$(LIBDIR) $(HDF5_LFLAGS) $(MSGPACK_LFLAGS) $(ZMQ_LFLAGS) $(JSON_LFLAGS)
 

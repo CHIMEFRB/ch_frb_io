@@ -342,10 +342,6 @@ public:
 	// treated as assembler misses.
 	int nt_align = 0;
 
-	// If 'frame0_url' is a nonempty string, then assembler thread will retrieve frame0 info by "curling" the URL.
-        std::string frame0_url = "";
-        int frame0_timeout = 3000;
-
 	// If ipaddr="0.0.0.0", then network thread will listen on all interfaces.
 	std::string ipaddr = "0.0.0.0";
 	int udp_port = constants::default_udp_port;
@@ -448,8 +444,6 @@ public:
     // the given beam id.
     // Raises runtime_error if the first packet has not been received yet.
     uint64_t get_first_fpgacount();
-    
-    uint64_t get_frame0_nano();
 
     void add_first_packet_listener(first_packet_listener f);
     
@@ -578,9 +572,6 @@ protected:
     std::atomic<uint64_t> assembler_thread_waiting_usec;
     std::atomic<uint64_t> assembler_thread_working_usec;
 
-    // Initialized to zero by constructor, set to nonzero value by assembler thread when first packet is received.
-    std::atomic<uint64_t> frame0_nano;  // nanosecond time() value for fgpacount zero.
-
     char _pad1b[constants::cache_line_size];
 
     // Used only by the network thread (not protected by lock)
@@ -673,9 +664,6 @@ protected:
     // Private methods called by the assembler thread.     
     void _assembler_thread_body();
     void _assembler_thread_exit();
-    // initializes 'frame0_nano' by curling 'frame0_url', called when first packet is received.
-    // NOTE that one must call curl_global_init() before, and curl_global_cleanup() after; in chime-frb-l1 we do this in the top-level main() method.
-    void _fetch_frame0();
 };
 
 
@@ -731,9 +719,6 @@ public:
 	bool force_reference = false;
 	bool force_fast = false;
 
-        // "ctime" in nanoseconds of FGPAcount zero
-        uint64_t frame0_nano = 0;
-
 	// If a memory slab has been preallocated from a pool, these pointers should be set.
 	// Otherwise, both pointers should be empty, and the assembled_chunk constructor will allocate.
 	std::shared_ptr<memory_slab_pool> pool;
@@ -750,7 +735,7 @@ public:
     const int stream_id = 0;
     const uint64_t ichunk = 0;
     // "ctime" in nanoseconds of FGPAcount zero
-    const uint64_t frame0_nano = 0;
+    uint64_t frame0_nano = 0;
 
     // Derived parameters.
     const int nt_coarse = 0;          // equal to (constants::nt_per_assembled_chunk / nt_per_packet)

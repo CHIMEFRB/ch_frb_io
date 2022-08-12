@@ -254,7 +254,7 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, int istrid
     intensity_packet packet;
     
     // Some intensity_packet fields are packet-independent; these are initialized here.
-    packet.protocol_version = 1;
+    packet.protocol_version = 2;
     packet.data_nbytes = nbeams * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
     packet.fpga_counts_per_sample = fpga_counts_per_sample;
     packet.nbeams = nbeams;
@@ -463,7 +463,7 @@ void intensity_network_ostream::_send_end_of_stream_packets()
     // reaches the other side, but we'll make a best effort by sending 5 packets separated by 0.1 sec.
 
     for (int ipacket = 0; ipacket < 5; ipacket++) {
-	vector<uint8_t> packet(24, uint8_t(0));
+	vector<uint8_t> packet(intensity_packet::intensity_fixed_header_length, uint8_t(0));
 	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
 	ssize_t n = send(this->sockfd, &packet[0], packet.size(), 0);
