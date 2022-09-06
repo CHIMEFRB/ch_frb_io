@@ -274,7 +274,7 @@ public:
     // Set to 'true' in the first call to put_unassembled_packet().
     std::atomic<bool> first_packet_received;
 
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id, int max_assembler_miss_senders=0);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id, size_t max_assembler_miss_senders=0);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -428,7 +428,7 @@ protected:
     // Are we tracking which L0 nodes are causing assembler misses?
     bool track_assembler_misses = false;
     // Max size of the following two ring buffers
-    int max_assembler_miss_size = 0;
+    size_t max_assembler_miss_size = 0;
     // Ring buffer of packet_ichunk -> time when the chunk was flushed
     std::map<uint64_t, struct timeval> chunk_flush_times;
     // Ring buffer of L0 nodes causing assembler misses

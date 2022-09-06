@@ -15,7 +15,7 @@ typedef std::lock_guard<std::mutex> guard_t;
 typedef std::unique_lock<std::mutex> ulock_t;
 
 assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int stream_id_,
-                                                 int max_assembler_miss_senders) :
+                                                 size_t max_assembler_miss_senders) :
     max_fpga_flushed(0),
     max_fpga_retrieved(0),
     first_fpgacount(0),
@@ -350,6 +350,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
             string sender = ip_to_string(packet.sender);
             auto it = this->chunk_flush_times.find(packet_ichunk);
             if (it == this->chunk_flush_times.end()) {
+                // 
                 chlog("Assembler miss (packet_ichunk " << packet_ichunk << ", sender " << sender << ") not found in chunk-flush-times map");
             } else {
                 struct timeval t0 = it->second;

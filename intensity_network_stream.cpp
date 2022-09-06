@@ -661,7 +661,7 @@ intensity_network_stream::get_statistics() {
     R.push_back(this->get_perhost_packets());
 
     // Collect statistics per beam:
-    for (int b=0; b<this->beam_ids.size(); b++) {
+    for (size_t b=0; b<this->beam_ids.size(); b++) {
         m.clear();
         m["beam_id"] = this->beam_ids[b];
 
