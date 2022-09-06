@@ -273,6 +273,17 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// time sample indices in rf_pipelines/bonsai.
 	
         this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
+
+        // Initialize the map from ichunk to time when that chunk was sent downstream --
+        // this is to prevent complaints about assembler misses during the first few seconds
+        // of the run.
+        chlog("Received first packet: chunk " << first_ichunk);
+        this->chunk_flush_times[first_ichunk - 4] = 
+        this->chunk_flush_times[first_ichunk - 3] = 
+        this->chunk_flush_times[first_ichunk - 2] = 
+        this->chunk_flush_times[first_ichunk - 1] = 
+            this->chunk_flush_times[first_ichunk] = 
+            this->chunk_flush_times[first_ichunk + 1] = xgettimeofday();
     }
 
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
