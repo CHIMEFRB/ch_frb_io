@@ -374,16 +374,27 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 
 vector<tuple<string, uint64_t, double> > assembled_chunk_ringbuf::get_assembler_miss_senders(size_t nlast) {
     guard_t lock(mutx);
-    size_t n = (nlast ? nlast : assembler_miss_senders.size());
+    // Setting "nlast" allows the caller to request only the final "nlast" elements from the
+    // "assembler_miss_senders" vector.
+    size_t sz = assembler_miss_senders.size();
+    size_t n;
     vector<tuple<string, uint64_t, double> > rtn;
+    list<tuple<string, uint64_t, double> >::iterator it;
+    if (nlast) {
+        n = std::min(nlast, sz);
+        // go to the end and then rewind by n
+        it = assembler_miss_senders.end();
+        for (size_t i=0; i<n; i++)
+            it--;
+    } else {
+        // we're grabbing the whole list
+        n = sz;
+        it = assembler_miss_senders.begin();
+    }
     rtn.reserve(n);
-    auto it = assembler_miss_senders.end();
-    // I would do for(i=n; i>=0; i--) but size_t is unsigned!
-    size_t i = n-1;
-    for (size_t count=0; count<n; count++) {
-        it--;
-        rtn[i] = *it;
-        i--;
+    for (size_t i=0; i<n; i++) {
+        rtn.push_back(*it);
+        it++;
     }
     return rtn;
 }
