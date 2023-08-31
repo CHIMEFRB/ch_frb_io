@@ -140,6 +140,11 @@ struct intensity_packet {
 	       const float *weights, int beam_wstride, int freq_wstride, 
 	       float wt_cutoff);
 
+    // sets up my pointers to point into the given data array (which
+    // must be large enough to hold the data); returns the number of
+    // bytes used.  This allows the "dest" array to be send as the
+    // data packet.
+    int set_pointers(uint8_t *dest);
 
     // Currently used only for debugging
     int find_coarse_freq_id(int id) const;
@@ -203,9 +208,9 @@ struct udp_packet_ringbuf : noncopyable {
     const int max_npackets_per_list;
     const int max_nbytes_per_list;
 
-    pthread_mutex_t lock;
-    pthread_cond_t cond_packets_added;
-    pthread_cond_t cond_packets_removed;
+    std::mutex mutx;
+    std::condition_variable cond_packets_added;
+    std::condition_variable cond_packets_removed;
     bool stream_ended = false;
 
     int ringbuf_size = 0;
@@ -213,7 +218,6 @@ struct udp_packet_ringbuf : noncopyable {
     std::vector<std::unique_ptr<udp_packet_list> > ringbuf;
 
     udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list);
-    ~udp_packet_ringbuf();
     
     // Note!  The pointer 'p' is _swapped_ with an empty udp_packet_list from the ring buffer.
     // In other words, when put_packet_list() returns, the argument 'p' points to an empty udp_packet_list.
@@ -254,10 +258,11 @@ public:
     std::atomic<uint64_t> max_fpga_retrieved;
     // The fpgacount of the first chunk produced by this stream
     std::atomic<uint64_t> first_fpgacount;
-    
-    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
-    ~assembled_chunk_ringbuf();
+    // Set to 'true' in the first call to put_unassembled_packet().
+    std::atomic<bool> first_packet_received;
+
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int stream_id);
 
     // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
     // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
@@ -347,9 +352,6 @@ protected:
     
     output_device_pool output_devices;
 
-    // Set to 'true' in the first call to put_unassembled_packet().
-    bool first_packet_received = false;
-
     // Helper function called in assembler thread, to add a new assembled_chunk to the ring buffer.
     // Resets 'chunk' to a null pointer.
     // Warning: only safe to call from assembler thread.
@@ -376,10 +378,10 @@ protected:
     char pad[constants::cache_line_size];
 
     // All fields below are protected by the lock
-    pthread_mutex_t lock;
+    std::mutex mutx;
 
     // Processing thread waits here if the ring buffer is empty.
-    pthread_cond_t cond_assembled_chunks_added;
+    std::condition_variable cond_assembled_chunks_added;
     
     // Telescoping ring buffer.
     // All ringbuf* vectors have length num_downsampling_levels.

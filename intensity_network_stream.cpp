@@ -4,6 +4,11 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#if defined(__linux__)
+// for forking stats (SIOCOUTQ)
+#include <linux/sockios.h>
+#endif
+
 #include <functional>
 #include <algorithm>
 #include <iostream>
@@ -25,6 +30,11 @@ namespace ch_frb_io {
 // -------------------------------------------------------------------------------------------------
 //
 // class intensity_network_stream
+
+// This is a lightweight scoped lock
+typedef std::lock_guard<std::mutex> guard_t;
+// This is also a scoped lock that supports use of a condition variable.
+typedef std::unique_lock<std::mutex> ulock_t;
 
 
 // Static member function (de facto constructor)
@@ -56,7 +66,8 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     frame0_nano(0),
     stream_priority(0),
     stream_chunks_written(0),
-    stream_bytes_written(0)
+    stream_bytes_written(0),
+    forking_paused(false)
 {
     // Argument checking
 
@@ -136,21 +147,11 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     network_thread_perhost_packets = make_shared<packet_counts>();
     perhost_packets = make_shared<packet_counts>();
-
-    pthread_mutex_init(&state_lock, NULL);
-    pthread_mutex_init(&event_lock, NULL);
-    pthread_mutex_init(&packet_history_lock, NULL);
-    pthread_cond_init(&cond_state_changed, NULL);
 }
 
 
 intensity_network_stream::~intensity_network_stream()
 {
-    pthread_cond_destroy(&cond_state_changed);
-    pthread_mutex_destroy(&state_lock);
-    pthread_mutex_destroy(&packet_history_lock);
-    pthread_mutex_destroy(&event_lock);
-
     if (sockfd >= 0) {
 	close(sockfd);
 	sockfd = -1;
@@ -196,10 +197,11 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
     if (cumulative_event_counts.size() != event_subcounts.size())
 	throw runtime_error("ch_frb_io: internal error: vector length mismatch in intensity_network_stream::_add_event_counts()");
 
-    pthread_mutex_lock(&this->event_lock);
-    for (unsigned int i = 0; i < cumulative_event_counts.size(); i++)
-	this->cumulative_event_counts[i] += event_subcounts[i];
-    pthread_mutex_unlock(&this->event_lock);
+    {
+        guard_t lock(this->event_mutex);
+        for (unsigned int i = 0; i < cumulative_event_counts.size(); i++)
+            this->cumulative_event_counts[i] += event_subcounts[i];
+    }
 
     memset(&event_subcounts[0], 0, event_subcounts.size() * sizeof(event_subcounts[0]));
 }
@@ -207,17 +209,14 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
 
 void intensity_network_stream::start_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
-    if (stream_end_requested || join_called) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (stream_end_requested || join_called)
 	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on completed or cancelled stream");
-    }
 
     // If stream has already been started, this is not treated as an error.
     this->stream_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -230,41 +229,36 @@ void intensity_network_stream::start_stream()
 
 void intensity_network_stream::end_stream()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     this->stream_started = true;
     this->stream_end_requested = true;    
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
 }
 
 
 void intensity_network_stream::join_threads()
 {
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
     
-    if (!stream_started) {
-	pthread_mutex_unlock(&this->state_lock);
+    if (!stream_started)
 	throw runtime_error("ch_frb_io: intensity_network_stream::join_threads() was called with no prior call to start_stream()");
-    }
 
     if (join_called) {
 	while (!threads_joined)
-	    pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
-	pthread_mutex_unlock(&this->state_lock);
+            this->cond_state_changed.wait(lock);
 	return;
     }
 
     this->join_called = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);
+    this->cond_state_changed.notify_all();
+    lock.unlock();
 
     network_thread.join();
     assembler_thread.join();
 
-    pthread_mutex_lock(&this->state_lock);
+    lock.lock();
     this->threads_joined = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->state_lock);    
+    this->cond_state_changed.notify_all();
 }
 
 
@@ -350,9 +344,8 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 {
     vector<int64_t> ret(event_type::num_types, 0);
 
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     memcpy(&ret[0], &this->cumulative_event_counts[0], ret.size() * sizeof(ret[0]));
-    pthread_mutex_unlock(&this->event_lock);    
 
     return ret;
 }
@@ -360,10 +353,9 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
     // Quickly grab a copy of perhost_packets
-    pthread_mutex_lock(&this->event_lock);
+    ulock_t lock(this->event_mutex);
     packet_counts pc(*perhost_packets);
-    pthread_mutex_unlock(&this->event_lock);
-
+    lock.unlock();
     return pc.to_string();
 }
 
@@ -456,9 +448,10 @@ shared_ptr<packet_counts>
 intensity_network_stream::get_packet_rates(double start, double period) {
     // This returns a single history entry.
     vector<shared_ptr<packet_counts> > counts;
-    pthread_mutex_lock(&this->packet_history_lock);
-    _get_history(start, start+period, packet_history, counts);
-    pthread_mutex_unlock(&this->packet_history_lock);
+    {
+        guard_t lock(this->packet_history_mutex);
+        _get_history(start, start+period, packet_history, counts);
+    }
     // FIXME -- if *period* is specified, we could sum over the requested period...
     if (counts.size() == 0)
         return shared_ptr<packet_counts>();
@@ -480,9 +473,8 @@ intensity_network_stream::get_packet_rates(double start, double period) {
 vector<shared_ptr<packet_counts> >
 intensity_network_stream::get_packet_rate_history(double start, double end, double period) {
     vector<shared_ptr<packet_counts> > counts;
-    pthread_mutex_lock(&this->packet_history_lock);
+    guard_t lock(this->packet_history_mutex);
     _get_history(start, end, packet_history, counts);
-    pthread_mutex_unlock(&this->packet_history_lock);
     return counts;
 }
 
@@ -491,15 +483,13 @@ void intensity_network_stream::fake_packet_from(const struct sockaddr_in& sender
     // network thread so is not lock-protected, but when updating the
     // history this is the lock used before reading the
     // network_thread_perhost_packets, so it should work...
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     network_thread_perhost_packets->increment(sender, nbytes);
     network_thread_perhost_packets->tv = xgettimeofday();
 
     cumulative_event_counts[event_type::packet_received] ++;
     cumulative_event_counts[event_type::packet_good] ++;
     cumulative_event_counts[event_type::byte_received] += nbytes;
-
-    pthread_mutex_unlock(&this->event_lock);
 }
 
 vector<unordered_map<string, uint64_t> >
@@ -514,6 +504,7 @@ intensity_network_stream::get_statistics() {
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
+    m["frame0_nano"]            = frame0_nano;
     m["fpga_count"]             = 0;    // XXX FIXME XXX
     m["network_thread_waiting_usec"] = network_thread_waiting_usec;
     m["network_thread_working_usec"] = network_thread_working_usec;
@@ -652,9 +643,12 @@ uint64_t intensity_network_stream::get_first_fpga_count(int beam) {
     // Which of my assemblers (if any) is handling the requested beam?
     int nbeams = this->ini_params.beam_ids.size();
     for (int i=0; i<nbeams; i++)
-        if (this->ini_params.beam_ids[i] == beam)
+        if (this->ini_params.beam_ids[i] == beam) {
+            if (!this->assemblers[i]->first_packet_received)
+                throw runtime_error("ch_frb_io: get_first_fpga_count called, but first packet has not been received yet.");
 	    return this->assemblers[i]->first_fpgacount;
-    return 0;
+        }
+    throw runtime_error("ch_frb_io internal error: beam_id not found in intensity_network_stream::get_first_fpga_count()");
 }
 
 void intensity_network_stream::get_max_fpga_count_seen(vector<uint64_t> &flushed,
@@ -716,6 +710,8 @@ void intensity_network_stream::network_thread_main()
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
 
+    chime_log_set_thread_name("Network-" + std::to_string(ini_params.stream_id));
+
     try {
 	_network_thread_body();   // calls pin_thread_to_cores()
     } catch (exception &e) {
@@ -730,21 +726,20 @@ void intensity_network_stream::network_thread_main()
 void intensity_network_stream::_network_thread_body()
 {
     pin_thread_to_cores(ini_params.network_thread_cores);
-    pthread_mutex_lock(&this->state_lock);
+    ulock_t lock(this->state_mutex);
 
     // Wait for "stream_started"
     for (;;) {
-	if (this->stream_end_requested) {
+	if (this->stream_end_requested)
 	    // This case can arise if end_stream() is called early
-	    pthread_mutex_unlock(&this->state_lock);
 	    return;
-	}
 	if (this->stream_started) {
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 	    break;
 	}
-	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+	this->cond_state_changed.wait(lock);
     }
+    // unlocked at this point.
 
     // Sleep hack (a temporary kludge that will go away soon)
 
@@ -810,20 +805,23 @@ void intensity_network_stream::_network_thread_body()
     // the previous counts added to the history list
     last_packet_counts->tv = tv_ini;
 
+    //uint64_t rate_logging_timestamp = 0;
+    //uint64_t rate_nbytes = 0;
+    //uint64_t rate_npackets = 0;
+    
     for (;;) {
         uint64_t timestamp;
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + ini_params.stream_cancellation_latency_usec) {
-	    pthread_mutex_lock(&this->state_lock);
 
+            lock.lock();
 	    if (this->stream_end_requested) {
-		pthread_mutex_unlock(&this->state_lock);    
+                lock.unlock();
                 _network_flush_packets();
 		return;
 	    }
-
-	    pthread_mutex_unlock(&this->state_lock);
+            lock.unlock();
 
 	    // We call _add_event_counts() in a few different places in this routine, to ensure that
 	    // the network thread's event counts are always regularly accumulated.
@@ -843,7 +841,7 @@ void intensity_network_stream::_network_thread_body()
             _update_packet_rates(last_packet_counts);
             packet_history_timestamp = curr_timestamp;
         }
-        
+
         timestamp = usec_between(tv_ini, xgettimeofday());
         network_thread_working_usec += (timestamp - curr_timestamp);
 
@@ -898,8 +896,23 @@ void intensity_network_stream::_network_thread_body()
 
 	incoming_packet_list->add_packet(packet_nbytes);
 
-	if (incoming_packet_list->is_full)
+        //rate_nbytes += packet_nbytes;
+        //rate_npackets++;
+
+	if (incoming_packet_list->is_full) {
             _network_flush_packets();
+
+            /*
+            // Log our packet receive rate each flush!
+            float dt = (float)(curr_timestamp - rate_logging_timestamp) / 1e6;
+            chlogf("Packet receive rate: t %.3f : %.3f packets/sec, %.0f bits/sec",
+                   curr_timestamp * 1e-6,
+                   (float)rate_npackets / dt, (float)rate_nbytes * 8 / dt);
+            rate_logging_timestamp = curr_timestamp;
+            rate_nbytes = 0;
+            rate_npackets = 0;
+             */
+        }
     }
 }
 
@@ -910,23 +923,22 @@ void intensity_network_stream::_network_flush_packets()
     this->_add_event_counts(network_thread_event_subcounts);
 
     // Update the "perhost_packets" counter from "network_thread_perhost_packets"
-    pthread_mutex_lock(&this->event_lock);
+    guard_t lock(this->event_mutex);
     perhost_packets->update(*network_thread_perhost_packets);
     perhost_packets->tv = network_thread_perhost_packets->tv;
-    pthread_mutex_unlock(&this->event_lock);
 }
 
 // This gets called from the network thread to update the "perhost_packets" counter from "network_thread_perhost_packets".
 void intensity_network_stream::_update_packet_rates(std::shared_ptr<packet_counts> last_packet_counts)
 {
     std::shared_ptr<packet_counts> this_packet_counts;
-    pthread_mutex_lock(&this->event_lock);
-    perhost_packets->update(*network_thread_perhost_packets);
-    perhost_packets->tv = network_thread_perhost_packets->tv;
-    // deep copy
-    this_packet_counts = make_shared<packet_counts>(*perhost_packets);
-    pthread_mutex_unlock(&this->event_lock);
-
+    {
+        guard_t lock(this->event_mutex);
+        perhost_packets->update(*network_thread_perhost_packets);
+        perhost_packets->tv = network_thread_perhost_packets->tv;
+        // deep copy
+        this_packet_counts = make_shared<packet_counts>(*perhost_packets);
+    }
     // Build new packet_counts structure with differences vs last_
     shared_ptr<packet_counts> count_diff = make_shared<packet_counts>();
     count_diff->tv = this_packet_counts->tv;
@@ -939,16 +951,16 @@ void intensity_network_stream::_update_packet_rates(std::shared_ptr<packet_count
         else
             count_diff->counts[it.first] = it.second - it2->second;
     }
-    // last_packet_count = this_packet_counts
     last_packet_counts.reset();
     last_packet_counts.swap(this_packet_counts);
 
     // Add *count_diff* to the packet history
-    pthread_mutex_lock(&this->packet_history_lock);
-    if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
-        packet_history.erase(--packet_history.end());
-    packet_history.insert(make_pair(count_diff->start_time(), count_diff));
-    pthread_mutex_unlock(&this->packet_history_lock);
+    {
+        guard_t lock(this->packet_history_mutex);
+        if (packet_history.size() >= (size_t)ini_params.max_packet_history_size)
+            packet_history.erase(--packet_history.end());
+        packet_history.insert(make_pair(count_diff->start_time(), count_diff));
+    }
 }
 
 // This gets called when the network thread exits (on all exit paths).
@@ -1004,6 +1016,8 @@ void intensity_network_stream::assembler_thread_main() {
     // We use try..catch to ensure that _assembler_thread_exit() always gets called, even if an exception is thrown.
     // We also print the exception so that it doesn't get "swallowed".
 
+    chime_log_set_thread_name("Assembler-" + std::to_string(ini_params.stream_id));
+
     try {
 	_assembler_thread_body();  // calls pin_thread_to_cores()
     } catch (exception &e) {
@@ -1012,6 +1026,70 @@ void intensity_network_stream::assembler_thread_main() {
 	throw;
     }
     _assembler_thread_exit();
+}
+
+void intensity_network_stream::start_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
+    unique_lock<mutex> ulock(forking_mutex);
+    //if (forking_packets.size() == 0) {
+    if (forking_socket == 0) {
+        forking_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (forking_socket < 0)
+            throw runtime_error(string("ch_frb_io: couldn't create udp socket for forking: ") + strerror(errno));
+        int flags = fcntl(forking_socket, F_GETFD);
+        flags |= FD_CLOEXEC;
+        if (fcntl(forking_socket, F_SETFD, flags) < 0)
+            throw runtime_error(string("ch_frb_io: couldn't set close-on-exec flag on packet-forking socket file descriptor") + strerror(errno));
+
+        // bufsize
+        //if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &ini_params.socket_bufsize, sizeof(ini_params.socket_bufsize)) < 0)
+	int bufsize = 1024*1024;
+	if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF, (void *) &bufsize, sizeof(bufsize)) < 0)
+            throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed for forking socket: ") + strerror(errno));
+        // timeout
+        const struct timeval tv_timeout = { 0, ini_params.socket_timeout_usec };
+        if (setsockopt(forking_socket, SOL_SOCKET, SO_SNDTIMEO, &tv_timeout, sizeof(tv_timeout)) < 0)
+            throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDTIMEO) failed for forking socket: ") + strerror(errno));
+    }
+    intensity_network_stream::packetfork pf;
+    // FIXME -- check that we actually hold the requested beam!!
+    // FIXME -- check that the dest beam is valid!
+    pf.beam = beam;
+    pf.destbeam = destbeam;
+    pf.dest = dest;
+    forking_packets.push_back(pf);
+
+    cout << "Forking packet list:" << endl;
+    for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+        cout << "  beam " << it->beam << " -> " << it->destbeam << " to " <<
+            inet_ntoa(it->dest.sin_addr) << " port " << ntohs(it->dest.sin_port) << endl;
+}
+
+void intensity_network_stream::stop_forking_packets(int beam, int destbeam, const struct sockaddr_in& dest) {
+    unique_lock<mutex> ulock(forking_mutex);
+    if ((beam == -1) && (destbeam == -1))
+        // Stop all!
+        forking_packets.clear();
+    else
+        for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+            if ((it->beam == beam) && (it->destbeam == destbeam) &&
+                (it->dest.sin_port == dest.sin_port) &&
+                (it->dest.sin_addr.s_addr == dest.sin_addr.s_addr)) {
+                forking_packets.erase(it);
+                it--;
+            }
+
+    cout << "Forking packet list:" << endl;
+    for (auto it = forking_packets.begin(); it != forking_packets.end(); it++)
+        cout << "  beam " << it->beam << " -> " << it->destbeam << " to " <<
+            inet_ntoa(it->dest.sin_addr) << " port " << ntohs(it->dest.sin_port) << endl;
+}
+
+void intensity_network_stream::pause_forking_packets() {
+    forking_paused = true;
+}
+
+void intensity_network_stream::resume_forking_packets() {
+    forking_paused = false;
 }
 
 void intensity_network_stream::_assembler_thread_body()
@@ -1028,9 +1106,12 @@ void intensity_network_stream::_assembler_thread_body()
 
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
+    uint8_t* forked_packet_data = reinterpret_cast<uint8_t*>(malloc(16384));
+
     struct timeval tva, tvb;
     tva = xgettimeofday();
-    
+
+    struct timeval tvf = tva;
     // Main packet loop
 
     while (1) {
@@ -1055,105 +1136,301 @@ void intensity_network_stream::_assembler_thread_body()
         tva = xgettimeofday();
         assembler_thread_waiting_usec += usec_between(tvb, tva);
 
-	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
-            uint8_t *packet_data = packet_list->get_packet_data(ipacket);
-            int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
-	    intensity_packet packet;
+        {
+            // We hold this lock while processing the whole packet
+            // list (even if we're not doing any packet forking); the
+            // only contention for the lock is from rare RPCs.
+            unique_lock<mutex> ulock(forking_mutex);
 
-	    if (!packet.decode(packet_data, packet_nbytes)) {
-		event_subcounts[event_type::packet_bad]++;
-		continue;
-	    }
+            int fork_sendqueue_start = 0;
+            int fork_sendqueue_end = 0;
+            int fork_sendspace_start = 0;
+            int fork_sendspace_end = 0;
+            int fork_packets_sent = 0;
+            int fork_bytes_sent = 0;
 
-	    bool mismatch = ((packet.nbeams != nbeams) || 
-			     (packet.nupfreq != nupfreq) || 
-			     (packet.ntsamp != nt_per_packet) || 
-			     (packet.fpga_counts_per_sample != fpga_counts_per_sample));
+            bool forking_active = !forking_paused && (this->forking_packets.size() > 0);
 
-	    if (_unlikely(mismatch)) {
-		if (ini_params.throw_exception_on_packet_mismatch) {
-		    stringstream ss;
-		    ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
-		       << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
-		       << "), expected ("
-		       << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
+            if (forking_active) {
+#if defined(FIONWRITE)
+                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_start) == -1) {
+                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
+                }
+#elif defined(SIOCOUTQ)
+                // linux
+                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_start) == -1) {
+                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
+                }
+#elif defined(SO_NWRITE)
+                int sz = sizeof(int);
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                               &fork_sendqueue_start, reinterpret_cast<socklen_t*>(&sz))) {
+                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
+                }
+#else
+                fork_sendqueue_start = -1;
+#endif
+#if defined(FIONSPACE)
+                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_start) == -1) {
+                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
+                }
+#else
+                fork_sendspace_start = -1;
+#endif
+            }
 
-		    throw runtime_error(ss.str());
-		}
+            for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
+                uint8_t *packet_data = packet_list->get_packet_data(ipacket);
+                int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
+                intensity_packet packet;
 
-		event_subcounts[event_type::stream_mismatch]++;
-		continue;
-	    }
+                if (!packet.decode(packet_data, packet_nbytes)) {
+                    event_subcounts[event_type::packet_bad]++;
+                    continue;
+                }
 
-	    // All checks passed.  Packet is declared "good" here.  
-	    //
-	    // The following checks have been performed, either in this routine or in intensity_packet::read().
-	    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
-	    //     and not large enough to lead to integer overflows
-	    //   - packet and data byte counts are correct
-	    //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
-	    //   - ntsamp is a power of two
-	    //   - fpga_counts_per_sample is > 0
-	    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
-	    //
-	    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
-	    // so it's important that they're done here!
+                bool mismatch = ((packet.nbeams != nbeams) || 
+                                 (packet.nupfreq != nupfreq) || 
+                                 (packet.ntsamp != nt_per_packet) || 
+                                 (packet.fpga_counts_per_sample != fpga_counts_per_sample));
 
-	    event_subcounts[event_type::packet_good]++;
+                if (_unlikely(mismatch)) {
+                    if (ini_params.throw_exception_on_packet_mismatch) {
+                        stringstream ss;
+                        ss << "ch_frb_io: fatal: packet (nbeams, nupfreq, nt_per_packet, fpga_counts_per_sample) = ("
+                           << packet.nbeams << "," << packet.nupfreq << "," << packet.ntsamp << "," << packet.fpga_counts_per_sample 
+                           << "), expected ("
+                           << nbeams << "," << nupfreq << "," << nt_per_packet << "," << fpga_counts_per_sample << ")";
+                        throw runtime_error(ss.str());
+                    }
 
-            this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(), packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+                    event_subcounts[event_type::stream_mismatch]++;
+                    continue;
+                }
 
-	    int nfreq_coarse = packet.nfreq_coarse;
-	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
+                // All checks passed.  Packet is declared "good" here.  
+                //
+                // The following checks have been performed, either in this routine or in intensity_packet::read().
+                //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
+                //     and not large enough to lead to integer overflows
+                //   - packet and data byte counts are correct
+                //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
+                //   - ntsamp is a power of two
+                //   - fpga_counts_per_sample is > 0
+                //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+                //
+                // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
+                // so it's important that they're done here!
 
-	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
-	    // length fields.  The new packet corresponds to a subset of the original packet containing
-	    // only beam index zero.  This scheme avoids the overhead of copying the packet.
+                event_subcounts[event_type::packet_good]++;
+
+                this->packet_max_fpga_seen = std::max(this->packet_max_fpga_seen.load(),
+                                                      packet.fpga_count + (uint64_t)packet.ntsamp * (uint64_t)packet.fpga_counts_per_sample);
+
+                int nfreq_coarse = packet.nfreq_coarse;
+                int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
+                const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
+
+                // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
+                // length fields.  The new packet corresponds to a subset of the original packet containing
+                // only beam index zero.  This scheme avoids the overhead of copying the packet.
+
+                // If we're re-sending packets, make a copy, because pointers get
+                // modified in this loop!
+                intensity_packet packetcopy;
+                if (forking_active)
+                    memcpy(&packetcopy, &packet, sizeof(intensity_packet));
+
+                packet.data_nbytes = new_data_nbytes;
+                packet.nbeams = 1;
 	    
-	    packet.data_nbytes = new_data_nbytes;
-	    packet.nbeams = 1;
-	    
-	    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-		// Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
-		// original packet containing only beam index 'ibeam'.
+                for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+                    // Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
+                    // original packet containing only beam index 'ibeam'.
 		
-		// Loop over assembler ids, to find a match for the packet_id.
-		int packet_id = packet.beam_ids[0];
-		int assembler_ix = 0;
+                    // Loop over assembler ids, to find a match for the packet_id.
+                    int packet_id = packet.beam_ids[0];
+                    int assembler_ix = 0;
 
-		for (;;) {
-		    if (assembler_ix >= nbeams) {
-			// No match found
-			event_subcounts[event_type::beam_id_mismatch]++;
-			if (ini_params.throw_exception_on_beam_id_mismatch)
-                            throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
-			break;
-		    }
+                    for (;;) {
+                        if (assembler_ix >= nbeams) {
+                            // No match found
+                            event_subcounts[event_type::beam_id_mismatch]++;
+                            if (ini_params.throw_exception_on_beam_id_mismatch)
+                                throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag.  packet's beam_id: " + std::to_string(packet_id));
+                            break;
+                        }
 
-		    if (assembler_beam_ids[assembler_ix] != packet_id) {
-			assembler_ix++;
-			continue;
-		    }
+                        if (assembler_beam_ids[assembler_ix] != packet_id) {
+                            assembler_ix++;
+                            continue;
+                        }
 
-		    // Match found
-		    assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
-		    break;
-		}
-		
-		// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
-		// corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
-		
-		packet.beam_ids += 1;
-		packet.scales += nfreq_coarse;
-		packet.offsets += nfreq_coarse;
-		packet.data += new_data_nbytes;
-	    }
-	}
+                        // Match found
+                        assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
+                        break;
+                    }
+
+                    // Danger zone: we do some pointer arithmetic, to modify the packet so that it now
+                    // corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
+
+                    packet.beam_ids += 1;
+                    packet.scales += nfreq_coarse;
+                    packet.offsets += nfreq_coarse;
+                    packet.data += new_data_nbytes;
+                }
+
+                if (forking_active) {
+                    // Revert the packet header to its original state!
+                    memcpy(&packet, &packetcopy, sizeof(intensity_packet));
+
+                    /*
+                     // In case there are any single-beam forks, create a header
+                     // for 1 beam.
+                     intensity_packet subpacket;
+                     memcpy(&subpacket, &packetcopy, sizeof(intensity_packet));
+                     int nc = subpacket.nfreq_coarse;
+                     subpacket.nbeams = 1;
+                     subpacket.data_nbytes = nc * subpacket.nupfreq * subpacket.ntsamp;
+                     int nsub = subpacket.set_pointers(forked_packet_data);
+                     */
+
+                    int nc = packet.nfreq_coarse;
+                    // Create headers for 1, 2, or 3-beam sub-packets.
+                    const int NS = 3;
+                    intensity_packet subpackets[NS];
+                    int nsubs[NS];
+                    for (int s=0; s<NS; s++) {
+                        memcpy(&(subpackets[s]), &packetcopy, sizeof(intensity_packet));
+                        subpackets[s].nbeams = s+1;
+                        subpackets[s].data_nbytes = subpackets[s].nbeams * nc * subpackets[s].nupfreq * subpackets[s].ntsamp;
+                        nsubs[s] = subpackets[s].set_pointers(forked_packet_data);
+                    }
+                    
+                    for (auto it=forking_packets.begin(); it!=forking_packets.end(); it++) {
+                        if (it->beam == 0) {
+                            // send all (four) beams!
+                            for (int i=0; i<packet.nbeams; i++)
+                                packet.beam_ids[i] += it->destbeam;
+                            int nsent = sendto(forking_socket, packet_data, packet_nbytes, 0,
+                                               reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                            fork_packets_sent++;
+                            fork_bytes_sent += nsent;
+                            for (int i=0; i<packet.nbeams; i++)
+                                packet.beam_ids[i] -= it->destbeam;
+                            if (nsent == -1)
+                                chlog("Failed to send forked packet data: " << strerror(errno));
+                            if (nsent < packet_nbytes)
+                                chlog("Sent " << nsent << " < " << packet_nbytes << " bytes of forked packet data!");
+                            continue;
+                        }
+                        // send 1-3 beams
+                        // start beam index
+                        int ibeam = 0;
+                        if (it->beam == 0) {
+                            // find beam index
+                            ibeam = -1;
+                            for (int i=0; i<packet.nbeams; i++)
+                                if (packet.beam_ids[i] == it->beam) {
+                                    ibeam = i;
+                                    break;
+                                }
+                            if (ibeam == -1) {
+                                chlog("Forking: beam " << it->beam << " not found");
+                                continue;
+                            }
+                        }
+                        int nbeams = 1;
+                        if (it->beam == -2) {
+                            nbeams = 2;
+                        } else if (it->beam == -3) {
+                            nbeams = 3;
+                        }
+                        intensity_packet* subpacket = &(subpackets[nbeams-1]);
+                        int nsub = nsubs[nbeams-1];
+                        memcpy(subpacket->coarse_freq_ids,
+                               packet.coarse_freq_ids,
+                               nc * sizeof(uint16_t));
+                        for (int i=0; i<nbeams; i++)
+                            subpacket->beam_ids[i] = packet.beam_ids[ibeam + i] + it->destbeam;
+                        memcpy(subpacket->scales,
+                               packet.scales + ibeam * nc,
+                               nbeams * nc * sizeof(float));
+                        memcpy(subpacket->offsets,
+                               packet.offsets + ibeam * nc,
+                               nbeams * nc * sizeof(float));
+                        memcpy(subpacket->data,
+                               packet.data + ibeam * subpacket->data_nbytes/nbeams,
+                               subpacket->data_nbytes);
+
+                        int nsent = sendto(forking_socket, forked_packet_data, nsub, 0,
+                                           reinterpret_cast<struct sockaddr*>(&(it->dest)), sizeof(it->dest));
+                        fork_packets_sent++;
+                        fork_bytes_sent += nsent;
+                        if (nsent == -1)
+                            chlog("Failed to send forked packet data: " << strerror(errno));
+                        if (nsent < nsub)
+                            chlog("Sent " << nsent << " < " << nsub << " bytes of forked packet data!");
+                        /* check what we sent
+                         intensity_packet dec;
+                         bool ok = dec.decode(forked_packet_data, nsub);
+                         cout << "Send sub-packet: parsed " << (ok?"ok":"failed") << ", nbeams " << dec.nbeams << ", first beam " << dec.beam_ids[0] << ", data bytes " << dec.data_nbytes << ", nc " << nc << ", nu " << subpacket.nupfreq << ", nt " << subpacket.ntsamp << endl;
+                         */
+                    }
+                } // end forking_active
+            } // end of loop over packet list
+            if (forking_active) {
+#if defined(FIONWRITE)
+                if (ioctl(forking_socket, FIONWRITE, &fork_sendqueue_end) == -1) {
+                    chlog("Failed to call ioctl(FIONWRITE): " << strerror(errno));
+                }
+#elif defined(SIOCOUTQ)
+                if (ioctl(forking_socket, SIOCOUTQ, &fork_sendqueue_end) == -1) {
+                    chlog("Failed to call ioctl(SIOCOUTQ): " << strerror(errno));
+                }
+#elif defined(SO_NWRITE)
+                int sz = sizeof(int);
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_NWRITE,
+                               &fork_sendqueue_end, reinterpret_cast<socklen_t*>(&sz))) {
+                    chlog("Failed to call getsockopt(SO_NWRITE): " << strerror(errno));
+                }
+#else
+                fork_sendqueue_end = -1;
+#endif
+#if defined(FIONSPACE)
+                if (ioctl(forking_socket, FIONSPACE, &fork_sendspace_end) == -1) {
+                    chlog("Failed to call ioctl(FIONSPACE): " << strerror(errno));
+                }
+#else
+                int isz = sizeof(int);
+                int bufsize = 0;
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_SNDBUF,
+                               &bufsize, reinterpret_cast<socklen_t*>(&isz))) {
+                    chlog("Failed to call getsockopt(SO_SNDBUF): " << strerror(errno));
+                }
+                fork_sendspace_end = bufsize;
+                //fork_sendspace_end = -1;
+#endif
+                int esz = sizeof(int);
+                int forking_error = 0;
+                if (getsockopt(forking_socket, SOL_SOCKET, SO_ERROR,
+                               &forking_error, reinterpret_cast<socklen_t*>(&esz))) {
+                    chlog("Failed to call getsockopt(SO_ERROR): " << strerror(errno));
+                }
+
+                struct timeval tvnow = xgettimeofday();
+                uint64_t worktime = usec_between(tva, tvnow);
+                uint64_t tperiod = usec_between(tvf, tvnow);
+                tvf = tvnow;
+
+                //chlog("Packet list: " << packet_list->curr_npackets << ", forwarded " << fork_packets_sent << " packets, " << fork_bytes_sent << " bytes in " << worktime/1000 << " ms / " << tperiod/1000 << " ms -> " << ((fork_packets_sent * 1e6) / tperiod) << " packets/sec, " << ((fork_bytes_sent * 1e6 * 8) / tperiod) << " bits/sec.  Send queue: " << fork_sendqueue_start << " | " << fork_sendspace_start << " at start, " << fork_sendqueue_end << " | " << fork_sendspace_end << " at end.  Socket error: " << forking_error);
+            }
+        } // end of forking_mutex lock
 
 	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
     }
+    free(forked_packet_data);
 }
 
 bool intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) 
@@ -1246,13 +1523,13 @@ void intensity_network_stream::_fetch_frame0() {
     curl_easy_cleanup(curl_handle);
 
     string frame0_txt = holder.thestring;
-    chlog("Received frame0 text: " << frame0_txt);
+    //chlog("Received frame0 text: " << frame0_txt);
     Json::Reader frame0_reader;
     Json::Value frame0_json;
     if (!frame0_reader.parse(frame0_txt, frame0_json))
         throw runtime_error("ch_frb_io: failed to parse 'frame0' string: '" + frame0_txt + "'");
 
-    chlog("Parsed: " << frame0_json);
+    //chlog("Parsed: " << frame0_json);
     if (!frame0_json.isObject())
         throw runtime_error("ch_frb_io: 'frame0' was not a JSON 'Object' as expected");
 
