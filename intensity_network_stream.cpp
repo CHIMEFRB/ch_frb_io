@@ -156,6 +156,12 @@ uint64_t intensity_network_stream::get_first_fpgacount() {
     return first_fpgacount;
 }
 
+uint64_t intensity_network_stream::get_frame0_nano() {
+    if (!first_packet_received)
+        throw runtime_error("ch_frb_io: get_frame0_nano called, but first packet has not been received yet.");
+    return frame0_nano;
+}
+
 shared_ptr<assembled_chunk_ringbuf> intensity_network_stream::_assembler_for_beam(int beam_id) {
     auto it = beam_to_assembler.find(beam_id);
     if (it == beam_to_assembler.end()) {
@@ -582,6 +588,7 @@ intensity_network_stream::get_statistics() {
 
     // Collect statistics for this stream as a whole:
     m["first_packet_received"]  = (counts[event_type::packet_received] > 0);
+    m["frame0_nano"]            = frame0_nano;
     m["nupfreq"]                = ini_params.nupfreq;
     m["nt_per_packet"]          = ini_params.nt_per_packet;
     m["fpga_counts_per_sample"] = ini_params.fpga_counts_per_sample;
@@ -1369,7 +1376,9 @@ void intensity_network_stream::_assembler_thread_body()
                 }
                 this->first_fpgacount = first_ichunk * constants::nt_per_assembled_chunk * ini_params.fpga_counts_per_sample;
             }
-            
+            chlog("Got frame0_nano " << packet.fpga_frame0_ns);
+            this->frame0_nano = packet.fpga_frame0_ns;
+
             {
                 ulock_t lock(this->state_mutex);
                 this->first_packet_received = true;

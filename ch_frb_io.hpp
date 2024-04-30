@@ -452,6 +452,8 @@ public:
     // Raises runtime_error if the first packet has not been received yet.
     uint64_t get_first_fpgacount();
 
+    uint64_t get_frame0_nano();
+
     void add_first_packet_listener(first_packet_listener f);
     
     // This is the main routine called by the processing threads, to read data from one beam
@@ -565,6 +567,7 @@ protected:
     std::vector<int> beam_ids;
 
     uint64_t first_fpgacount;
+    uint64_t frame0_nano;
     
     std::map<int, std::shared_ptr<assembled_chunk_ringbuf> > beam_to_assembler;
 
