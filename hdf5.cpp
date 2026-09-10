@@ -37,14 +37,24 @@ static void set_bitshuffle(const string &name, hid_t prop_id, int bitshuffle)
     H5Z_filter_t filter_id = 32008;
     vector<unsigned int> cd_values = { 0, 2 };  // trailing "2" means combine with LZ4 compression
 
-    herr_t status = H5Pset_filter(prop_id, (H5Z_filter_t)filter_id, H5Z_FLAG_MANDATORY, cd_values.size(), &cd_values[0]);
-    if (status >= 0)
-	return;  // success
+    // H5Pset_filter() only records the filter in the property list.  It does not check
+    // that the filter exists, and returns success whether or not the plugin is
+    // installed -- a missing plugin is not discovered until H5Dcreate() tries to apply
+    // it.  So ask H5Zfilter_avail() directly, and pass H5Z_FLAG_OPTIONAL for the
+    // non-mandatory levels, which tells HDF5 to drop the filter and write the dataset
+    // uncompressed instead of failing to create it.
+    bool avail = (H5Zfilter_avail(filter_id) > 0);
 
-    if (bitshuffle == 3)
-	throw runtime_error(name + ": Fatal: couldn't load bitshuffle plugin.  See README for instructions for compiling bitshuffle, and make sure $HDF5_PLUGIN_PATH is set");
-    if (bitshuffle == 2)
-	cerr << (name + ": warning: couldn't load bitshuffle plugin, data will be written uncompressed");
+    if (!avail && (bitshuffle == 3))
+	throw runtime_error(name + ": Fatal: couldn't load bitshuffle plugin (HDF5 filter 32008).  See README for instructions for compiling bitshuffle, and make sure $HDF5_PLUGIN_PATH is set");
+    if (!avail && (bitshuffle == 2))
+	cerr << (name + ": warning: couldn't load bitshuffle plugin, data will be written uncompressed\n");
+
+    unsigned int flag = (bitshuffle == 3) ? H5Z_FLAG_MANDATORY : H5Z_FLAG_OPTIONAL;
+    herr_t status = H5Pset_filter(prop_id, filter_id, flag, cd_values.size(), &cd_values[0]);
+
+    if (status < 0)
+	throw runtime_error(name + ": H5Pset_filter() failed for the bitshuffle filter");
 }
 
 
