@@ -1513,6 +1513,14 @@ void test_avx2_kernels(std::mt19937 &rng)
 	chunk_a->randomize(rng);
 	chunk_b->randomize(rng);
 
+	// The destinations are randomized so that downsample() has to overwrite real
+	// garbage, but randomize() also sets has_rfi_mask, and downsample() rejects a
+	// destination whose mask is already set (that mask describes data which is about
+	// to be overwritten).  Clear it, and leave the sources alone: downsample()
+	// requires THEIR masks, which it combines into the destination.
+	chunk0->has_rfi_mask = false;
+	chunk1->has_rfi_mask = false;
+
 	chunk0->downsample(chunk_a.get(), chunk_b.get());  // slow
 	chunk1->downsample(chunk_a.get(), chunk_b.get());  // fast
 
