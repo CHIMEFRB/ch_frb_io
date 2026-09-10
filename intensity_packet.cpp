@@ -238,7 +238,10 @@ void test_packet_offsets(std::mt19937 &rng)
 	*((uint16_t *) &buf[24]) = nbeams;
 	*((uint16_t *) &buf[26]) = nfreq_coarse;
 	*((uint16_t *) &buf[28]) = nupfreq;
-	*((uint16_t *) &buf[32]) = ntsamp;
+	// ntsamp is the last uint16 of the 32-byte fixed header, so it lives at offset
+	// 30.  Writing it at 32 put it past the memcpy() below, and the value that
+	// reached p.ntsamp was whatever buf happened to hold.
+	*((uint16_t *) &buf[30]) = ntsamp;
 
 	memcpy(&p, &buf[0], intensity_packet::intensity_fixed_header_length);
 
