@@ -615,7 +615,8 @@ void assembled_chunk::write_msgpack_file(const string &filename, bool compress, 
     if ((this->rfi_mask != nullptr) && (!this->has_rfi_mask))
 	throw runtime_error("ch_frb_io::assembled_chunk::write_msgpack_file() called on chunk whose RFI mask has not been initialized yet");
     
-    char tempfilename[filename.size() + 10];
+    // ".tmpXXXXXX" is 10 characters, and sprintf() appends a NUL: 11 bytes, not 10.
+    char tempfilename[filename.size() + 11];
     sprintf(tempfilename, "%s.tmpXXXXXX", filename.c_str());
     int fd = mkstemp(tempfilename);
     if (fd == -1)
